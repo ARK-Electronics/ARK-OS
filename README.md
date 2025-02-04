@@ -57,6 +57,3 @@ This service starts the RemoteIDTransmitter service which broadcasts RemoteID da
 
 **jetson-can.service** <br>
 This service enables the Jetson CAN interface.
-
-**jetson-clocks.service** <br>
-This service sets the Jetson clocks to their maximum rate.
