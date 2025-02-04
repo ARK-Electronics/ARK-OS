@@ -19,6 +19,31 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import os
+
+def detect_jetson_model():
+    try:
+        with open("/proc/device-tree/model", "r") as f:
+            model = f.read().lower()
+            if "orin nx" in model:
+                return "JETSON_ORIN_NX"
+            elif "orin nano" in model:
+                return "JETSON_ORIN_NANO"
+            else:
+                print(f"Warning: Unknown Jetson model detected: {model}")
+                return None
+    except FileNotFoundError:
+        print("Warning: Could not detect Jetson model")
+        return None
+
+# Detect and set model before importing RPi.GPIO
+jetson_model = detect_jetson_model()
+if jetson_model:
+    os.environ['JETSON_MODEL_NAME'] = jetson_model
+    print(f"Detected and set JETSON_MODEL_NAME={jetson_model}")
+else:
+    print("Could not set JETSON_MODEL_NAME environment variable")
+
 import RPi.GPIO as GPIO
 import time
 
