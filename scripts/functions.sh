@@ -47,7 +47,7 @@ function ask_yes_no() {
 function sudo_refresh_loop() {
 	while true; do
 		sudo -v
-		sleep 60
+		sleep 5
 	done
 }
 
