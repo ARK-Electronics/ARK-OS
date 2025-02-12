@@ -715,9 +715,6 @@ class uploader:
                 # This check should also check if the revision is an unaffected revision
                 # and thus can support the full flash, see
                 # https://github.com/PX4/Firmware/blob/master/src/drivers/boards/common/stm32/board_mcu_version.c#L125-L144
-
-                if self.fw_maxsize > fw.property('image_maxsize') and not force:
-                    raise RuntimeError(f"Board can accept larger flash images ({self.fw_maxsize} bytes) than board config ({fw.property('image_maxsize')} bytes). Please use the correct board configuration to avoid lacking critical functionality.")
         else:
             # If we're still on bootloader v4 on a Pixhawk, we don't know if we
             # have the silicon errata and therefore need to flash px4_fmu-v2
