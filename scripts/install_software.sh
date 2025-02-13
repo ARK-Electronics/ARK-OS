@@ -267,6 +267,7 @@ if [ "$TARGET" = "jetson" ]; then
 
 	# these services run as root
 	echo "Installing Jetson services"
+	sudo install -m 755 $TARGET_DIR/scripts/start_can_interface.sh /usr/local/bin/
 	sudo cp $TARGET_DIR/services/jetson-can.service /etc/systemd/system/
 	sudo systemctl daemon-reload
 	sudo systemctl enable jetson-can.service

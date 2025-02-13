@@ -5,7 +5,7 @@ After=syslog.target network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/start_can_interface.sh
+ExecStart=/usr/local/bin/start_can_interface.sh
 Restart=on-failure
 RestartSec=5
 KillMode=process
