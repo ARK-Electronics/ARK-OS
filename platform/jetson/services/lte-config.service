@@ -5,7 +5,8 @@ After=syslog.target network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/configure_lte.sh
+
+ExecStart=/home/jetson/.local/bin/configure_lte.sh
 Restart=on-failure
 RestartSec=5
 KillMode=process
