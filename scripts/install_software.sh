@@ -268,9 +268,12 @@ if [ "$TARGET" = "jetson" ]; then
 	# these services run as root
 	echo "Installing Jetson services"
 	sudo cp $TARGET_DIR/services/jetson-can.service /etc/systemd/system/
+	sudo cp $TARGET_DIR/services/lte-config.service /etc/systemd/system/
 	sudo systemctl daemon-reload
 	sudo systemctl enable jetson-can.service
 	sudo systemctl restart jetson-can.service
+	sudo systemctl enable lte-config.service
+	sudo systemctl restart lte-config.service
 fi
 
 sudo systemctl enable systemd-time-wait-sync.service

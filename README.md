@@ -57,3 +57,6 @@ This service starts the RemoteIDTransmitter service which broadcasts RemoteID da
 
 **jetson-can.service** <br>
 This service enables the Jetson CAN interface.
+
+**lte-config.service** <br>
+This service configures the ARK M.2 LTE Module.
