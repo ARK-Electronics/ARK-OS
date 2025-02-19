@@ -64,10 +64,6 @@ EOF
 }
 
 APN=""
-DNS1=""
-DNS2=""
-USERNAME=""
-PASSWORD=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
