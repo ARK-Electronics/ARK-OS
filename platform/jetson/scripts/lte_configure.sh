@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -euo pipefail
-
 check_prerequisites() {
     if ! modprobe qmi_wwan; then
         echo "Error: Failed to load qmi_wwan kernel module"
@@ -22,19 +20,14 @@ check_prerequisites() {
 }
 
 wait_for_modem_alive() {
-    local timeout=30
-    local count=0
-
-    echo "Waiting for modem"
-    while [ $count -lt $timeout ]; do
-        if mmcli -L | grep -q "Sierra.*RC7611"; then
-            return 0
+    while true; do
+        modem_instance=$(mmcli -L | grep -oP '(?<=/Modem/)\d+')
+        if [ -n "$modem_instance" ]; then
+            break
         fi
-        sleep 1
-        count=$((count + 1))
+        sleep 2
     done
-    echo "Error: Modem not detected within timeout period"
-    exit 1
+    echo "Modem instance: $modem_instance"
 }
 
 wait_for_modem_network_connected() {
@@ -129,14 +122,27 @@ modem_status=$(mmcli -m 0)
 bearer_index=$(echo "$modem_status" | awk '/Bearer.*paths:/ { last = $NF } END { gsub(".*/", "", last); print last }')
 bearer_info=$(mmcli -m 0 --bearer=$bearer_index)
 
-conn_name="ark-lte"
 interface=$(echo "$bearer_info" | awk -F': ' '/interface/ {print $2}')
 address=$(echo "$bearer_info" | awk -F': ' '/address/ {print $2}')
 prefix=$(echo "$bearer_info" | awk -F': ' '/prefix/ {print $2}')
 gateway=$(echo "$bearer_info" | awk -F': ' '/gateway/ {print $2}')
-# TODO: optional dns
-# dns=$(echo "$bearer_info" | awk -F': ' '/dns/ {print $2}')
+dns=$(echo "$bearer_info" | awk -F': ' '/dns/ {print $2}')
 mtu=$(echo "$bearer_info" | awk -F': ' '/mtu/ {print $2}')
+
+IFS=', ' read -r dns1 dns2 <<< "$dns"
+# Remove ending comma from dns1
+dns1=${dns1%,}
+
+echo "IPv4 Address: $address"
+echo "IPv4 Prefix: $prefix"
+echo "IPv4 Gateway: $gateway"
+echo "IPv4 DNS1: $dns1"
+echo "IPv4 DNS2: $dns2"
+echo "IPv4 MTU: $mtu"
+
+# Flush any existing ip or routes
+sudo ip addr flush dev $interface
+sudo ip route flush dev $interface
 
 sudo ip link set $interface up
 
@@ -147,6 +153,9 @@ fi
 
 sudo ip link set dev $interface arp off
 sudo ip link set $interface mtu $mtu
+
+sudo sh -c "echo 'nameserver $dns1' >> /etc/resolv.conf"
+sudo sh -c "echo 'nameserver $dns2' >> /etc/resolv.conf"
 
 # Add route if it doesn't already exist
 if ! ip route show | grep -q "default via $gateway dev $interface"; then
