@@ -139,6 +139,9 @@ if [ "$TARGET" = "jetson" ]; then
 		echo "JetPack installation finished"
 	fi
 
+	# Required for FW updating ARK LTE
+	sudo apt-get install libqmi-utils -y
+
 	sudo pip3 install \
 		Jetson.GPIO \
 		smbus2 \

@@ -2,9 +2,70 @@
 
 set -euo pipefail
 
-# Configuration
-APN="fast.t-mobile.com"  # Change this to your carrier's APN
-TIMEOUT=60  # Timeout in seconds to wait for modem
+# Help text
+usage() {
+    cat << EOF
+Usage: $0 --apn <apn> [--dns1 <server1>] [--dns2 <server2>] [--user <username>] [--password <password>]
+
+Required arguments:
+    --apn <apn>           Access Point Name for the cellular connection
+
+Optional arguments:
+    --dns1 <server1>      Primary DNS server
+    --dns2 <server2>      Secondary DNS server
+    --user <username>     Username for carriers that require authentication
+    --password <password> Password for carriers that require authentication
+    --help               Show this help message
+EOF
+}
+
+# Parse arguments
+APN=""
+DNS1=""
+DNS2=""
+USERNAME=""
+PASSWORD=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --apn)
+            APN="$2"
+            shift 2
+            ;;
+        --dns1)
+            DNS1="$2"
+            shift 2
+            ;;
+        --dns2)
+            DNS2="$2"
+            shift 2
+            ;;
+        --user)
+            USERNAME="$2"
+            shift 2
+            ;;
+        --password)
+            PASSWORD="$2"
+            shift 2
+            ;;
+        --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown parameter $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$APN" ]; then
+    echo "Error: APN is required"
+    usage
+    exit 1
+fi
 
 # Function to check prerequisites
 check_prerequisites() {
@@ -13,7 +74,7 @@ check_prerequisites() {
     # Check for QMI_WWAN kernel module
     if ! lsmod | grep -q "qmi_wwan"; then
         echo "Error: qmi_wwan kernel module not loaded"
-        echo "Try: sudo modprobe qmi_wwan"
+        echo "Try: modprobe qmi_wwan"
         exit 1
     fi
 
@@ -30,22 +91,15 @@ check_prerequisites() {
         echo "Error: NetworkManager is not running"
         exit 1
     fi
-
-    # Check for SIM presence (basic check)
-    if ! mmcli -L | grep -q "Sierra.*RC7611"; then
-        echo "Warning: Modem not detected. Please check:"
-        echo "  - SIM card is properly inserted"
-        echo "  - Antennas are properly connected"
-        echo "  - Device is properly powered"
-        exit 1
-    fi
 }
 
-# Function to wait for modem
+# Function to wait for modem with timeout
 wait_for_modem() {
-    echo "Waiting for modem to be detected..."
+    local timeout=30
     local count=0
-    while [ $count -lt $TIMEOUT ]; do
+
+    echo "Waiting for modem to be detected..."
+    while [ $count -lt $timeout ]; do
         if mmcli -L | grep -q "Sierra.*RC7611"; then
             return 0
         fi
@@ -80,141 +134,138 @@ verify_modem_state() {
     # Check for SIM
     if ! echo "$modem_status" | grep -q "SIM.*active"; then
         echo "Error: No active SIM detected"
+        echo "Please check:"
+        echo "  - SIM card is properly inserted"
+        echo "  - SIM card is not locked"
+        echo "  - SIM card is activated with carrier"
         exit 1
+    fi
+
+    # Check signal quality
+    local signal_quality
+    signal_quality=$(echo "$modem_status" | grep "signal quality:" | grep -o "[0-9]*" | head -1)
+    if [ -n "$signal_quality" ] && [ "$signal_quality" -lt 10 ]; then
+        echo "Warning: Very weak signal strength ($signal_quality%)"
+        echo "Please check antenna connections"
     fi
 }
 
-# Function to setup initial EPS bearer
-setup_eps_bearer() {
+# Function to verify bearer state
+verify_bearer_state() {
     local modem_index=$1
-    echo "Configuring initial EPS bearer settings..."
-    sudo mmcli -m "$modem_index" --3gpp-set-initial-eps-bearer-settings="apn=$APN"
 
-    # Verify bearer setup
+    echo "Verifying bearer state..."
     local bearer_status
-    bearer_status=$(mmcli -m "$modem_index" --bearer=0)
-    if ! echo "$bearer_status" | grep -q "connected.*yes"; then
-        echo "Error: Bearer not connected"
-        exit 1
+    bearer_status=$(mmcli -m "$modem_index" --bearer=0 2>/dev/null || true)
+
+    if [ -n "$bearer_status" ]; then
+        if ! echo "$bearer_status" | grep -q "connected.*yes"; then
+            echo "Warning: Bearer not connected"
+            echo "This may be normal if connection hasn't been started yet"
+        fi
     fi
 }
 
-# Function to create NetworkManager connection
-create_nm_connection() {
-    local modem_index=$1
-    local conn_name="sierra-lte"
+# Function to configure connection
+configure_connection() {
+    local conn_name="ark-lte"
 
-    # Check if connection already exists
+    # Remove existing connection if present
     if nmcli connection show | grep -q "^$conn_name "; then
-        echo "Connection '$conn_name' already exists. Removing..."
+        echo "Removing existing connection..."
         nmcli connection delete "$conn_name"
     fi
 
-    echo "Creating NetworkManager connection..."
-    nmcli connection add \
+    # Build base connection command
+    local cmd="nmcli connection add \
         type gsm \
-        con-name "$conn_name" \
+        con-name $conn_name \
         ifname wwan0 \
-        apn "$APN" \
+        apn $APN \
         connection.autoconnect yes \
         gsm.auto-config yes \
         ipv4.method auto \
         ipv4.route-metric 4294967295 \
-        ipv6.method auto
+        ipv6.method auto \
+        ethernet.arp no"
 
-    echo "Setting connection permissions..."
-    nmcli connection modify "$conn_name" connection.permissions "user:$USER"
-
-    # Get bearer settings and configure interface
-    local bearer_info
-    bearer_info=$(mmcli -m "$modem_index" --bearer=0)
-    local mtu
-    mtu=$(echo "$bearer_info" | grep "mtu:" | awk '{print $3}')
-
-    # If we couldn't get MTU from bearer, default to 1500
-    if [ -z "$mtu" ]; then
-        mtu=1500
-    fi
-
-    echo "Configuring interface settings..."
-    nmcli connection modify "$conn_name" gsm.mtu "$mtu"
-    nmcli connection modify "$conn_name" 802-3-ethernet.accept-all-mac-addresses no
-    nmcli connection modify "$conn_name" ethernet.arp no
-
-    return 0
-}
-
-# Function to verify connection
-verify_connection() {
-    local conn_name="sierra-lte"
-    local max_attempts=12
-    local attempt=0
-
-    echo "Waiting for connection to become active..."
-    while [ $attempt -lt $max_attempts ]; do
-        if nmcli -g GENERAL.STATE connection show "$conn_name" 2>/dev/null | grep -q "activated"; then
-            echo "Connection is active"
-            return 0
+    # Add optional DNS servers if specified
+    if [ -n "$DNS1" ] || [ -n "$DNS2" ]; then
+        local dns_servers=""
+        if [ -n "$DNS1" ]; then
+            dns_servers="$DNS1"
+            if [ -n "$DNS2" ]; then
+                dns_servers="$dns_servers,$DNS2"
+            fi
+        elif [ -n "$DNS2" ]; then
+            dns_servers="$DNS2"
         fi
-        sleep 5
-        attempt=$((attempt + 1))
-    done
-
-    echo "Error: Connection failed to activate"
-    return 1
-}
-
-# Function for connection testing
-test_connection() {
-    echo "Testing connection..."
-
-    # Test IPv4 connectivity
-    if ! ping -c 4 -I wwan0 8.8.8.8; then
-        echo "Warning: IPv4 connectivity test failed"
-        echo "Troubleshooting steps:"
-        echo "1. Check APN settings"
-        echo "2. Verify SIM card is active"
-        echo "3. Check signal strength"
-        echo "4. Verify carrier account status"
-        return 1
+        cmd="$cmd ipv4.dns \"$dns_servers\""
+        cmd="$cmd ipv4.ignore-auto-dns yes"
     fi
 
-    return 0
+    # Add authentication if specified
+    if [ -n "$USERNAME" ]; then
+        cmd="$cmd gsm.username \"$USERNAME\""
+    fi
+    if [ -n "$PASSWORD" ]; then
+        cmd="$cmd gsm.password \"$PASSWORD\""
+    fi
+
+    # Execute the assembled command
+    eval "$cmd"
+
+    # Configure MTU and other link settings
+    nmcli connection modify "$conn_name" gsm.mtu 1500
+    nmcli connection modify "$conn_name" 802-3-ethernet.accept-all-mac-addresses no
 }
 
 # Main script
-echo "Starting Sierra RC7611 modem setup with NetworkManager..."
+echo "Configuring ARK LTE modem..."
 
 # Check if running as root
-if [ "$EUID" -eq 0 ]; then
-    echo "Please run this script as a regular user with sudo privileges"
+if [ "$EUID" -ne 0 ]; then
+    echo "Error: This script must be run as root"
     exit 1
 fi
 
-# Run setup steps
+# Run prerequisite checks
 check_prerequisites
+
+# Wait for modem
 wait_for_modem
 
+# Verify modem state
+verify_modem_state "$MODEM_INDEX"
+
+# Verify bearer state
+verify_bearer_state "$MODEM_INDEX"
+
+# Get modem index
 MODEM_INDEX=$(get_modem_index)
 if [ -z "$MODEM_INDEX" ]; then
     echo "Error: Could not determine modem index"
     exit 1
 fi
 
-verify_modem_state "$MODEM_INDEX"
-setup_eps_bearer "$MODEM_INDEX"
-create_nm_connection "$MODEM_INDEX"
+# Configure EPS bearer
+echo "Configuring initial EPS bearer settings..."
+mmcli -m "$MODEM_INDEX" --3gpp-set-initial-eps-bearer-settings="apn=$APN"
+
+# Create and configure connection
+echo "Creating NetworkManager connection..."
+configure_connection
 
 echo "Starting connection..."
-nmcli connection up sierra-lte
+nmcli connection up ark-lte
 
-if verify_connection; then
-    if test_connection; then
-        echo "Setup completed successfully!"
-    else
-        echo "Setup completed with warnings (connection test failed)"
-    fi
-else
-    echo "Setup failed - connection could not be activated"
+# Quick connection verification
+echo "Verifying connection..."
+sleep 5
+if ! nmcli -g GENERAL.STATE connection show ark-lte 2>/dev/null | grep -q "activated"; then
+    echo "Error: Connection failed to activate"
     exit 1
 fi
+
+echo "Configuration completed successfully"
+exit 0
