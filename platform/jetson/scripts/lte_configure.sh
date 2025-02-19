@@ -100,7 +100,7 @@ check_prerequisites
 
 wait_for_modem_alive
 
-MODEM_INDEX=$(mmcli -L | grep "Sierra.*RC7611" | grep -o "/[0-9]*" | tr -d '/' | tr -d '\n')
+MODEM_INDEX=$(mmcli -L | grep -oP '(?<=/Modem/)\d+')
 if [ -z "$MODEM_INDEX" ]; then
     echo "Error: Could not determine modem index"
     exit 1
