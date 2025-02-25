@@ -1,96 +1,170 @@
 #!/bin/bash
 
-apn="fast.t-mobile.com"
-
-# mmcli -L
-# /org/freedesktop/ModemManager1/Modem/0 [Sierra Wireless, Incorporated] RC7611
-
-# Get the modem instance number wait until it is valid
-while true; do
-    modem_instance=$(mmcli -L | grep -oP '(?<=/Modem/)\d+')
-    if [ -n "$modem_instance" ]; then
-        break
+check_prerequisites() {
+    if ! modprobe qmi_wwan; then
+        echo "Error: Failed to load qmi_wwan kernel module"
+        exit 1
     fi
-    sleep 2
-done
-echo "Modem instance: $modem_instance"
 
-# sudo mmcli -m 0 --simple-connect="apn=fast.t-mobile.com,ip-type=ipv4v6"
-while true; do
-    sudo mmcli -m $modem_instance --simple-connect="apn=$apn,ip-type=ipv4v6"
-    if [ $? -eq 0 ]; then
-        echo "Connected to APN $apn successfully."
-        break
-    else
-        echo "Failed to connect to APN $apn."
+    for cmd in mmcli; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "Error: Required command '$cmd' not found"
+            exit 1
+        fi
+    done
+
+    if ! systemctl is-active --quiet NetworkManager; then
+        echo "Error: NetworkManager is not running"
+        exit 1
     fi
-    sleep 2
+}
+
+wait_for_modem_alive() {
+    while true; do
+        modem_instance=$(mmcli -L | grep -oP '(?<=/Modem/)\d+')
+        if [ -n "$modem_instance" ]; then
+            break
+        fi
+        sleep 2
+    done
+    echo "Modem instance: $modem_instance"
+}
+
+wait_for_modem_network_connected() {
+    local modem_index=$1
+    local timeout=60
+    local count=0
+
+    while [ $count -lt $timeout ]; do
+        # Get status, strip colors, and check states
+        local modem_status
+        modem_status=$(mmcli -m "$modem_index" | TERM=dumb sed 's/\x1b\[[0-9;]*m//g')
+
+        if echo "$modem_status" | sed 's/^[ \t]*//' | grep -q "state: connected" && \
+           echo "$modem_status" | sed 's/^[ \t]*//' | grep -q "packet service state: attached"; then
+            return 0
+        fi
+
+        echo -n "Waiting for modem to connect... ($count/$timeout seconds)\r"
+        sleep 1
+        count=$((count + 1))
+    done
+
+    echo -e "\nError: Timeout waiting for modem to connect"
+    exit 1
+}
+
+usage() {
+    cat << EOF
+Usage: $0 --apn <apn>
+
+Required arguments:
+    --apn <apn>           Access Point Name for the cellular connection
+EOF
+}
+
+APN=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --apn)
+            APN="$2"
+            shift 2
+            ;;
+        --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown parameter $1"
+            usage
+            exit 1
+            ;;
+    esac
 done
 
-# Check the modem status
-mmcli -m $modem_instance
+if [ -z "$APN" ]; then
+    echo "Error: APN is required"
+    usage
+    exit 1
+fi
 
-# Get the bearer instance number. It will be the last Bearer/N number
-bearer_instance=$(mmcli -m $modem_instance | grep -oP '(?<=/Bearer/)\d+$' | tail -n 1)
-echo "Bearer instance: $bearer_instance"
+echo "Setting up ARK LTE modem"
 
-# Connect the bearer instance
-while true; do
-    sudo mmcli -m $modem_instance --bearer=$bearer_instance
-    if [ $? -eq 0 ]; then
-        echo "Bearer $bearer_instance connected successfully."
-        break
-    else
-        echo "Failed to connect bearer $bearer_instance."
-    fi
-    sleep 2
-done
+if [ "$EUID" -ne 0 ]; then
+    echo "Error: This script must be run as root"
+    exit 1
+fi
 
-# Get the IPV4 address, prefix, gateway, DNS, and MTU values
-# Will be in the format:
-#   IPv4 configuration |         method: static
-#                      |        address: XXX.XXX.XXX.XXX
-#                      |         prefix: XX
-#                      |        gateway: XXX.XXX.XXX.XXX
-#                      |            dns: XXX.XXX.XXX.XXX, XXX.XXX.XXX.XXX
-#                      |            mtu: XXX
-ipv4_info=$(mmcli -m $modem_instance --bearer=$bearer_instance | grep -A 5 'IPv4 configuration')
-ipv4_address=$(echo "$ipv4_info" | grep 'address' | awk '{print $3}')
-ipv4_prefix=$(echo "$ipv4_info" | grep 'prefix' | awk '{print $3}')
-ipv4_gateway=$(echo "$ipv4_info" | grep 'gateway' | awk '{print $3}')
-ipv4_dns=$(echo "$ipv4_info" | grep 'dns' | awk '{print $3, $4}')
-ipv4_mtu=$(echo "$ipv4_info" | grep 'mtu' | awk '{print $3}')
+check_prerequisites
 
-# Split the DNS values
-IFS=', ' read -r dns1 dns2 <<< "$ipv4_dns"
+wait_for_modem_alive
+
+MODEM_INDEX=$(mmcli -L | grep -oP '(?<=/Modem/)\d+')
+if [ -z "$MODEM_INDEX" ]; then
+    echo "Error: Could not determine modem index"
+    exit 1
+fi
+
+echo "Configuring initial EPS bearer settings"
+mmcli -m "$MODEM_INDEX" --3gpp-set-initial-eps-bearer-settings="apn=$APN"
+
+echo "Waiting for modem to connect to network"
+mmcli -m "$MODEM_INDEX" --simple-connect="apn=$APN,ip-type=ipv4v6"
+wait_for_modem_network_connected "$MODEM_INDEX"
+
+echo "Creating connection"
+modem_status=$(mmcli -m 0)
+bearer_index=$(echo "$modem_status" | awk '/Bearer.*paths:/ { last = $NF } END { gsub(".*/", "", last); print last }')
+bearer_info=$(mmcli -m 0 --bearer=$bearer_index)
+
+interface=$(echo "$bearer_info" | awk -F': ' '/interface/ {print $2}')
+address=$(echo "$bearer_info" | awk -F': ' '/address/ {print $2}')
+prefix=$(echo "$bearer_info" | awk -F': ' '/prefix/ {print $2}')
+gateway=$(echo "$bearer_info" | awk -F': ' '/gateway/ {print $2}')
+dns=$(echo "$bearer_info" | awk -F': ' '/dns/ {print $2}')
+mtu=$(echo "$bearer_info" | awk -F': ' '/mtu/ {print $2}')
+
+IFS=', ' read -r dns1 dns2 <<< "$dns"
 # Remove ending comma from dns1
 dns1=${dns1%,}
 
-echo "IPv4 Address: $ipv4_address"
-echo "IPv4 Prefix: $ipv4_prefix"
-echo "IPv4 Gateway: $ipv4_gateway"
+echo "IPv4 Address: $address"
+echo "IPv4 Prefix: $prefix"
+echo "IPv4 Gateway: $gateway"
 echo "IPv4 DNS1: $dns1"
 echo "IPv4 DNS2: $dns2"
-echo "IPv4 MTU: $ipv4_mtu"
+echo "IPv4 MTU: $mtu"
 
-# Flush existing IP address and routes
-sudo ip addr flush dev wwan0
-sudo ip route flush dev wwan0
+# Flush any existing ip or routes
+sudo ip addr flush dev $interface
+sudo ip route flush dev $interface
 
-sudo ip link set wwan0 up
+sudo ip link set $interface up
 
-# sudo ip addr add <address>/<prefix> dev wwan0
-sudo ip addr add $ipv4_address/$ipv4_prefix dev wwan0
-# sudo ip route add default via <gateway> dev wwan0 metric 4294967295
-sudo ip route add default via $ipv4_gateway dev wwan0 metric 4294967295
-# sudo ip link set wwan0 mtu <mtu>
-sudo ip link set wwan0 mtu $ipv4_mtu
+# Add IP if it doesn't already exist
+if ! ip addr show $interface | grep -q "$address"; then
+    sudo ip addr add "$address/$prefix" dev $interface
+fi
 
-# Configure DNS
-# sudo sh -c "echo 'nameserver XXX.XXX.XXX.XXX' >> /etc/resolv.conf"
-# sudo sh -c "echo 'nameserver XXX.XXX.XXX.XXX' >> /etc/resolv.conf"
+sudo ip link set dev $interface arp off
+sudo ip link set $interface mtu $mtu
+
 sudo sh -c "echo 'nameserver $dns1' >> /etc/resolv.conf"
 sudo sh -c "echo 'nameserver $dns2' >> /etc/resolv.conf"
 
-# Check the connection
-ping -4 -c 4 -I wwan0 8.8.8.8
+# Add route if it doesn't already exist
+if ! ip route show | grep -q "default via $gateway dev $interface"; then
+    sudo ip route add default via $gateway dev $interface metric 4294967295
+fi
+
+echo "Testing connection"
+
+if ! ping -4 -c 4 -I $interface 8.8.8.8 >/dev/null 2>&1; then
+    echo "Failed!"
+    exit 1
+fi
+
+echo "Connected!"
+
+exit 0

@@ -6,7 +6,7 @@ After=syslog.target network-online.target
 [Service]
 Type=simple
 
-ExecStart=/home/jetson/.local/bin/configure_lte.sh
+ExecStart=/home/jetson/.local/bin/configure_lte.sh --apn fast.t-mobile.com
 Restart=on-failure
 RestartSec=5
 KillMode=process
