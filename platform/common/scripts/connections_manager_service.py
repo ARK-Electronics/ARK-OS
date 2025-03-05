@@ -7,7 +7,6 @@ This service provides a REST API for managing network connections, including:
 - Ethernet connections
 - LTE/cellular connections (Jetson platform only)
 - Connection priorities and routing
-- Network statistics
 
 It's designed to work with NetworkManager and ModemManager.
 """
@@ -28,25 +27,53 @@ import argparse
 from pathlib import Path
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
+try:
+    # Try to use system log location
+    log_handlers = [
         logging.StreamHandler(),
         logging.FileHandler('/var/log/connections_manager.log')
     ]
+except PermissionError:
+    # Fall back to local file if permission denied
+    print("Warning: Could not write to system log. Using local log file instead.")
+    log_handlers = [
+        logging.StreamHandler(),
+        logging.FileHandler('connections_manager.log')
+    ]
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=log_handlers
 )
 logger = logging.getLogger('connections_manager')
 
+
 # Create Flask app
 app = Flask(__name__)
-CORS(app)  # Enable cross-origin requests
+# Enable CORS for development and production
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+@app.before_request
+def log_request_info():
+    logger.debug('Request Headers: %s', request.headers)
+    logger.debug('Request Path: %s', request.path)
+    logger.debug('Request Method: %s', request.method)
+    logger.debug('Request Remote Addr: %s', request.remote_addr)
+
+# Add some test endpoints with different paths
+@app.route('/network/test', methods=['GET'])
+def api_test():
+    """Test endpoint to verify API routing"""
+    logger.debug("Test endpoint called: /network/test - DETAILED LOG")
+    logger.info("Test endpoint called: /network/test")
+    return jsonify({"status": "success", "message": "Connections Manager API is working"})
 
 # Default configuration
 DEFAULT_CONFIG = {
     "service": {
-        "port": 5000,
-        "host": "0.0.0.0",
+        "port": 3001,
+        "host": "0.0.0.0",  # Listen on all interfaces for local development
         "debug": False
     },
     "network": {
@@ -216,7 +243,7 @@ def get_connection_priority(connection):
 def scan_wifi_networks():
     """Scan for available WiFi networks"""
     networks = []
-    
+
     # Trigger a scan
     safe_run_command("nmcli device wifi rescan")
     
@@ -301,26 +328,30 @@ def update_routing_priorities(priorities):
     return success
 
 # API Routes
-@app.route('/api/connections', methods=['GET'])
+@app.route('/network/connections', methods=['GET'])
 def api_get_connections():
     """Get all network connections"""
+    logger.info("GET /network/connections called")
     return jsonify(get_network_connections())
 
-@app.route('/api/connections/<id>/connect', methods=['POST'])
+@app.route('/network/connections/<id>/connect', methods=['POST'])
 def api_connect_to_network(id):
     """Connect to a network by UUID"""
+    logger.info(f"POST /network/connections/{id}/connect called")
     result = safe_run_command(f"nmcli connection up uuid {id}")
     return jsonify({'success': result is not None})
 
-@app.route('/api/connections/<id>/disconnect', methods=['POST'])
+@app.route('/network/connections/<id>/disconnect', methods=['POST'])
 def api_disconnect_from_network(id):
     """Disconnect from a network by UUID"""
+    logger.info(f"POST /network/connections/{id}/disconnect called")
     result = safe_run_command(f"nmcli connection down uuid {id}")
     return jsonify({'success': result is not None})
 
-@app.route('/api/connections/<id>', methods=['PUT'])
+@app.route('/network/connections/<id>', methods=['PUT'])
 def api_update_connection(id):
     """Update a connection configuration (WiFi and Ethernet only)"""
+    logger.info(f"PUT /network/connections/{id} called")
     data = request.json
     connection_type = data.get('type')
     
@@ -379,9 +410,10 @@ def api_update_connection(id):
     
     return jsonify({'success': False, 'error': 'Unsupported connection type'})
 
-@app.route('/api/connections', methods=['POST'])
+@app.route('/network/connections', methods=['POST'])
 def api_create_connection():
     """Create a new connection (WiFi and Ethernet only)"""
+    logger.info("POST /network/connections called")
     data = request.json
     connection_type = data.get('type')
     
@@ -460,20 +492,21 @@ def api_create_connection():
     
     return jsonify({'success': False, 'error': 'Unsupported connection type'})
 
-@app.route('/api/connections/<id>', methods=['DELETE'])
+@app.route('/network/connections/<id>', methods=['DELETE'])
 def api_delete_connection(id):
-    """Delete a connection by UUID (WiFi and Ethernet only)"""    
+    """Delete a connection by UUID (WiFi and Ethernet only)"""
+    logger.info(f"DELETE /network/connections/{id} called")
     result = safe_run_command(f"nmcli connection delete uuid {id}")
     return jsonify({'success': result is not None})
 
-@app.route('/api/wifi/scan', methods=['GET'])
+@app.route('/network/wifi/scan', methods=['GET'])
 def api_scan_wifi():
-    """Scan for available WiFi networks"""
+    logger.info("GET /network/wifi/scan called")
     return jsonify(scan_wifi_networks())
 
-@app.route('/api/wifi/connect', methods=['POST'])
+@app.route('/network/wifi/connect', methods=['POST'])
 def api_connect_wifi():
-    """Connect to a WiFi network"""
+    logger.info("POST /network/wifi/connect called")
     data = request.json
     ssid = data.get('ssid')
     password = data.get('password')
@@ -488,34 +521,30 @@ def api_connect_wifi():
     result = safe_run_command(cmd)
     return jsonify({'success': result is not None})
 
-@app.route('/api/routing', methods=['GET'])
+@app.route('/network/routing', methods=['GET'])
 def api_get_routing():
-    """Get current routing priorities"""
+    logger.info("GET /network/routing called")
     return jsonify(get_routing_priorities())
 
-@app.route('/api/routing', methods=['PUT'])
+@app.route('/network/routing', methods=['PUT'])
 def api_update_routing():
-    """Update routing priorities"""
+    logger.info("PUT /network/routing called")
     data = request.json
     priorities = data.get('priorities', [])
     
     success = update_routing_priorities(priorities)
     return jsonify({'success': success})
 
-@app.route('/api/statistics', methods=['GET'])
-def api_get_statistics():
-    """Get connection statistics"""
-    return jsonify(get_connection_statistics())
 
-@app.route('/api/hostname', methods=['GET'])
+@app.route('/network/hostname', methods=['GET'])
 def api_get_hostname():
-    """Get the current hostname"""
+    logger.info("GET /network/hostname called")
     hostname = safe_run_command("hostname")
     return jsonify({"hostname": hostname})
 
-@app.route('/api/hostname', methods=['POST'])
+@app.route('/network/hostname', methods=['POST'])
 def api_set_hostname():
-    """Set a new hostname"""
+    logger.info("POST /network/hostname called")
     data = request.json
     new_hostname = data.get('hostname')
     
@@ -523,7 +552,7 @@ def api_set_hostname():
         return jsonify({"status": "error", "message": "No hostname provided"}), 400
     
     # Validate hostname format
-    if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$', new_hostname):$', new_hostname):
+    if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$', new_hostname):
         return jsonify({"status": "error", "message": "Invalid hostname format"}), 400
     
     # Change hostname using hostnamectl
@@ -568,9 +597,10 @@ def detect_apn_from_carrier(operator_name):
     # No match found
     return None
 
-@app.route('/api/lte/status', methods=['GET'])
+@app.route('/network/lte/status', methods=['GET'])
 def api_get_lte_status():
     """Get LTE modem status (Jetson platform only)"""
+    logger.info("GET /network/lte/status called")
     # Check if we're on a Jetson platform
     is_jetson = os.path.exists('/etc/nv_tegra_release')
     
@@ -683,9 +713,10 @@ def api_get_lte_status():
         return jsonify({"status": "error", "message": str(e)})
 
 
-@app.route('/api/lte/connect', methods=['POST'])
+@app.route('/network/lte/connect', methods=['POST'])
 def api_connect_lte():
     """Connect to LTE network with specified APN (Jetson platform only)"""
+    logger.info("POST /network/lte/connect called")
     # Check if we're on a Jetson platform
     is_jetson = os.path.exists('/etc/nv_tegra_release')
     
@@ -851,9 +882,10 @@ def api_connect_lte():
         logger.error(f"Error connecting to LTE: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/lte/disconnect', methods=['POST'])
+@app.route('/network/lte/disconnect', methods=['POST'])
 def api_disconnect_lte():
     """Disconnect from LTE network (Jetson platform only)"""
+    logger.info("POST /network/lte/disconnect called")
     # Check if we're on a Jetson platform
     is_jetson = os.path.exists('/etc/nv_tegra_release')
     
@@ -900,15 +932,12 @@ def api_disconnect_lte():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def main():
-    """Main entry point"""
     parser = argparse.ArgumentParser(description='ARK-OS Connections Manager Service')
     parser.add_argument('--config', default='/etc/ark/network/connections_manager.toml', help='Path to config file')
     args = parser.parse_args()
     
-    # Load configuration
     load_config(args.config)
     
-    # Run Flask app
     app.run(
         host=config['service']['host'],
         port=config['service']['port'],

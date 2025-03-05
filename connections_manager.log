@@ -1,0 +1,4 @@
+2025-03-04 19:22:04,705 - connections_manager - INFO - Configuration loaded from /etc/ark/network/connections_manager.toml
+2025-03-04 19:22:04,753 - werkzeug - WARNING -  * Running on all addresses.
+   WARNING: This is a development server. Do not use it in a production deployment.
+2025-03-04 19:22:04,754 - werkzeug - INFO -  * Running on http://192.168.0.96:5000/ (Press CTRL+C to quit)
