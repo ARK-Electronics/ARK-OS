@@ -1,0 +1,15 @@
+[Unit]
+Description=ARK-OS Connections Manager Service
+After=network.target NetworkManager.service ModemManager.service
+Wants=NetworkManager.service ModemManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/connections_manager_service.py --config /etc/ark/network/connections_manager.toml
+Restart=on-failure
+RestartSec=5
+Type=simple
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

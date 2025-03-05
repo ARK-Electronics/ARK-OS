@@ -255,6 +255,9 @@ if [ "$INSTALL_RTSP_SERVER" = "y" ]; then
 	./scripts/install_rtsp_server.sh
 fi
 
+########## connections-manager ##########
+./scripts/install_connections_manager.sh
+
 ########## ark-ui ##########
 if [ "$INSTALL_ARK_UI" = "y" ]; then
 	./scripts/install_ark_ui.sh
