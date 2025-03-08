@@ -15,7 +15,7 @@ sudo apt-get install -y python3-pip python3-flask python3-psutil python3-toml
 
 # Install Python modules
 print_step "Installing Python packages..."
-sudo pip3 install flask-cors
+sudo pip3 install flask-cors flask-socketio python-socketio eventlet psutil toml
 
 # Copy necessary files
 print_step "Copying configuration files and scripts..."
