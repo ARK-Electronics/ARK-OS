@@ -783,6 +783,8 @@ class LteManager:
                 "state": "Unknown",
                 "signal": 0,
                 "connected": False,
+                "network_registered": False,
+                "fully_connected": False,
                 "apn": "",
                 "detectedApn": None,
             }
@@ -828,21 +830,38 @@ class LteManager:
             if operator_name_match:
                 response['operator'] = operator_name_match.group(1).strip()
 
-            # Network connectivity
+            # Network state
+            if state_match:
+                state_value = state_match.group(1).strip()
+                response['state'] = state_value
+                # Consider "registered" or "connected" as connected to the network
+                if state_value in ['registered', 'connected']:
+                    response['network_registered'] = True
+
+            # Packet service state
             packet_state_match = re.search(r'packet service state:\s*([^\n]+)', modem_info)
             if packet_state_match and packet_state_match.group(1).strip() == 'attached':
                 response['network_connected'] = True
 
-            # Bearer & APN
+            # Bearer & APN from 3GPP EPS section
             bearer_path_match = re.search(r'initial bearer path:\s*([^\n]+)', modem_info)
             if bearer_path_match:
                 bearer_path = bearer_path_match.group(1).strip()
                 if bearer_path and bearer_path != 'none':
                     response['bearer_path'] = bearer_path
-                    bearer_match = re.search(r'/Bearer/(\d+)', bearer_path)
-                    if bearer_match:
-                        response['bearer_index'] = bearer_match.group(1)
-                        response['connected'] = True  # If there's a bearer, the modem is connected
+                    initial_bearer_match = re.search(r'/Bearer/(\d+)', bearer_path)
+                    if initial_bearer_match:
+                        response['initial_bearer_index'] = initial_bearer_match.group(1)
+
+            # Check for additional bearers (from the Bearer section)
+            bearer_paths_match = re.search(r'Bearer\s+\|\s+paths:\s*([^\n]+)', modem_info)
+            if bearer_paths_match:
+                bearer_paths = bearer_paths_match.group(1).strip()
+                if bearer_paths and bearer_paths != 'none':
+                    additional_bearer_match = re.search(r'/Bearer/(\d+)', bearer_paths)
+                    if additional_bearer_match:
+                        response['bearer_index'] = additional_bearer_match.group(1)
+                        # Not setting connected yet - need to check if it has an IP
 
             apn_match = re.search(r'initial bearer apn:\s*([^\n]+)', modem_info)
             if apn_match:
@@ -858,22 +877,53 @@ class LteManager:
                 bearer_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --bearer={bearer_index}")
 
                 if bearer_info:
-                    # Extract interface and IP details
-                    interface_match = re.search(r'interface:\s+(\w+)', bearer_info)
-                    if interface_match:
-                        response['interface'] = interface_match.group(1)
+                    logger.info(f"Found bearer {bearer_index} information")
 
-                    ip_match = re.search(r'ip:\s+([0-9.]+)', bearer_info) or re.search(r'address:\s+([0-9.]+)', bearer_info)
-                    if ip_match:
-                        response['ip_address'] = ip_match.group(1)
+                    # Check if the bearer is connected
+                    connected_match = re.search(r'connected:\s+(yes|no)', bearer_info, re.IGNORECASE)
+                    if connected_match and connected_match.group(1).lower() == 'yes':
+                        logger.info("Bearer reports as connected")
 
-                    gateway_match = re.search(r'gateway:\s+([0-9.]+)', bearer_info)
-                    if gateway_match:
-                        response['gateway'] = gateway_match.group(1)
+                        # Extract interface and IP details
+                        interface_match = re.search(r'interface:\s+(\w+)', bearer_info)
+                        if interface_match:
+                            response['interface'] = interface_match.group(1)
+                            logger.info(f"Found interface: {response['interface']}")
 
-                    dns_match = re.search(r'dns:\s+([\w\.,\s]+)', bearer_info, re.IGNORECASE)
-                    if dns_match:
-                        response['dns'] = [dns.strip() for dns in dns_match.group(1).split(',')]
+                        # Look for IPv4 configuration section and get IP details
+                        ipv4_match = re.search(r'IPv4 configuration[^\n]*\n(.*?)(?=-{2,}|\Z)', bearer_info, re.DOTALL)
+                        if ipv4_match:
+                            ipv4_section = ipv4_match.group(1)
+
+                            ip_match = re.search(r'address:\s+([0-9.]+)', ipv4_section)
+                            if ip_match:
+                                response['ip_address'] = ip_match.group(1)
+                                logger.info(f"Found IP address: {response['ip_address']}")
+                                response['fully_connected'] = True
+                                response['connected'] = True
+
+                            gateway_match = re.search(r'gateway:\s+([0-9.]+)', ipv4_section)
+                            if gateway_match:
+                                response['gateway'] = gateway_match.group(1)
+
+                            dns_match = re.search(r'dns:\s+([\w\.,\s]+)', ipv4_section, re.IGNORECASE)
+                            if dns_match:
+                                response['dns'] = [dns.strip() for dns in dns_match.group(1).split(',')]
+                        else:
+                            # Fallback to looking anywhere in the output
+                            ip_match = re.search(r'ip:\s+([0-9.]+)', bearer_info) or re.search(r'address:\s+([0-9.]+)', bearer_info)
+                            if ip_match:
+                                response['ip_address'] = ip_match.group(1)
+                                response['fully_connected'] = True
+                                response['connected'] = True
+
+                            gateway_match = re.search(r'gateway:\s+([0-9.]+)', bearer_info)
+                            if gateway_match:
+                                response['gateway'] = gateway_match.group(1)
+
+                            dns_match = re.search(r'dns:\s+([\w\.,\s]+)', bearer_info, re.IGNORECASE)
+                            if dns_match:
+                                response['dns'] = [dns.strip() for dns in dns_match.group(1).split(',')]
 
                     # Get data usage stats if interface is available
                     if response.get('interface'):
@@ -966,17 +1016,36 @@ class LteManager:
 
             # Wait for modem to connect to network
             logger.info("Waiting for modem to connect to network...")
-            connected = False
+            fully_connected = False
+            network_connected = False
             status = None
-            for _ in range(60):  # Wait up to 60 seconds
+
+            # First wait for network registration
+            for _ in range(30):  # Wait up to 30 seconds for network registration
                 status = LteManager.get_lte_status()
-                if status.get("connected") or status.get("network_connected"):
-                    connected = True
+                if status.get("network_registered") or status.get("network_connected"):
+                    network_connected = True
+                    logger.info("Modem registered to network, now waiting for IP address...")
                     break
+                logger.info(f"Waiting for network registration... State: {status.get('state')}")
                 time.sleep(1)
 
-            if not connected:
-                return {"status": "error", "message": "Modem failed to connect within timeout period"}, 500
+            if not network_connected:
+                return {"status": "error", "message": "Modem failed to register with the network within timeout period"}, 500
+
+            # Then wait for full connection with IP address
+            for _ in range(30):  # Wait up to another 30 seconds for full connection
+                status = LteManager.get_lte_status()
+                if status.get("fully_connected"):
+                    fully_connected = True
+                    logger.info(f"Modem fully connected with IP: {status.get('ip_address')}")
+                    break
+                logger.info(f"Waiting for IP address assignment... Connected: {status.get('connected')}")
+                time.sleep(1)
+
+            if not fully_connected:
+                logger.warning("Modem registered but failed to get IP address - will try to configure anyway")
+                # Continue anyway - we might be able to get the IP through other means
 
             # Get bearer information
             logger.info("Getting bearer information...")
