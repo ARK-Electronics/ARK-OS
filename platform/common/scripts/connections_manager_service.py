@@ -190,8 +190,6 @@ class CommandExecutor:
         return result if result is not None else default
 
 
-
-
 class NetworkConnectionManager:
     @staticmethod
     def get_network_connections():
@@ -762,7 +760,7 @@ class LteManager:
             return {"status": "not_available", "message": "LTE functionality only available on Jetson platform"}
 
         # Check if ModemManager is installed and running
-        if not CommandExecutor.run_command("systemctl is-active --quiet ModemManager"):
+        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
             return {"status": "not_found", "message": "ModemManager is not running"}
 
         # Get modem index
@@ -901,10 +899,10 @@ class LteManager:
                 return {"status": "error", "message": "APN is required - no carrier detected"}, 400
 
         # Check prerequisites
-        if not CommandExecutor.run_command("modprobe qmi_wwan"):
+        if not CommandExecutor.safe_run_command("modprobe qmi_wwan"):
             return {"status": "error", "message": "Failed to load qmi_wwan kernel module"}, 500
 
-        if not CommandExecutor.run_command("systemctl is-active --quiet ModemManager"):
+        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
             return {"status": "error", "message": "ModemManager is not running"}, 500
         
         try:
@@ -926,13 +924,13 @@ class LteManager:
             # Configure modem initial EPS bearer settings
             logger.info(f"Configuring modem with APN: {apn}")
             eps_cmd = f"mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=apn={apn}"
-            if not CommandExecutor.run_command(eps_cmd):
+            if not CommandExecutor.safe_run_command(eps_cmd):
                 return {"status": "error", "message": "Failed to configure modem EPS settings"}, 500
 
             # Connect modem to network
             logger.info("Connecting modem to network...")
             connect_cmd = f"mmcli -m {modem_index} --simple-connect=apn={apn},ip-type=ipv4v6"
-            if not CommandExecutor.run_command(connect_cmd):
+            if not CommandExecutor.safe_run_command(connect_cmd):
                 return {"status": "error", "message": "Failed to connect modem to network"}, 500
 
             # Wait for modem to connect to network
@@ -982,26 +980,26 @@ class LteManager:
 
             # Flush existing IP and routes
             logger.info(f"Configuring interface {interface}...")
-            if not CommandExecutor.run_command(f"ip addr flush dev {interface}"):
+            if not CommandExecutor.safe_run_command(f"ip addr flush dev {interface}"):
                 logger.warning("Failed to flush IP address")
 
-            if not CommandExecutor.run_command(f"ip route flush dev {interface}"):
+            if not CommandExecutor.safe_run_command(f"ip route flush dev {interface}"):
                 logger.warning("Failed to flush routes")
 
             # Configure interface
-            if not CommandExecutor.run_command(f"ip link set {interface} up"):
+            if not CommandExecutor.safe_run_command(f"ip link set {interface} up"):
                 return {"status": "error", "message": f"Failed to bring up interface {interface}"}, 500
 
-            if not CommandExecutor.run_command(f"ip addr add {address}/{prefix} dev {interface}"):
+            if not CommandExecutor.safe_run_command(f"ip addr add {address}/{prefix} dev {interface}"):
                 return {"status": "error", "message": f"Failed to add IP address to interface {interface}"}, 500
 
             if mtu_match:
-                CommandExecutor.run_command(f"ip link set {interface} mtu {mtu_match.group(1)}")
+                CommandExecutor.safe_run_command(f"ip link set {interface} mtu {mtu_match.group(1)}")
 
             # Configure routing
-            CommandExecutor.run_command(f"ip link set dev {interface} arp off")
+            CommandExecutor.safe_run_command(f"ip link set dev {interface} arp off")
 
-            if not CommandExecutor.run_command(f"ip route add default via {gateway} dev {interface} metric 4294967295"):
+            if not CommandExecutor.safe_run_command(f"ip route add default via {gateway} dev {interface} metric 4294967295"):
                 return {"status": "error", "message": "Failed to add default route"}, 500
 
             # Configure DNS if available
@@ -1011,17 +1009,17 @@ class LteManager:
                     dns1 = dns_servers[0].strip()
                     if dns1:
                         logger.info(f"Adding DNS server: {dns1}")
-                        CommandExecutor.run_command(f"sh -c \"echo 'nameserver {dns1}' >> /etc/resolv.conf\"")
+                        CommandExecutor.safe_run_command(f"sh -c \"echo 'nameserver {dns1}' >> /etc/resolv.conf\"")
 
                 if len(dns_servers) > 1:
                     dns2 = dns_servers[1].strip()
                     if dns2:
                         logger.info(f"Adding DNS server: {dns2}")
-                        CommandExecutor.run_command(f"sh -c \"echo 'nameserver {dns2}' >> /etc/resolv.conf\"")
+                        CommandExecutor.safe_run_command(f"sh -c \"echo 'nameserver {dns2}' >> /etc/resolv.conf\"")
 
             # Test connection
             logger.info("Testing connection...")
-            if not CommandExecutor.run_command(f"ping -4 -c 1 -I {interface} 8.8.8.8", timeout=5):
+            if not CommandExecutor.safe_run_command(f"ping -4 -c 1 -I {interface} 8.8.8.8", timeout=5):
                 logger.warning("Ping test failed, but connection might still be working")
 
             return {
@@ -1045,7 +1043,7 @@ class LteManager:
             return {"status": "error", "message": "LTE functionality only available on Jetson platform"}, 400
         
         # Check if ModemManager is installed and running
-        if not CommandExecutor.run_command("systemctl is-active --quiet ModemManager"):
+        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
             return {"status": "error", "message": "ModemManager is not running"}, 500
 
         # Get modem index
@@ -1069,14 +1067,14 @@ class LteManager:
 
             # Disconnect the modem
             logger.info("Disconnecting modem...")
-            if not CommandExecutor.run_command(f"mmcli -m {modem_index} --simple-disconnect"):
+            if not CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --simple-disconnect"):
                 return {"status": "error", "message": "Failed to disconnect from LTE network"}, 500
 
             # Clean up the interface if found
             if interface:
                 logger.info(f"Cleaning up interface {interface}...")
-                CommandExecutor.run_command(f"ip addr flush dev {interface}")
-                CommandExecutor.run_command(f"ip route flush dev {interface}")
+                CommandExecutor.safe_run_command(f"ip addr flush dev {interface}")
+                CommandExecutor.safe_run_command(f"ip route flush dev {interface}")
 
             return {"status": "success", "message": "Disconnected from LTE network"}
         except Exception as e:
