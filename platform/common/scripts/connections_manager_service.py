@@ -760,7 +760,7 @@ class LteManager:
             return {"status": "not_available", "message": "LTE functionality only available on Jetson platform"}
 
         # Check if ModemManager is installed and running
-        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
+        if not CommandExecutor.safe_run_command("systemctl is-active ModemManager"):
             return {"status": "not_found", "message": "ModemManager is not running"}
 
         # Get modem index
