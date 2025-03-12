@@ -1094,11 +1094,11 @@ class LteManager:
                                 status_data["interface"] = line.split('interface:')[1].strip()
                             elif 'apn:' in line:
                                 status_data["apn"] = line.split('apn:')[1].strip()
-                            elif 'address:' in line and 'IPv4' in line:
+                            elif 'address:' in line:
                                 status_data["ipAddress"] = line.split('address:')[1].strip()
-                            elif 'gateway:' in line and 'IPv4' in line:
+                            elif 'gateway:' in line:
                                 status_data["gateway"] = line.split('gateway:')[1].strip()
-                            elif 'dns:' in line and 'IPv4' in line:
+                            elif 'dns:' in line:
                                 dns_servers = line.split('dns:')[1].strip()
                                 status_data["dns"] = [s.strip() for s in dns_servers.split(',')]
                             elif 'mtu:' in line:
