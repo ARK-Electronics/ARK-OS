@@ -1,0 +1,57 @@
+jetson@jetson:~$ mmcli -m 0
+  ----------------------------------
+  General  |                   path: /org/freedesktop/ModemManager1/Modem/0
+           |              device id: 55aee9689f2c57135fc2b6f3c000c14d5a7a375c
+  ----------------------------------
+  Hardware |           manufacturer: Sierra Wireless, Incorporated
+           |                  model: RC7611
+           |      firmware revision: SWI9X07H_00.09.10.00 85890e jenkins 2023/09/25 03:16:56
+           |         carrier config: default
+           |           h/w revision: 1.0
+           |              supported: lte
+           |                current: lte
+           |           equipment id: 358026262107223
+  ----------------------------------
+  System   |                 device: /sys/devices/platform/bus@0/3610000.usb/usb1/1-2/1-2.4
+           |                drivers: qcserial, qmi_wwan
+           |                 plugin: sierra
+           |           primary port: cdc-wdm0
+           |                  ports: cdc-wdm0 (qmi), ttyUSB0 (qcdm), ttyUSB2 (at), 
+           |                         wwx028078f0f50a (net)
+  ----------------------------------
+  Numbers  |                    own: 13854186254
+  ----------------------------------
+  Status   |                   lock: sim-pin2
+           |         unlock retries: sim-pin (3), sim-puk (10), sim-pin2 (10), sim-puk2 (10)
+           |                  state: connected
+           |            power state: on
+           |            access tech: lte
+           |         signal quality: 67% (recent)
+  ----------------------------------
+  Modes    |              supported: allowed: 4g; preferred: none
+           |                current: allowed: 4g; preferred: none
+  ----------------------------------
+  Bands    |              supported: eutran-2, eutran-4, eutran-5, eutran-12, eutran-13, 
+           |                         eutran-14, eutran-25, eutran-26, eutran-66, eutran-71
+           |                current: eutran-2, eutran-4, eutran-5, eutran-12, eutran-13, 
+           |                         eutran-14, eutran-25, eutran-26, eutran-66, eutran-71
+  ----------------------------------
+  IP       |              supported: ipv4, ipv6, ipv4v6
+  ----------------------------------
+  3GPP     |                   imei: 358026262107223
+           |          enabled locks: fixed-dialing
+           |            operator id: 311370
+           |          operator name: GCI
+           |           registration: roaming
+           |   packet service state: attached
+  ----------------------------------
+  3GPP EPS |   ue mode of operation: csps-2
+           |    initial bearer path: /org/freedesktop/ModemManager1/Bearer/0
+           |     initial bearer apn: fast.t-mobile.com
+           | initial bearer ip type: ipv4
+  ----------------------------------
+  SIM      |       primary sim path: /org/freedesktop/ModemManager1/SIM/0
+           |         sim slot paths: slot 1: /org/freedesktop/ModemManager1/SIM/0 (active)
+           |                         slot 2: none
+  ----------------------------------
+  Bearer   |                  paths: /org/freedesktop/ModemManager1/Bearer/1

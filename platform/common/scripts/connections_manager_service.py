@@ -297,7 +297,6 @@ class NetworkConnectionManager:
 
 
 
-
 class RoutingManager:
     @staticmethod
     def get_routing_priorities():
@@ -702,44 +701,101 @@ def api_set_hostname():
         return jsonify({"status": "error", "message": message}), 400
 
 
-class CellularUtils:
-    @staticmethod
-    def detect_apn_from_carrier(operator_name):
-        """Detect appropriate APN based on carrier/operator name"""
-        if not operator_name:
-            return None
 
-        # Convert to lowercase for case-insensitive matching
-        operator_lower = operator_name.lower()
+### Basic description of connection setup:
+# If the modem doesn't have initial bearer APN, we need to do that first. We can verify that right
+# off the bat by checking for "initial bearer apn". Once we have that set we need to check if we're
+# 'registered', and then do the simple-connect. Once simple connect is complete and our state is 'connected'
+# we need to create the network interface.
 
-        # Common US carriers
-        if any(name in operator_lower for name in ['t-mobile', 'tmobile']):
-            return 'fast.t-mobile.com'
-        elif any(name in operator_lower for name in ['at&t', 'at and t', 'att']):
-            return 'broadband'
-        elif any(name in operator_lower for name in ['verizon']):
-            return 'vzwinternet'
-        elif any(name in operator_lower for name in ['sprint']):
-            return 'sprint'
-        elif any(name in operator_lower for name in ['h2o']):
-            return 'h2o'
-        elif any(name in operator_lower for name in ['visible']):
-            return 'vsblinternet'
+# Get modem index - usually 0 but let's be dynamic
+# modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
 
-        # International carriers
-        elif any(name in operator_lower for name in ['vodafone']):
-            return 'internet'
-        elif any(name in operator_lower for name in ['orange']):
-            return 'orange'
-        elif any(name in operator_lower for name in ['telefonica', 'movistar']):
-            return 'movistar.es'
-        elif any(name in operator_lower for name in ['telstra']):
-            return 'telstra.internet'
+# TODO: look for "initial bearer apn: fast.t-mobile.com".
 
-        # No match found
-        return None
+# TODO: If there is no initial bearer apn, we need to do:
+# sudo mmcli -m 0 --3gpp-set-initial-eps-bearer-settings="apn=<your_apn>"
+
+# TODO: If state is 'registered' then we need to do the simple connect:
+# sudo mmcli -m 0 --simple-connect="apn=fast.t-mobile.com,ip-type=ipv4v6"
+# Otherwise the state should be 'connected'
+
+# Once we're 'connected' we should see a "Bearer" section at the bottom:
+
+# ----------------------------------
+# SIM      |       primary sim path: /org/freedesktop/ModemManager1/SIM/0
+#          |         sim slot paths: slot 1: /org/freedesktop/ModemManager1/SIM/0 (active)
+#          |                         slot 2: none
+# ----------------------------------
+# Bearer   |                  paths: /org/freedesktop/ModemManager1/Bearer/1
 
 
+# TODO: Parse the index from the bearer path (in this case 1). And then get the bearer information:
+
+# jetson@jetson:~$ mmcli -m 0 --bearer=1
+#  ------------------------------------
+#  General            |           path: /org/freedesktop/ModemManager1/Bearer/1
+#                     |           type: default
+#  ------------------------------------
+#  Status             |      connected: yes
+#                     |      suspended: no
+#                     |    multiplexed: no
+#                     |      interface: wwx028078f0f50a
+#                     |     ip timeout: 20
+#  ------------------------------------
+#  Properties         |            apn: fast.t-mobile.com
+#                     |        roaming: allowed
+#                     |        ip type: ipv4v6
+#  ------------------------------------
+#  IPv4 configuration |         method: static
+#                     |        address: 162.163.170.25
+#                     |         prefix: 30
+#                     |        gateway: 162.163.170.26
+#                     |            dns: 10.177.0.34, 10.177.0.210
+#                     |            mtu: 1500
+#  ------------------------------------
+#  Statistics         |     start date: 2025-03-12T01:49:06Z
+#                     |       duration: 179
+#                     |       attempts: 2
+#                     | total-duration: 302
+
+# TODO: from here we can see the interface name, apn, and IPv4 configuration.
+
+### FROM OUR DOCS: Steps to setup the wwan0 (or whatever interface name it has).
+
+# Set Up the Wireless Interface
+# Use the values from the above IPv4 configuration for address, prefix, gateway, and mtu.
+
+# Bring up the wwan0 interface:
+# sudo ip link set wwan0 up
+
+# Assign the IP address:
+# sudo ip addr add <address>/<prefix> dev wwan0
+
+# Disable ARP on wwan0:
+# sudo ip link set dev wwan0 arp off
+
+# Set the MTU:
+# sudo ip link set wwan0 mtu <mtu>
+
+# Add a default route:
+# sudo ip route add default via <gateway> dev wwan0 metric 4294967295
+# The metric option ensures links like WiFi or Ethernet are prioritized ahead of LTE
+
+# Configure DNS (Optional)
+# To use the DNS servers provided by the cellular connection, run the following commands:
+# sudo sh -c "echo 'nameserver 10.177.0.34' >> /etc/resolv.conf"
+# sudo sh -c "echo 'nameserver 10.177.0.210' >> /etc/resolv.conf"
+
+# Test the Connection
+# ping -4 -c 4 -I wwan0 8.8.8.8
+
+
+# TODO: from here we can report the status. This information is what needs to be reported. If we have not connected
+# yet some of this information won't be available. We will populate as much of the info as is available and
+# use appropriate values for missing/invalid data so that our UI can distinguish between real and missing data.
+# Data we report:
+# model, operator name, apn, state, imei, interface, signal strength, ip address, gateway, and dns.
 
 
 @app.route('/network/lte/status', methods=['GET'])
@@ -750,6 +806,10 @@ def api_get_lte_status():
 
 
 class LteManager:
+    @staticmethod
+    def connect_lte(apn=None, request_data=None):
+        # TODO:
+
     @staticmethod
     def get_lte_status():
         """Get LTE modem status with improved parsing of mmcli output"""
@@ -774,424 +834,16 @@ class LteManager:
             if not modem_info:
                 return {"status": "error", "message": "Failed to get modem information"}
 
-            # Initialize response with defaults
-            response = {
-                "status": "ok",
-                "model": "Unknown",
-                "manufacturer": "Unknown",
-                "operator": "Unknown",
-                "state": "Unknown",
-                "signal": 0,
-                "connected": False,
-                "network_registered": False,
-                "fully_connected": False,
-                "apn": "",
-                "detectedApn": None,
-            }
 
-            # Extract direct patterns from the output
-            # Hardware info
-            manufacturer_match = re.search(r'manufacturer:\s*([^\n]+)', modem_info)
-            if manufacturer_match:
-                response['manufacturer'] = manufacturer_match.group(1).strip()
 
-            model_match = re.search(r'model:\s*([^\n]+)', modem_info)
-            if model_match:
-                response['model'] = model_match.group(1).strip()
+            # TODO:
 
-            equipment_id_match = re.search(r'equipment id:\s*([^\n]+)', modem_info)
-            if equipment_id_match:
-                response['equipment_id'] = equipment_id_match.group(1).strip()
 
-            # Status info
-            state_match = re.search(r'state:\s*([^\n]+)', modem_info)
-            if state_match:
-                response['state'] = state_match.group(1).strip()
-
-            signal_match = re.search(r'signal quality:\s*(\d+)%', modem_info)
-            if signal_match:
-                response['signal'] = int(signal_match.group(1))
-
-            # Numbers
-            phone_match = re.search(r'own:\s*([^\n]+)', modem_info)
-            if phone_match:
-                response['phone_number'] = phone_match.group(1).strip()
-
-            # 3GPP info
-            imei_match = re.search(r'imei:\s*([^\n]+)', modem_info)
-            if imei_match:
-                response['imei'] = imei_match.group(1).strip()
-
-            operator_id_match = re.search(r'operator id:\s*([^\n]+)', modem_info)
-            if operator_id_match:
-                response['operator_id'] = operator_id_match.group(1).strip()
-
-            operator_name_match = re.search(r'operator name:\s*([^\n]+)', modem_info)
-            if operator_name_match:
-                response['operator'] = operator_name_match.group(1).strip()
-
-            # Network state
-            if state_match:
-                state_value = state_match.group(1).strip()
-                response['state'] = state_value
-                # Consider "registered" or "connected" as connected to the network
-                if state_value in ['registered', 'connected']:
-                    response['network_registered'] = True
-
-            # Packet service state
-            packet_state_match = re.search(r'packet service state:\s*([^\n]+)', modem_info)
-            if packet_state_match and packet_state_match.group(1).strip() == 'attached':
-                response['network_connected'] = True
-
-            # Bearer & APN from 3GPP EPS section
-            bearer_path_match = re.search(r'initial bearer path:\s*([^\n]+)', modem_info)
-            if bearer_path_match:
-                bearer_path = bearer_path_match.group(1).strip()
-                if bearer_path and bearer_path != 'none':
-                    response['bearer_path'] = bearer_path
-                    initial_bearer_match = re.search(r'/Bearer/(\d+)', bearer_path)
-                    if initial_bearer_match:
-                        response['initial_bearer_index'] = initial_bearer_match.group(1)
-
-            # Check for additional bearers (from the Bearer section)
-            bearer_paths_match = re.search(r'Bearer\s+\|\s+paths:\s*([^\n]+)', modem_info)
-            if bearer_paths_match:
-                bearer_paths = bearer_paths_match.group(1).strip()
-                if bearer_paths and bearer_paths != 'none':
-                    additional_bearer_match = re.search(r'/Bearer/(\d+)', bearer_paths)
-                    if additional_bearer_match:
-                        response['bearer_index'] = additional_bearer_match.group(1)
-                        # Not setting connected yet - need to check if it has an IP
-
-            apn_match = re.search(r'initial bearer apn:\s*([^\n]+)', modem_info)
-            if apn_match:
-                response['apn'] = apn_match.group(1).strip()
-
-            ip_type_match = re.search(r'initial bearer ip type:\s*([^\n]+)', modem_info)
-            if ip_type_match:
-                response['ip_type'] = ip_type_match.group(1).strip()
-
-            # If we have a bearer, get more details about the connection
-            bearer_index = response.get('bearer_index')
-            if bearer_index:
-                bearer_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --bearer={bearer_index}")
-
-                if bearer_info:
-                    logger.info(f"Found bearer {bearer_index} information")
-
-                    # Check if the bearer is connected
-                    connected_match = re.search(r'connected:\s+(yes|no)', bearer_info, re.IGNORECASE)
-                    if connected_match and connected_match.group(1).lower() == 'yes':
-                        logger.info("Bearer reports as connected")
-
-                        # Extract interface and IP details
-                        interface_match = re.search(r'interface:\s+(\w+)', bearer_info)
-                        if interface_match:
-                            response['interface'] = interface_match.group(1)
-                            logger.info(f"Found interface: {response['interface']}")
-
-                        # Look for IPv4 configuration section and get IP details
-                        ipv4_match = re.search(r'IPv4 configuration[^\n]*\n(.*?)(?=-{2,}|\Z)', bearer_info, re.DOTALL)
-                        if ipv4_match:
-                            ipv4_section = ipv4_match.group(1)
-
-                            ip_match = re.search(r'address:\s+([0-9.]+)', ipv4_section)
-                            if ip_match:
-                                response['ip_address'] = ip_match.group(1)
-                                logger.info(f"Found IP address: {response['ip_address']}")
-                                response['fully_connected'] = True
-                                response['connected'] = True
-
-                            gateway_match = re.search(r'gateway:\s+([0-9.]+)', ipv4_section)
-                            if gateway_match:
-                                response['gateway'] = gateway_match.group(1)
-
-                            dns_match = re.search(r'dns:\s+([\w\.,\s]+)', ipv4_section, re.IGNORECASE)
-                            if dns_match:
-                                response['dns'] = [dns.strip() for dns in dns_match.group(1).split(',')]
-                        else:
-                            # Fallback to looking anywhere in the output
-                            ip_match = re.search(r'ip:\s+([0-9.]+)', bearer_info) or re.search(r'address:\s+([0-9.]+)', bearer_info)
-                            if ip_match:
-                                response['ip_address'] = ip_match.group(1)
-                                response['fully_connected'] = True
-                                response['connected'] = True
-
-                            gateway_match = re.search(r'gateway:\s+([0-9.]+)', bearer_info)
-                            if gateway_match:
-                                response['gateway'] = gateway_match.group(1)
-
-                            dns_match = re.search(r'dns:\s+([\w\.,\s]+)', bearer_info, re.IGNORECASE)
-                            if dns_match:
-                                response['dns'] = [dns.strip() for dns in dns_match.group(1).split(',')]
-
-                    # Get data usage stats if interface is available
-                    if response.get('interface'):
-                        try:
-                            io_counters = psutil.net_io_counters(pernic=True)
-                            interface = response.get('interface')
-                            if interface in io_counters:
-                                response['data_usage'] = {
-                                    'tx_bytes': io_counters[interface].bytes_sent,
-                                    'rx_bytes': io_counters[interface].bytes_recv
-                                }
-                        except Exception as e:
-                            logger.warning(f"Failed to get interface statistics: {e}")
-
-            # Detect appropriate APN based on carrier
-            if response['operator'] and response['operator'] != "Unknown":
-                detected_apn = CellularUtils.detect_apn_from_carrier(response['operator'])
-                if detected_apn:
-                    response['detectedApn'] = detected_apn
-
-            return response
-        except Exception as e:
-            logger.error(f"Error getting LTE status: {e}")
-            return {"status": "error", "message": str(e)}
-
-    @staticmethod
-    def connect_lte(apn=None, request_data=None):
-        """Connect to LTE network with specified APN (Jetson platform only)"""
-        # Get APN from request data if provided
-        if request_data:
-            apn = request_data.get('apn', apn)
-
-        # Check if we're on a Jetson platform
-        is_jetson = os.path.exists('/etc/nv_tegra_release')
-
-        if not is_jetson:
-            return {"status": "error", "message": "LTE functionality only available on Jetson platform"}, 400
-
-        # If no APN is provided, try to detect it from the carrier
-        if not apn:
-            # Get carrier/operator name from the improved status method
-            status = LteManager.get_lte_status()
-            if status.get("operator") and status.get("operator") != "Unknown":
-                detected_apn = CellularUtils.detect_apn_from_carrier(status["operator"])
-                if detected_apn:
-                    logger.info(f"No APN provided, detected {detected_apn} from carrier {status['operator']}")
-                    apn = detected_apn
-                else:
-                    logger.error(f"No APN provided and couldn't detect from carrier: {status['operator']}")
-                    return {"status": "error", "message": f"APN is required - couldn't auto-detect from carrier {status['operator']}"}, 400
-            else:
-                logger.error("No APN provided and couldn't detect carrier")
-                return {"status": "error", "message": "APN is required - no carrier detected"}, 400
-
-        # Check prerequisites
-        if not CommandExecutor.safe_run_command("modprobe qmi_wwan"):
-            return {"status": "error", "message": "Failed to load qmi_wwan kernel module"}, 500
-
-        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
-            return {"status": "error", "message": "ModemManager is not running"}, 500
-
-        try:
-            # Wait for modem to be available
-            logger.info("Waiting for modem to be available...")
-            modem_index = None
-            for _ in range(30):  # Wait up to 60 seconds (2s per iteration)
-                result = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
-                if result:
-                    modem_index = result
-                    break
-                time.sleep(2)
-
-            if not modem_index:
-                return {"status": "error", "message": "No modem found after waiting"}, 404
-
-            logger.info(f"Modem found with index {modem_index}")
-
-            # Configure modem initial EPS bearer settings
-            logger.info(f"Configuring modem with APN: {apn}")
-            eps_cmd = f"mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=apn={apn}"
-            if not CommandExecutor.safe_run_command(eps_cmd):
-                return {"status": "error", "message": f"Failed to configure modem EPS settings for APN: {apn}"}, 500
-
-            # Connect modem to network
-            logger.info("Connecting modem to network...")
-            connect_cmd = f"mmcli -m {modem_index} --simple-connect=apn={apn},ip-type=ipv4v6"
-            connect_output = CommandExecutor.safe_run_command(connect_cmd)
-            if not connect_output:
-                return {"status": "error", "message": f"Failed to connect modem to network with APN: {apn}"}, 500
-
-            # Wait for modem to connect to network
-            logger.info("Waiting for modem to connect to network...")
-            fully_connected = False
-            network_connected = False
-            status = None
-
-            # First wait for network registration
-            for _ in range(30):  # Wait up to 30 seconds for network registration
-                status = LteManager.get_lte_status()
-                if status.get("network_registered") or status.get("network_connected"):
-                    network_connected = True
-                    logger.info("Modem registered to network, now waiting for IP address...")
-                    break
-                logger.info(f"Waiting for network registration... State: {status.get('state')}")
-                time.sleep(1)
-
-            if not network_connected:
-                return {"status": "error", "message": "Modem failed to register with the network within timeout period"}, 500
-
-            # Then wait for full connection with IP address
-            for _ in range(30):  # Wait up to another 30 seconds for full connection
-                status = LteManager.get_lte_status()
-                if status.get("fully_connected"):
-                    fully_connected = True
-                    logger.info(f"Modem fully connected with IP: {status.get('ip_address')}")
-                    break
-                logger.info(f"Waiting for IP address assignment... Connected: {status.get('connected')}")
-                time.sleep(1)
-
-            if not fully_connected:
-                logger.warning("Modem registered but failed to get IP address - will try to configure anyway")
-                # Continue anyway - we might be able to get the IP through other means
-
-            # Get bearer information
-            logger.info("Getting bearer information...")
-            bearer_path = status.get("bearer_path")
-            if not bearer_path:
-                return {"status": "error", "message": "Failed to get bearer path"}, 500
-
-            # Get interface details
-            interface = status.get("interface")
-            address = status.get("ip_address")
-            gateway = status.get("gateway")
-            dns_servers = status.get("dns", [])
-
-            if not interface:
-                logger.warning("Interface not found in bearer - using fallback detection")
-                # Fallback: Try to detect network interface tied to the modem
-                net_info = CommandExecutor.safe_run_command("ip a | grep -B 1 qmi_wwan | grep -o 'ww[^:]*'")
-                if net_info:
-                    interface = net_info.strip()
-                    logger.info(f"Fallback detected interface: {interface}")
-                else:
-                    return {"status": "error", "message": "Failed to identify network interface"}, 500
-
-            if not address or not gateway:
-                return {"status": "error", "message": "Failed to extract IP/gateway information from bearer"}, 500
-
-            # Configure the network interface
-            logger.info(f"Configuring interface {interface}...")
-            # Default prefix length if not specified
-            prefix = "24"
-
-            # Flush existing IP and routes
-            if not CommandExecutor.safe_run_command(f"ip addr flush dev {interface}"):
-                logger.warning(f"Failed to flush IP address on {interface}")
-
-            if not CommandExecutor.safe_run_command(f"ip route flush dev {interface}"):
-                logger.warning(f"Failed to flush routes on {interface}")
-
-            # Configure interface
-            if not CommandExecutor.safe_run_command(f"ip link set {interface} up"):
-                return {"status": "error", "message": f"Failed to bring up interface {interface}"}, 500
-
-            if not CommandExecutor.safe_run_command(f"ip addr add {address}/{prefix} dev {interface}"):
-                return {"status": "error", "message": f"Failed to add IP address {address} to interface {interface}"}, 500
-
-            # Configure routing - use a high metric to avoid conflicts
-            CommandExecutor.safe_run_command(f"ip link set dev {interface} arp off")
-
-            if not CommandExecutor.safe_run_command(f"ip route add default via {gateway} dev {interface} metric 4000"):
-                return {"status": "error", "message": f"Failed to add default route via {gateway}"}, 500
-
-            # Configure DNS if available
-            if dns_servers and len(dns_servers) > 0:
-                for dns in dns_servers:
-                    if dns and dns.strip():
-                        logger.info(f"Adding DNS server: {dns}")
-                        CommandExecutor.safe_run_command(f"sh -c \"echo 'nameserver {dns.strip()}' >> /etc/resolv.conf\"")
-
-            # Test connection
-            logger.info("Testing connection...")
-            ping_success = CommandExecutor.safe_run_command(f"ping -4 -c 1 -I {interface} 8.8.8.8", timeout=5)
-            if not ping_success:
-                logger.warning("Ping test failed, but connection might still be working")
-
-            return {
-                "status": "success",
-                "message": "LTE modem connected",
-                "interface": interface,
-                "ipAddress": address,
-                "gateway": gateway,
-                "dns": dns_servers,
-                "apn": apn,
-                "pingTest": bool(ping_success)
-            }
-        except Exception as e:
-            logger.error(f"Error connecting to LTE: {e}")
-            return {"status": "error", "message": str(e)}, 500
 
 
     @staticmethod
     def disconnect_lte():
-        """Disconnect LTE modem"""
-        # Check if we're on a Jetson platform
-        is_jetson = os.path.exists('/etc/nv_tegra_release')
-
-        if not is_jetson:
-            return {"status": "error", "message": "LTE functionality only available on Jetson platform"}, 400
-
-        # Check if ModemManager is installed and running
-        if not CommandExecutor.safe_run_command("systemctl is-active --quiet ModemManager"):
-            return {"status": "error", "message": "ModemManager is not running"}, 500
-
-        # Get modem index
-        modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
-        if not modem_index:
-            return {"status": "error", "message": "No modem found"}, 404
-
-        try:
-            # Get current status to identify the interface
-            status = LteManager.get_lte_status()
-            interface = status.get("interface")
-
-            # Log extra information for debugging
-            logger.info(f"Disconnecting LTE modem. Current status: connected={status.get('connected')}, interface={interface}")
-
-            # Disconnect the modem - try both methods for better compatibility
-            logger.info(f"Running disconnect command for modem {modem_index}...")
-            disconnect_result = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --simple-disconnect")
-
-            if not disconnect_result:
-                logger.warning("simple-disconnect failed, trying alternative method")
-                # Try using bearers directly as a fallback
-                bearer_index = status.get('bearer_index')
-                if bearer_index:
-                    CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --bearer={bearer_index} --delete")
-
-            # Check for any remaining interfaces to clean up
-            if not interface:
-                # Try to find interfaces by pattern if not in status
-                qmi_interfaces = CommandExecutor.safe_run_command("ip a | grep -B 1 qmi_wwan | grep -o 'ww[^:]*'")
-                if qmi_interfaces:
-                    interface = qmi_interfaces.strip().split('\n')[0].strip()
-                    logger.info(f"Found interface by pattern: {interface}")
-
-            # Clean up the interface if found
-            if interface:
-                logger.info(f"Cleaning up interface {interface}...")
-                CommandExecutor.safe_run_command(f"ip addr flush dev {interface}")
-                CommandExecutor.safe_run_command(f"ip route flush dev {interface}")
-                CommandExecutor.safe_run_command(f"ip link set {interface} down")
-            else:
-                logger.warning("No interface found to clean up")
-
-            # Give time for ModemManager to process the disconnect
-            time.sleep(1)
-
-            # Verify disconnection
-            verification_status = LteManager.get_lte_status()
-            if verification_status.get("connected"):
-                logger.warning("Modem still reports as connected after disconnect attempt")
-                return {"status": "warning", "message": "Disconnect command completed but modem still reports as connected"}
-
-            return {"status": "success", "message": "Disconnected from LTE network"}
-        except Exception as e:
-            logger.error(f"Error disconnecting from LTE: {e}")
-            return {"status": "error", "message": str(e)}, 500
+        # TODO: disconnect modem from network
 
 
 @app.route('/network/lte/connect', methods=['POST'])
