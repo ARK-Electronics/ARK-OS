@@ -807,7 +807,7 @@ def api_get_lte_status():
 
 class LteManager:
     @staticmethod
-    def connect_lte(apn=None, request_data=None):
+    def connect_lte(requested_apn=None):
         """Connect to LTE network with the specified or detected APN
         
         This method handles the connection process:
@@ -837,39 +837,19 @@ class LteManager:
                 
                 return {"success": True, "message": "Already connected", "status": current_status}, 200
             
-            # Determine what APN to use
-            used_apn = None
-            if request_data and 'apn' in request_data and request_data['apn']:
-                used_apn = request_data['apn']
-            elif apn:
-                used_apn = apn
-            elif current_status.get("defaultApn"):
-                used_apn = current_status.get("defaultApn")
-            else:
-                # Default APNs based on detected carrier
-                carrier = current_status.get("carrier", "").lower()
-                if 't-mobile' in carrier:
-                    used_apn = "fast.t-mobile.com"
-                elif 'att' in carrier or 'at&t' in carrier:
-                    used_apn = "broadband"
-                elif 'verizon' in carrier:
-                    used_apn = "vzwinternet"
-                else:
-                    used_apn = "internet"  # Generic fallback
-            
-            logger.info(f"Using APN: {used_apn}")
+            logger.info(f"Using APN: {requested_apn}")
             
             # Check if initial bearer APN is set
             has_initial_apn = False
             for line in CommandExecutor.safe_run_command(f"mmcli -m {modem_index}").split('\n'):
-                if 'initial bearer apn:' in line and used_apn in line:
+                if 'initial bearer apn:' in line and requested_apn in line:
                     has_initial_apn = True
                     break
             
             # Set initial bearer APN if not set or different
             if not has_initial_apn:
-                logger.info(f"Setting initial bearer APN to {used_apn}")
-                initial_apn_cmd = f"sudo mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=\"apn={used_apn}\""
+                logger.info(f"Setting initial bearer APN to {requested_apn}")
+                initial_apn_cmd = f"sudo mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=\"apn={requested_apn}\""
                 initial_result = CommandExecutor.safe_run_command(initial_apn_cmd)
                 if not initial_result and 'successfully' not in str(initial_result).lower():
                     return {"success": False, "message": f"Failed to set initial bearer APN: {initial_result}"}, 500
@@ -878,7 +858,7 @@ class LteManager:
             if current_state in ['registered', 'searching']:
                 logger.info(f"Modem in {current_state} state, performing simple-connect")
                 # Connect with the specified APN
-                connect_cmd = f"sudo mmcli -m {modem_index} --simple-connect=\"apn={used_apn},ip-type=ipv4v6\""
+                connect_cmd = f"sudo mmcli -m {modem_index} --simple-connect=\"apn={requested_apn},ip-type=ipv4v6\""
                 connect_result = CommandExecutor.safe_run_command(connect_cmd)
                 
                 # Wait for connection to establish
