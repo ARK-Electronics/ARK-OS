@@ -1019,23 +1019,45 @@ class LteManager:
                 # APN info
                 elif 'initial bearer apn:' in line:
                     status_data["apn"] = line.split('initial bearer apn:')[1].strip()
-                # Detect carrier from operator name
-                if 'operator name:' in line:
-                    operator = line.split('operator name:')[1].strip().lower()
-                    if 't-mobile' in operator:
-                        status_data["carrier"] = "t-mobile"
-                        status_data["defaultApn"] = "fast.t-mobile.com"
-                    elif 'att' in operator or 'at&t' in operator:
-                        status_data["carrier"] = "att"
-                        status_data["defaultApn"] = "broadband"
-                    elif 'verizon' in operator:
-                        status_data["carrier"] = "verizon"
-                        status_data["defaultApn"] = "vzwinternet"
-                    else:
-                        status_data["carrier"] = operator
-                        # If no specific carrier is detected, use the current APN or a default
-                        if not status_data["apn"]:
-                            status_data["defaultApn"] = "internet"
+
+                # Extract primary SIM path so we can query it directly
+                elif 'primary sim path:' in line:
+                    sim_path = line.split('primary sim path:')[1].strip()
+                    sim_match = re.search(r'/org/freedesktop/ModemManager1/SIM/(\d+)', sim_path)
+                    if sim_match:
+                        sim_index = sim_match.group(1)
+
+                        # Get detailed SIM information
+                        sim_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --sim {sim_index}")
+                        if sim_info:
+                            # Extract carrier information from SIM (most reliable source)
+                            sim_operator_name = None
+                            sim_operator_id = None
+
+                            for sim_line in sim_info.split('\n'):
+                                sim_line = sim_line.strip()
+                                if 'operator name:' in sim_line:
+                                    sim_operator_name = sim_line.split('operator name:')[1].strip()
+                                    status_data["simOperatorName"] = sim_operator_name
+                                elif 'operator id:' in sim_line:
+                                    sim_operator_id = sim_line.split('operator id:')[1].strip()
+                                    status_data["simOperatorId"] = sim_operator_id
+
+                            # Use SIM operator name to determine carrier (more reliable than modem operator)
+                            if sim_operator_name:
+                                sim_operator_lower = sim_operator_name.lower()
+                                if 't-mobile' in sim_operator_lower:
+                                    status_data["carrier"] = "t-mobile"
+                                    status_data["defaultApn"] = "fast.t-mobile.com"
+                                elif 'att' in sim_operator_lower or 'at&t' in sim_operator_lower:
+                                    status_data["carrier"] = "att"
+                                    status_data["defaultApn"] = "broadband"
+                                elif 'verizon' in sim_operator_lower:
+                                    status_data["carrier"] = "verizon"
+                                    status_data["defaultApn"] = "vzwinternet"
+                                else:
+                                    status_data["carrier"] = sim_operator_name
+                                    # If no specific carrier is detected, fall back to modem operator
 
             # Set the status based on state
             if status_data["state"] == "connected":
