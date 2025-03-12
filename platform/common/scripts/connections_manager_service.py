@@ -1009,7 +1009,7 @@ class LteManager:
                     if 'connected' in state_string:
                         # We have to do this because the 'connected' string has color codes
                         status_data["state"] = 'connected'
-                    else
+                    else:
                         status_data["state"] = state_string
 
                 # APN info
