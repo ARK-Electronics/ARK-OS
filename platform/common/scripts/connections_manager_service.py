@@ -1151,7 +1151,20 @@ class LteManager:
 def api_connect_lte():
     """Connect to LTE network with specified APN (Jetson platform only)"""
     logger.info("POST /network/lte/connect called")
-    result, status_code = LteManager.connect_lte(request_data=request.json)
+
+    # Log the request data for debugging
+    if request.json:
+        logger.info(f"Request data: {request.json}")
+        # Extract APN from request if provided
+        apn = request.json.get('apn')
+        if apn:
+            logger.info(f"APN provided in request: {apn}")
+    else:
+        logger.info("No request data provided")
+        apn = None
+
+    # Pass both the APN and full request data to the connect_lte function
+    result, status_code = LteManager.connect_lte(requested_apn=apn)
     
     if isinstance(status_code, int):
         return jsonify(result), status_code
