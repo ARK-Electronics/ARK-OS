@@ -1005,7 +1005,13 @@ class LteManager:
                 # |            power state: on
                 # |   packet service state: attached
                 elif '  state:' in line:
-                    status_data["state"] = line.split('state:')[1].strip()
+                    state_string = line.split('state:')[1].strip()
+                    if 'connected' in state_string:
+                        # We have to do this because the 'connected' string has color codes
+                        status_data["state"] = 'connected'
+                    else
+                        status_data["state"] = state_string
+
                 # APN info
                 elif 'initial bearer apn:' in line:
                     status_data["apn"] = line.split('initial bearer apn:')[1].strip()
