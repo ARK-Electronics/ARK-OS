@@ -872,6 +872,10 @@ class LteManager:
                     logger.error(f"Simple-connect failed: {connect_result}")
                     return {"success": False, "message": "Failed to connect to network"}, 500
 
+                # TODO: we should instead spin and poll. Maybe poll every 3 seconds for a max of 30 seconds.
+                # Give it a few seconds to get an IP from the network
+                time.sleep(3)
+
                 new_status = LteManager.get_lte_status()
                 
                 logger.info(f"debug status: {new_status}")
@@ -1231,8 +1235,6 @@ class NetworkStatsCollector:
                             interface_type = 'wifi'
                         elif conn_type == '802-3-ethernet':
                             interface_type = 'ethernet'
-                        elif conn_type in ['gsm', 'cdma']:
-                            interface_type = 'lte'
                         else:
                             interface_type = 'other'
                             
