@@ -996,7 +996,11 @@ class LteManager:
                     signal_match = re.search(r'(\d+)%', line)
                     if signal_match:
                         status_data["signalStrength"] = int(signal_match.group(1))
-                elif 'state:' in line:
+                # NOTE: we use to spaces preceding 'state' to differentiate between the other strings with 'state'
+                # |                  state: registered
+                # |            power state: on
+                # |   packet service state: attached
+                elif '  state:' in line:
                     status_data["state"] = line.split('state:')[1].strip()
                 # APN info
                 elif 'initial bearer apn:' in line:
