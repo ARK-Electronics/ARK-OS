@@ -816,6 +816,9 @@ class LteManager:
         3. If modem is in 'registered' state, perform simple-connect
         4. Set up the network interface with the proper IP configuration
         """
+
+        logger.info(f"CONNECTING")
+
         try:
             # Get modem index
             modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
@@ -825,7 +828,9 @@ class LteManager:
             # Get current status to determine what actions to take
             current_status = LteManager.get_lte_status()
             current_state = current_status.get("state", "")
-            
+
+            logger.info(f"current_state: {current_state}")
+
             # If already connected, return current status
             if current_state == "connected":
                 # Check if interface needs to be configured
@@ -862,15 +867,12 @@ class LteManager:
                 # Connect with the specified APN
                 connect_cmd = f"sudo mmcli -m {modem_index} --simple-connect=\"apn={requested_apn},ip-type=ipv4v6\""
                 connect_result = CommandExecutor.safe_run_command(connect_cmd)
-                
-                # Wait for connection to establish
-                time.sleep(2)
-                
-                # Check if connection succeeded
-                new_status = LteManager.get_lte_status()
-                if new_status.get("state") != "connected":
+
+                if not 'successfully connected' in connect_result:
                     logger.error(f"Simple-connect failed: {connect_result}")
                     return {"success": False, "message": "Failed to connect to network"}, 500
+
+                new_status = LteManager.get_lte_status()
                 
                 # Set up network interface
                 LteManager._setup_network_interface(new_status)
