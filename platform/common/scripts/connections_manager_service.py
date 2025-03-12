@@ -843,6 +843,7 @@ class LteManager:
             has_initial_apn = False
             for line in CommandExecutor.safe_run_command(f"mmcli -m {modem_index}").split('\n'):
                 if 'initial bearer apn:' in line and requested_apn in line:
+                    logger.info(f"Initial bearer APN already set")
                     has_initial_apn = True
                     break
             
