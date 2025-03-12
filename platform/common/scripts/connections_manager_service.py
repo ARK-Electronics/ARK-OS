@@ -808,7 +808,152 @@ def api_get_lte_status():
 class LteManager:
     @staticmethod
     def connect_lte(apn=None, request_data=None):
-        # TODO:
+        """Connect to LTE network with the specified or detected APN
+        
+        This method handles the connection process:
+        1. Check if modem exists
+        2. Check for initial bearer APN, set if missing
+        3. If modem is in 'registered' state, perform simple-connect
+        4. Set up the network interface with the proper IP configuration
+        """
+        try:
+            # Get modem index
+            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
+            if not modem_index:
+                return {"success": False, "message": "No modem found"}, 404
+            
+            # Get current status to determine what actions to take
+            current_status = LteManager.get_lte_status()
+            current_state = current_status.get("state", "")
+            
+            # If already connected, return current status
+            if current_state == "connected":
+                # Check if interface needs to be configured
+                if not current_status.get("interfaceState") == "up" and current_status.get("interface"):
+                    LteManager._setup_network_interface(current_status)
+                    # Refresh status after interface setup
+                    updated_status = LteManager.get_lte_status()
+                    return {"success": True, "status": updated_status}, 200
+                
+                return {"success": True, "message": "Already connected", "status": current_status}, 200
+            
+            # Determine what APN to use
+            used_apn = None
+            if request_data and 'apn' in request_data and request_data['apn']:
+                used_apn = request_data['apn']
+            elif apn:
+                used_apn = apn
+            elif current_status.get("defaultApn"):
+                used_apn = current_status.get("defaultApn")
+            else:
+                # Default APNs based on detected carrier
+                carrier = current_status.get("carrier", "").lower()
+                if 't-mobile' in carrier:
+                    used_apn = "fast.t-mobile.com"
+                elif 'att' in carrier or 'at&t' in carrier:
+                    used_apn = "broadband"
+                elif 'verizon' in carrier:
+                    used_apn = "vzwinternet"
+                else:
+                    used_apn = "internet"  # Generic fallback
+            
+            logger.info(f"Using APN: {used_apn}")
+            
+            # Check if initial bearer APN is set
+            has_initial_apn = False
+            for line in CommandExecutor.safe_run_command(f"mmcli -m {modem_index}").split('\n'):
+                if 'initial bearer apn:' in line and used_apn in line:
+                    has_initial_apn = True
+                    break
+            
+            # Set initial bearer APN if not set or different
+            if not has_initial_apn:
+                logger.info(f"Setting initial bearer APN to {used_apn}")
+                initial_apn_cmd = f"sudo mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=\"apn={used_apn}\""
+                initial_result = CommandExecutor.safe_run_command(initial_apn_cmd)
+                if not initial_result and 'successfully' not in str(initial_result).lower():
+                    return {"success": False, "message": f"Failed to set initial bearer APN: {initial_result}"}, 500
+            
+            # If in 'registered' state, perform simple-connect
+            if current_state in ['registered', 'searching']:
+                logger.info(f"Modem in {current_state} state, performing simple-connect")
+                # Connect with the specified APN
+                connect_cmd = f"sudo mmcli -m {modem_index} --simple-connect=\"apn={used_apn},ip-type=ipv4v6\""
+                connect_result = CommandExecutor.safe_run_command(connect_cmd)
+                
+                # Wait for connection to establish
+                time.sleep(2)
+                
+                # Check if connection succeeded
+                new_status = LteManager.get_lte_status()
+                if new_status.get("state") != "connected":
+                    logger.error(f"Simple-connect failed: {connect_result}")
+                    return {"success": False, "message": "Failed to connect to network"}, 500
+                
+                # Set up network interface
+                LteManager._setup_network_interface(new_status)
+                
+                # Final status check
+                final_status = LteManager.get_lte_status()
+                return {"success": True, "status": final_status}, 200
+            else:
+                return {"success": False, "message": f"Modem not in registered state: {current_state}"}, 400
+                
+        except Exception as e:
+            logger.error(f"Error connecting to LTE: {e}")
+            return {"success": False, "message": str(e)}, 500
+    
+    @staticmethod
+    def _setup_network_interface(status_data):
+        """Set up the network interface using the bearer information
+        
+        This method configures the network interface with:
+        1. Sets the interface up
+        2. Assigns IP address
+        3. Disables ARP (required for LTE interfaces)
+        4. Sets MTU
+        5. Adds default route with very high metric
+        """
+        try:
+            interface = status_data.get("interface")
+            ip_address = status_data.get("ipAddress")
+            gateway = status_data.get("gateway")
+            prefix = status_data.get("prefix", "30")  # Default to /30 if not specified
+            mtu = status_data.get("mtu", "1500")  # Default to 1500 if not specified
+            
+            if not interface or not ip_address or not gateway:
+                logger.error("Missing interface information for setup")
+                return False
+            
+            # Set interface up
+            logger.info(f"Setting up interface {interface}")
+            CommandExecutor.safe_run_command(f"sudo ip link set {interface} up")
+            
+            # Set IP address and prefix
+            CommandExecutor.safe_run_command(f"sudo ip addr add {ip_address}/{prefix} dev {interface}")
+            
+            # Disable ARP
+            CommandExecutor.safe_run_command(f"sudo ip link set dev {interface} arp off")
+            
+            # Set MTU
+            CommandExecutor.safe_run_command(f"sudo ip link set {interface} mtu {mtu}")
+            
+            # Add default route with high metric
+            # Use very high metric to ensure other connection types are preferred
+            CommandExecutor.safe_run_command(f"sudo ip route add default via {gateway} dev {interface} metric 4294967295")
+            
+            # Check if everything succeeded
+            interface_status = CommandExecutor.safe_run_command(f"ip link show {interface} | grep 'state'")
+            if interface_status and "UP" in interface_status:
+                logger.info(f"Successfully configured interface {interface}")
+                return True
+            else:
+                logger.error(f"Failed to bring up interface {interface}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error setting up network interface: {e}")
+            return False
 
     @staticmethod
     def get_lte_status():
@@ -834,16 +979,170 @@ class LteManager:
             if not modem_info:
                 return {"status": "error", "message": "Failed to get modem information"}
 
+            # Parse modem info into structured data
+            status_data = {
+                "status": "unknown",
+                "model": "",
+                "manufacturer": "",
+                "imei": "",
+                "operatorName": "",
+                "signalStrength": 0,
+                "state": "",
+                "apn": "",
+                "interface": "",
+                "ipAddress": "",
+                "gateway": "",
+                "dns": []
+            }
 
+            # Extract basic modem info
+            for line in modem_info.split('\n'):
+                line = line.strip()
+                
+                # Hardware info
+                if 'manufacturer:' in line:
+                    status_data["manufacturer"] = line.split('manufacturer:')[1].strip()
+                elif 'model:' in line:
+                    status_data["model"] = line.split('model:')[1].strip()
+                # 3GPP info
+                elif 'imei:' in line:
+                    status_data["imei"] = line.split('imei:')[1].strip()
+                elif 'operator name:' in line:
+                    status_data["operatorName"] = line.split('operator name:')[1].strip()
+                # Status info
+                elif 'signal quality:' in line:
+                    signal_match = re.search(r'(\d+)%', line)
+                    if signal_match:
+                        status_data["signalStrength"] = int(signal_match.group(1))
+                elif 'state:' in line:
+                    status_data["state"] = line.split('state:')[1].strip()
+                # APN info
+                elif 'initial bearer apn:' in line:
+                    status_data["apn"] = line.split('initial bearer apn:')[1].strip()
+                # Detect carrier from operator name
+                if 'operator name:' in line:
+                    operator = line.split('operator name:')[1].strip().lower()
+                    if 't-mobile' in operator:
+                        status_data["carrier"] = "t-mobile"
+                        status_data["defaultApn"] = "fast.t-mobile.com"
+                    elif 'att' in operator or 'at&t' in operator:
+                        status_data["carrier"] = "att"
+                        status_data["defaultApn"] = "broadband"
+                    elif 'verizon' in operator:
+                        status_data["carrier"] = "verizon"
+                        status_data["defaultApn"] = "vzwinternet"
+                    else:
+                        status_data["carrier"] = operator
+                        # If no specific carrier is detected, use the current APN or a default
+                        if not status_data["apn"]:
+                            status_data["defaultApn"] = "internet"
 
-            # TODO:
+            # Set the status based on state
+            if status_data["state"] == "connected":
+                status_data["status"] = "connected"
+            elif status_data["state"] == "registered":
+                status_data["status"] = "registered"
+            elif status_data["state"] == "searching":
+                status_data["status"] = "searching"
+            elif status_data["state"] == "disabled":
+                status_data["status"] = "disabled"
+            else:
+                status_data["status"] = "not_ready"
 
+            # Check for bearer information if connected
+            if status_data["state"] == "connected":
+                bearer_path = None
+                # Look for bearer path in modem info
+                for line in modem_info.split('\n'):
+                    if 'Bearer' in line and 'paths:' in line:
+                        bearer_match = re.search(r'/org/freedesktop/ModemManager1/Bearer/(\d+)', line)
+                        if bearer_match:
+                            bearer_index = bearer_match.group(1)
+                            bearer_path = f"/org/freedesktop/ModemManager1/Bearer/{bearer_index}"
+                            break
+                
+                # Get bearer details if available
+                if bearer_path:
+                    bearer_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --bearer={bearer_index}")
+                    if bearer_info:
+                        # Extract interface and IP config
+                        for line in bearer_info.split('\n'):
+                            line = line.strip()
+                            if 'interface:' in line:
+                                status_data["interface"] = line.split('interface:')[1].strip()
+                            elif 'apn:' in line:
+                                status_data["apn"] = line.split('apn:')[1].strip()
+                            elif 'address:' in line and 'IPv4' in line:
+                                status_data["ipAddress"] = line.split('address:')[1].strip()
+                            elif 'gateway:' in line and 'IPv4' in line:
+                                status_data["gateway"] = line.split('gateway:')[1].strip()
+                            elif 'dns:' in line and 'IPv4' in line:
+                                dns_servers = line.split('dns:')[1].strip()
+                                status_data["dns"] = [s.strip() for s in dns_servers.split(',')]
+                            elif 'mtu:' in line:
+                                status_data["mtu"] = line.split('mtu:')[1].strip()
+                        
+                        # Check if the interface is up
+                        if status_data["interface"]:
+                            interface_status = CommandExecutor.safe_run_command(f"ip link show {status_data['interface']} | grep 'state'")
+                            if interface_status:
+                                if "UP" in interface_status:
+                                    status_data["interfaceState"] = "up"
+                                else:
+                                    status_data["interfaceState"] = "down"
+                            else:
+                                status_data["interfaceState"] = "unknown"
 
+            # Return the structured data
+            return status_data
 
+        except Exception as e:
+            logger.error(f"Error getting LTE status: {e}")
+            return {"status": "error", "message": str(e)}
 
     @staticmethod
     def disconnect_lte():
-        # TODO: disconnect modem from network
+        """Disconnect from LTE network by removing all bearers and resetting the interface"""
+        try:
+            # Get modem index
+            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
+            if not modem_index:
+                return {"success": False, "message": "No modem found"}, 404
+            
+            # Get current LTE status to find the interface name
+            current_status = LteManager.get_lte_status()
+            interface_name = current_status.get("interface", "")
+            
+            # Bring down the interface if it exists
+            if interface_name:
+                CommandExecutor.safe_run_command(f"sudo ip link set {interface_name} down")
+            
+            # Find and remove all bearers
+            modem_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index}")
+            if modem_info:
+                bearer_paths = []
+                for line in modem_info.split('\n'):
+                    if 'Bearer' in line and 'paths:' in line:
+                        # Extract all bearer paths
+                        paths = re.findall(r'/org/freedesktop/ModemManager1/Bearer/\d+', line)
+                        bearer_paths.extend(paths)
+                
+                # Remove each bearer
+                for path in bearer_paths:
+                    bearer_index = path.split('/')[-1]
+                    logger.info(f"Removing bearer {bearer_index}")
+                    CommandExecutor.safe_run_command(f"sudo mmcli -m {modem_index} --delete-bearer={bearer_index}")
+            
+            # Check status after disconnect
+            new_status = LteManager.get_lte_status()
+            if new_status.get("state") != "connected":
+                return {"success": True, "status": new_status}, 200
+            else:
+                return {"success": False, "message": "Failed to disconnect modem"}, 500
+                
+        except Exception as e:
+            logger.error(f"Error disconnecting LTE: {e}")
+            return {"success": False, "message": str(e)}, 500
 
 
 @app.route('/network/lte/connect', methods=['POST'])
