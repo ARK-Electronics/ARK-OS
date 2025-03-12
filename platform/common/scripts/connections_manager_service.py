@@ -856,6 +856,7 @@ class LteManager:
                     return {"success": False, "message": f"Failed to set initial bearer APN: {initial_result}"}, 500
             
             # If in 'registered' state, perform simple-connect
+            logger.info(f"Check current state: current_state: {current_state}")
             if current_state in ['registered', 'searching']:
                 logger.info(f"Modem in {current_state} state, performing simple-connect")
                 # Connect with the specified APN
