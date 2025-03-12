@@ -874,6 +874,8 @@ class LteManager:
 
                 new_status = LteManager.get_lte_status()
                 
+                logger.info(f"debug status: {new_status}")
+
                 # Set up network interface
                 LteManager._setup_network_interface(new_status)
                 
@@ -959,7 +961,7 @@ class LteManager:
 
         try:
             # Get complete modem information
-            modem_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index}")
+            modem_info = CommandExecutor.safe_run_command(f"TERM=dumb mmcli -m {modem_index}")
             if not modem_info:
                 return {"status": "error", "message": "Failed to get modem information"}
 
