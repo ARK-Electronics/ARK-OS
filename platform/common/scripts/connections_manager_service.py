@@ -816,9 +816,6 @@ class LteManager:
         3. If modem is in 'registered' state, perform simple-connect
         4. Set up the network interface with the proper IP configuration
         """
-
-        logger.info(f"CONNECTING")
-
         try:
             # Get modem index
             modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
@@ -872,16 +869,22 @@ class LteManager:
                     logger.error(f"Simple-connect failed: {connect_result}")
                     return {"success": False, "message": "Failed to connect to network"}, 500
 
-                # TODO: we should instead spin and poll. Maybe poll every 3 seconds for a max of 30 seconds.
+                # TODO: we should instead spin and poll. Maybe poll every 1 seconds for a max of 10 seconds.
                 # Give it a few seconds to get an IP from the network
-                time.sleep(3)
+                for i in range(10):
+                    new_status = LteManager.get_lte_status()
+                    ip_address = status_data.get("ipAddress")
 
-                new_status = LteManager.get_lte_status()
-                
-                logger.info(f"debug status: {new_status}")
+                    logger.info(f"Polling attempt {i+1}/10. Status: {new_status}")
+
+                    if ip_address:
+                        break;
 
                 # Set up network interface
                 LteManager._setup_network_interface(new_status)
+
+                # Give it just a sec
+                time.sleep(1)
                 
                 # Final status check
                 final_status = LteManager.get_lte_status()
