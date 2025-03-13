@@ -1411,7 +1411,6 @@ class StatsThread:
         Only runs while there are active clients connected to the websocket.
         """
         logger.info("Network stats collection thread started")
-        count = 0
 
         try:
             # Main collection loop - runs as long as there are active clients
@@ -1419,15 +1418,6 @@ class StatsThread:
                 try:
                     # Collect interface stats at the configured interval
                     stats = NetworkStatsProcessor.update_interface_stats()
-                    count += 1
-
-                    # Log occasionally to avoid filling logs
-                    if count <= 2 or count % 30 == 0:
-                        active_interfaces = list(stats.keys()) if stats else []
-                        logger.info(f"Stats update #{count}. Active interfaces: {active_interfaces}")
-                        
-                        # Log interfaces with significant traffic
-                        StatsThread._log_traffic_stats(stats)
 
                     # Send updates to clients at the report interval
                     StatsThread._send_stats_to_clients()
@@ -1446,23 +1436,6 @@ class StatsThread:
         finally:
             # Always mark the thread as inactive when exiting
             State.stats_thread_active = False
-
-    @staticmethod
-    def _log_traffic_stats(stats):
-        """Log information about interfaces with meaningful traffic"""
-        if not stats:
-            return
-            
-        # Only log interfaces with significant traffic (> 0.1 Mbps)
-        active_interfaces = []
-        for interface, data in stats.items():
-            rx_rate = data.get('rx_rate_mbps', 0)
-            tx_rate = data.get('tx_rate_mbps', 0)
-            if rx_rate > 0.1 or tx_rate > 0.1:
-                active_interfaces.append(f"{interface}: ↓{rx_rate:.2f}/↑{tx_rate:.2f} Mbps")
-
-        if active_interfaces:
-            logger.info(f"Interfaces with traffic: {', '.join(active_interfaces)}")
 
     @staticmethod
     def _send_stats_to_clients():
