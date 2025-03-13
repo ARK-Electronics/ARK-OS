@@ -873,7 +873,7 @@ class LteManager:
                 # Give it a few seconds to get an IP from the network
                 for i in range(10):
                     new_status = LteManager.get_lte_status()
-                    ip_address = status_data.get("ipAddress")
+                    ip_address = new_status.get("ipAddress")
 
                     logger.info(f"Polling attempt {i+1}/10. Status: {new_status}")
 
