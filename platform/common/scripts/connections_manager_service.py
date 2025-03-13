@@ -210,9 +210,6 @@ class NetworkConnectionManager:
             if mode_output:
                 connection['mode'] = mode_output
 
-        # For ethernet, signal strength is always 100%
-        if connection_type == 'ethernet':
-            connection['signalStrength'] = 100
 
 
 # API Routes
