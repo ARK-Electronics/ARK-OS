@@ -6,7 +6,6 @@ This service provides a REST API for managing network connections, including:
 - WiFi connections (both client and AP mode)
 - Ethernet connections
 - LTE/cellular connections (Jetson platform only)
-- Connection priorities and routing
 
 It's designed to work with NetworkManager and ModemManager.
 """
@@ -85,37 +84,9 @@ def create_app():
 # Create Flask app and SocketIO instance
 app, socketio = create_app()
 
-# Constants and configuration
-class Config:
-    # Default configuration
-    DEFAULT_CONFIG = {
-        "service": {
-            "port": 3001,
-            "host": "0.0.0.0",  # Listen on all interfaces for local development
-            "debug": False
-        },
-        "network": {
-            "priorities": [
-                {"type": "ethernet", "priority": 1},
-                {"type": "wifi", "priority": 2},
-                {"type": "lte", "priority": 3}
-            ],
-            "ap": {
-                "ssid": "ARK-AP",
-                "password": "arkosdrone"
-            }
-        }
-    }
-
-    # Data usage tracking constants
-    STATS_COLLECT_INTERVAL = 1.0  # Collect stats once per second
-    STATS_REPORT_INTERVAL = 2.0   # Report to client every 2 seconds
-    RATE_FILTER_ALPHA = 0.3       # Complementary filter coefficient (0-1, higher = more responsive)
-
 
 # Global state
 class State:
-    config = Config.DEFAULT_CONFIG.copy()
     interface_stats = {}  # Store the latest stats for each interface
     last_stats_update = 0
     last_stats_report = 0
@@ -125,36 +96,6 @@ class State:
     active_stats_clients = set()
     stats_thread_active = False
     stats_thread = None
-
-class ConfigManager:
-    @staticmethod
-    def load_config(config_path):
-        """Load configuration from TOML file"""
-        try:
-            if os.path.exists(config_path):
-                loaded_config = toml.load(config_path)
-                # Deep merge with default config
-                ConfigManager._deep_merge(State.config, loaded_config)
-                logger.info(f"Configuration loaded from {config_path}")
-            else:
-                logger.warning(f"Config file {config_path} not found, using default config")
-                # Create the config file with default values
-                os.makedirs(os.path.dirname(config_path), exist_ok=True)
-                with open(config_path, 'w') as f:
-                    toml.dump(State.config, f)
-                logger.info(f"Created default configuration file at {config_path}")
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-
-    @staticmethod
-    def _deep_merge(base, updates):
-        """Deep merge two dictionaries, updating base with values from updates"""
-        for key, value in updates.items():
-            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                ConfigManager._deep_merge(base[key], value)
-            else:
-                base[key] = value
-
 
 class CommandExecutor:
     @staticmethod
@@ -234,9 +175,6 @@ class NetworkConnectionManager:
                 if connection['status'] == 'active':
                     NetworkConnectionManager._enhance_active_connection(connection, device, mapped_type, name)
 
-                # Get connection priority
-                connection['priority'] = NetworkConnectionManager.get_connection_priority(connection)
-
                 connections.append(connection)
 
         return connections
@@ -275,71 +213,6 @@ class NetworkConnectionManager:
         # For ethernet, signal strength is always 100%
         if connection_type == 'ethernet':
             connection['signalStrength'] = 100
-
-    @staticmethod
-    def get_connection_priority(connection):
-        """Get the priority for a connection based on type"""
-        # Check routing table metrics for active connections
-        if connection['status'] == 'active' and connection['device']:
-            metric_output = CommandExecutor.safe_run_command(
-                f"ip route show default | grep {connection['device']} | grep -o 'metric [0-9]\\+' | awk '{{print $2}}'"
-            )
-            if metric_output and metric_output.isdigit():
-                return int(metric_output)
-
-        # Fall back to default priorities from config
-        for priority_entry in State.config['network']['priorities']:
-            if priority_entry['type'] == connection['type']:
-                return priority_entry['priority']
-
-        # Default to lowest priority (highest number)
-        return 99
-
-
-
-class RoutingManager:
-    @staticmethod
-    def get_routing_priorities():
-        """Get current routing priorities based on the routing table"""
-        connections = NetworkConnectionManager.get_network_connections()
-        active_connections = [conn for conn in connections if conn['status'] == 'active']
-
-        # Sort by priority (routing metric)
-        active_connections.sort(key=lambda x: x.get('priority', 99))
-
-        # Assign sequential priorities
-        for i, conn in enumerate(active_connections):
-            conn['priority'] = i + 1
-
-        return active_connections
-
-    @staticmethod
-    def update_routing_priorities(priorities):
-        """Update routing priorities by changing route metrics"""
-        success = True
-        for priority_item in priorities:
-            conn_id = priority_item.get('id')
-            priority = priority_item.get('priority')
-            
-            # Find connection details
-            connections = NetworkConnectionManager.get_network_connections()
-            connection = next((c for c in connections if c['id'] == conn_id), None)
-
-            if connection and connection['status'] == 'active' and connection['device']:
-                # Set route metric for this connection
-                metric = priority * 100  # Convert priority to metric (lower priority = lower metric = higher precedence)
-                cmd = f"nmcli connection modify {conn_id} ipv4.route-metric {metric} ipv6.route-metric {metric}"
-                if CommandExecutor.safe_run_command(cmd) is None:
-                    success = False
-
-                # Reactivate connection for changes to take effect
-                CommandExecutor.safe_run_command(f"nmcli connection down {conn_id}")
-                if CommandExecutor.safe_run_command(f"nmcli connection up {conn_id}") is None:
-                    success = False
-
-        return success
-
-
 
 
 # API Routes
@@ -639,21 +512,6 @@ def api_connect_wifi():
     logger.info("POST /network/wifi/connect called")
     return jsonify(WiFiNetworkManager.connect_wifi(request.json))
 
-
-@app.route('/network/routing', methods=['GET'])
-def api_get_routing():
-    logger.info("GET /network/routing called")
-    return jsonify(RoutingManager.get_routing_priorities())
-
-
-@app.route('/network/routing', methods=['PUT'])
-def api_update_routing():
-    logger.info("PUT /network/routing called")
-    data = request.json
-    priorities = data.get('priorities', [])
-    
-    success = RoutingManager.update_routing_priorities(priorities)
-    return jsonify({'success': success})
 
 
 class HostnameManager:
@@ -1364,7 +1222,7 @@ class NetworkStatsProcessor:
 
         # Check if enough time has passed since the last update
         if (State.interface_stats and
-            current_time - State.last_stats_update < Config.STATS_COLLECT_INTERVAL):
+            current_time - State.last_stats_update < 1.0):
             # Not enough time has passed since last update
             logger.debug("Skipping stats update - not enough time elapsed")
             return State.interface_stats
@@ -1414,10 +1272,9 @@ class NetworkStatsProcessor:
 
                 # Apply complementary filter for smooth rate transition
                 # new_value = α * current_measurement + (1-α) * previous_value
-                # Using Config.RATE_FILTER_ALPHA (default 0.3)
                 if 'rx_rate' in previous:
                     # Apply complementary filter
-                    alpha = Config.RATE_FILTER_ALPHA
+                    alpha = 1
                     rx_rate = (alpha * current_rx_rate) + ((1 - alpha) * previous['rx_rate'])
                     tx_rate = (alpha * current_tx_rate) + ((1 - alpha) * previous['tx_rate'])
                 else:
@@ -1486,29 +1343,16 @@ class NetworkReporting:
                     continue
 
                 # Create a simplified summary with just the essentials
-                # IMPORTANT: Using UI naming conventions for compatibility
                 interface_summary = {
+                    'name': stats.get('name', interface),
                     'interface': interface,
                     'type': stats.get('type', 'other'),
-                    'name': stats.get('name', interface),
-                    'ipAddress': stats.get('ip_address', ''),  # camelCase for UI
-                    'active': True,  # Only active interfaces are included
-                    'isUp': True,    # Legacy field for UI compatibility
-                    
-                    # Basic traffic stats
+                    'ipAddress': stats.get('ip_address', ''),
+                    'active': True,
                     'rxBytes': stats.get('rx_bytes', 0),
                     'txBytes': stats.get('tx_bytes', 0),
-                    'totalBytes': stats.get('rx_bytes', 0) + stats.get('tx_bytes', 0),
-                    
-                    # Rates in Mbps - CRITICAL: match exactly what the Vue component expects
-                    'dataDown': stats.get('rx_rate_mbps', 0),
-                    'dataUp': stats.get('tx_rate_mbps', 0),
-                    'current_rx_rate_mbps': stats.get('rx_rate_mbps', 0),  # Snake case version 
-                    'current_tx_rate_mbps': stats.get('tx_rate_mbps', 0),  # Snake case version
-                    'currentRxRateMbps': stats.get('rx_rate_mbps', 0),     # Camel case version
-                    'currentTxRateMbps': stats.get('tx_rate_mbps', 0),     # Camel case version
-                    
-                    # Error and packet counts with camelCase for UI
+                    'rxRateMbps': stats.get('rx_rate_mbps', 0),
+                    'txRateMbps': stats.get('tx_rate_mbps', 0),
                     'rxErrors': stats.get('rx_errors', 0),
                     'rxDropped': stats.get('rx_dropped', 0),
                     'txErrors': stats.get('tx_errors', 0),
@@ -1517,10 +1361,8 @@ class NetworkReporting:
                     'txPackets': stats.get('tx_packets', 0)
                 }
                 
-                # Add WiFi-specific fields if applicable
                 if stats.get('type') == 'wifi':
                     interface_summary['signalStrength'] = stats.get('signal_strength', 0)
-                    interface_summary['ssid'] = stats.get('ssid', '')
                 
                 summary.append(interface_summary)
 
@@ -1595,7 +1437,7 @@ class StatsThread:
                     # Continue the thread despite errors
 
                 # Sleep before next collection
-                time.sleep(Config.STATS_COLLECT_INTERVAL)
+                time.sleep(1.0)
 
             logger.info("Network stats collection thread stopping - no active clients")
 
@@ -1628,7 +1470,7 @@ class StatsThread:
         current_time = time.time()
 
         # Only send updates at the configured interval
-        if (current_time - State.last_stats_report >= Config.STATS_REPORT_INTERVAL) and State.active_stats_clients:
+        if (current_time - State.last_stats_report >= 2.0) and State.active_stats_clients:
             try:
                 # Generate the summary to send to clients
                 summary = NetworkReporting.get_interface_usage_summary()
@@ -1640,12 +1482,10 @@ class StatsThread:
                     
                 # Send update to all connected clients
                 if State.active_stats_clients:
-                    # Log data we're sending periodically
-                    if current_time - State.last_stats_update > 10:
-                        logger.info(f"Sending stats update: {summary}")
-                        
                     socketio.emit('network_stats_update', summary)
                     logger.info(f"Sent stats update to {len(State.active_stats_clients)} clients")
+                    pretty_json = json.dumps(summary, indent=2, sort_keys=True)
+                    logger.info(f"stats: \n{pretty_json}")
                     State.last_stats_report = current_time
             except Exception as e:
                 logger.error(f"Failed to send stats update: {e}")
@@ -1728,7 +1568,6 @@ class SocketEventHandler:
     @staticmethod
     @socketio.on_error()
     def handle_error(e):
-        """Handle Socket.IO errors"""
         try:
             client_id = request.sid if hasattr(request, 'sid') else "unknown"
             logger.error(f"SocketIO error for client {client_id}: {str(e)}")
@@ -1741,36 +1580,31 @@ class SocketEventHandler:
 
 
 class ApplicationRunner:
-    """Application entry point and initialization"""
-    
     @staticmethod
     def main():
-        """Main entry point for the application"""
-        # Parse command line arguments
         parser = argparse.ArgumentParser(description='ARK-OS Connections Manager Service')
         parser.add_argument(
-            '--config',
-            default='/etc/ark/network/connections_manager.toml',
-            help='Path to config file'
+            '--example',
+            default='/this/is/an/example',
+            help='Example arg'
         )
         args = parser.parse_args()
 
-        # Load configuration from file
-        ConfigManager.load_config(args.config)
-
-        # Start the server
         ApplicationRunner.start_server()
     
     @staticmethod
     def start_server():
-        """Start the Flask SocketIO server"""
-        logger.info(f"Starting SocketIO server on {State.config['service']['host']}:{State.config['service']['port']}")
+        host = '0.0.0.0'
+        port = '3001'
+        debug = False;
+
+        logger.info(f"Starting SocketIO server on {host}:{port}")
         try:
             socketio.run(
                 app,
-                host=State.config['service']['host'],
-                port=State.config['service']['port'],
-                debug=State.config['service']['debug'],
+                host=host,
+                port=port,
+                debug=debug,
                 allow_unsafe_werkzeug=True
             )
         except Exception as e:
@@ -1778,6 +1612,5 @@ class ApplicationRunner:
             logger.exception(e)
 
 
-# Entry point
 if __name__ == '__main__':
     ApplicationRunner.main()
