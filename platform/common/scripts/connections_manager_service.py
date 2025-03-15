@@ -84,7 +84,6 @@ def create_app():
 # Create Flask app and SocketIO instance
 app, socketio = create_app()
 
-
 # Global state
 class State:
     interface_stats = {}  # Store the latest stats for each interface
@@ -106,7 +105,7 @@ class CommandExecutor:
     def run_command(command, timeout=10):
         """Run a shell command and return its output"""
         try:
-            # logger.debug(f"Running command: {command}")
+            logger.debug(f"Running command: {command}")
             result = subprocess.run(
                 command,
                 shell=True,
@@ -142,7 +141,7 @@ class NetworkConnectionManager:
         connections = []
 
         # Get all NetworkManager connections
-        output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,DEVICE,UUID,STATE connection show")
+        output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,DEVICE,AUTOCONNECT,ACTIVE connection show")
         if not output:
             return connections
 
@@ -150,115 +149,70 @@ class NetworkConnectionManager:
         for line in output.strip().split('\n'):
             parts = line.split(':')
             if len(parts) >= 5:
-                name, conn_type, device, uuid, state = parts[:5]
-
-                # Only include WiFi and Ethernet connections
-                if conn_type not in ['802-11-wireless', '802-3-ethernet']:
-                    continue
-
-                # Map connection types
-                type_map = {
-                    '802-11-wireless': 'wifi',
-                    '802-3-ethernet': 'ethernet'
-                }
-                mapped_type = type_map.get(conn_type, conn_type)
+                name, type, device, autoconnect, active = parts[:5]
 
                 # Get connection details
                 connection = {
-                    'id': uuid,
                     'name': name,
-                    'type': mapped_type,
-                    'status': 'active' if state == 'activated' and device else 'inactive',
-                    'device': device if device else '',
-                    'signalQuality': 0,
-                    'dataRate': 0,
-                    'ipAddress': ''
+                    'type': type,
+                    'device': device,
+                    'autoconnect': autoconnect,
+                    'active': active,
+                    # Wifi only
+                    'ssid': '',
+                    'mode': '',
+                    'signal': '',
                 }
 
-                # Get additional details based on type
-                if connection['status'] == 'active':
-                    NetworkConnectionManager._enhance_active_connection(connection, device, mapped_type, name)
+                # If Wifi check mode and ssid
+                if type == '802-11-wireless':
+                    connection['mode'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode con show \"{name}\"")
+                    connection['ssid'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid con show \"{name}\"")
 
                 connections.append(connection)
 
+        # Get all Wifi signal strengths
+        wifi_signals = {}
+        output = CommandExecutor.safe_run_command("nmcli -t -f SSID,SIGNAL device wifi")
+        for line in output.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 2:
+                ssid, signal = parts[:2]
+                wifi_signals[ssid] = signal
+
+        # Add signal strength to all matching wifi connections
+        for connection in connections:
+            if connection['type'] == '802-11-wireless' and connection['ssid'] in wifi_signals:
+                connection['signal'] = wifi_signals[connection['ssid']]
+
         return connections
-    
-    @staticmethod
-    def _enhance_active_connection(connection, device, connection_type, name):
-        """Add additional details to an active connection"""
-        # Get IP address
-        ip_output = CommandExecutor.safe_run_command(
-            f"ip addr show {device} | grep 'inet ' | head -1 | awk '{{print $2}}' | cut -d/ -f1"
-        )
-        if ip_output:
-            connection['ipAddress'] = ip_output
-
-        # Get signal strength for WiFi
-        if connection_type == 'wifi':
-            signal_output = CommandExecutor.safe_run_command(
-                f"nmcli -f SIGNAL device wifi list ifname {device} | grep -v SIGNAL | head -1 | awk '{{print $1}}'"
-            )
-            if signal_output and signal_output.isdigit():
-                connection['signalQuality'] = int(signal_output)
-            
-            # Get SSID and additional WiFi details
-            ssid_output = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid connection show '{name}'")
-            if ssid_output:
-                connection['ssid'] = ssid_output
-            
-            # Get WiFi password (only include a boolean indicating if it exists, not the actual password)
-            password = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless-security.psk connection show '{name}' -s")
-            connection['hasPassword'] = bool(password)
-            
-            mode_output = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode connection show '{name}'")
-            if mode_output:
-                connection['mode'] = mode_output
-
 
 
 # API Routes
 @app.route('/network/connections', methods=['GET'])
 def api_get_connections():
-    """Get all network connections"""
     logger.info("GET /network/connections called")
     return jsonify(NetworkConnectionManager.get_network_connections())
 
 
-class ConnectionControl:
-    @staticmethod
-    def connect(connection_id):
-        """Connect to a network by UUID"""
-        result = CommandExecutor.safe_run_command(f"nmcli connection up uuid {connection_id}")
-        return {'success': result is not None}
-
-    @staticmethod
-    def disconnect(connection_id):
-        """Disconnect from a network by UUID"""
-        result = CommandExecutor.safe_run_command(f"nmcli connection down uuid {connection_id}")
-        return {'success': result is not None}
+@app.route('/network/connections/<name>/connect', methods=['POST'])
+def api_connect_to_network(name):
+    logger.info(f"POST /network/connections/{name}/connect called")
+    result = CommandExecutor.safe_run_command(f"nmcli connection up {name}")
+    return jsonify({'success': result is not None})
 
 
-@app.route('/network/connections/<id>/connect', methods=['POST'])
-def api_connect_to_network(id):
-    """Connect to a network by UUID"""
-    logger.info(f"POST /network/connections/{id}/connect called")
-    return jsonify(ConnectionControl.connect(id))
+@app.route('/network/connections/<name>/disconnect', methods=['POST'])
+def api_disconnect_from_network(name):
+    logger.info(f"POST /network/connections/{name}/disconnect called")
+    result = CommandExecutor.safe_run_command(f"nmcli connection down {name}")
+    return jsonify({'success': result is not None})
 
 
-@app.route('/network/connections/<id>/disconnect', methods=['POST'])
-def api_disconnect_from_network(id):
-    """Disconnect from a network by UUID"""
-    logger.info(f"POST /network/connections/{id}/disconnect called")
-    return jsonify(ConnectionControl.disconnect(id))
-
-
-
-
-@app.route('/network/connections/<id>', methods=['PUT'])
-def api_update_connection(id):
-    """Update a connection configuration (WiFi and Ethernet only)"""
-    logger.info(f"PUT /network/connections/{id} called")
-    return jsonify(ConnectionManager.update_connection(id, request.json))
+@app.route('/network/connections/<name>', methods=['PUT'])
+def api_update_connection(name):
+    logger.info(f"PUT /network/connections/{name} called")
+    return jsonify(ConnectionManager.update_connection(name, request.json))
 
 
 class ConnectionManager:
@@ -327,112 +281,134 @@ class ConnectionManager:
 
     @staticmethod
     def create_connection(data):
-        """Create a new connection (WiFi and Ethernet only)"""
-        connection_type = data.get('type')
 
-        if connection_type == 'wifi':
+        # name --> matches ssid or eth name
+        # type --> wifi / ethernet
+        # autoconnect
+
+        # Wifi only
+        # ssid
+        # password
+        # mode --> infrastructure / ap
+
+        # Ethernet only
+        # ipMethod --> auto / static
+        # ipAddress -> if static
+        # The other settings should be auto?
+
+        type = data.get('type')
+
+        if type == 'wifi':
             return ConnectionManager._create_wifi_connection(data)
-        elif connection_type == 'ethernet':
+
+        elif type == 'ethernet':
             return ConnectionManager._create_ethernet_connection(data)
         else:
             return {'success': False, 'error': 'Unsupported connection type'}
-    
+
+
     @staticmethod
     def _create_wifi_connection(data):
-        """Create a new WiFi connection"""
         ssid = data.get('ssid')
         password = data.get('password')
-        mode = data.get('mode', 'infrastructure')
-        
+        mode = data.get('mode')
+        autoconnect = data.get('autoconnect')
+
         if not ssid:
             return {'success': False, 'error': 'SSID is required'}
-        
+
+        if not password:
+            return {'success': False, 'error': 'Password is required'}
+
+        if not mode:
+            return {'success': False, 'error': 'Mode is required'}
+
+        # Check if connection with this name already exists
+        command = f"nmcli -t -f NAME con show"
+        result = CommandExecutor.safe_run_command(command)
+
+        if re.search(rf"^{re.escape(ssid)}$", result, re.MULTILINE):
+            return {'success': False, 'error': 'Connection already exists'}
+
+        command = None
+
+        # Create the connection
         if mode == 'infrastructure':
-            # Create infrastructure WiFi connection
-            cmd = f"nmcli device wifi connect '{ssid}'"
-            if password:
-                cmd += f" password '{password}'"
-                
-            result = CommandExecutor.safe_run_command(cmd)
-            if result is None:
-                return {'success': False, 'error': 'Failed to create WiFi connection'}
-                
-            # Get the UUID of the new connection
-            uuid_output = CommandExecutor.safe_run_command(f"nmcli -t -f NAME,UUID connection show | grep '{ssid}' | cut -d: -f2")
-            return {'success': True, 'id': uuid_output}
-            
+            command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect {autoconnect} ssid \"{ssid}\""
         elif mode == 'ap':
-            # Create AP WiFi connection
-            cmd = f"nmcli connection add type wifi ifname '*' con-name '{ssid}' autoconnect no ssid '{ssid}' 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
-            result = CommandExecutor.safe_run_command(cmd)
-            
-            if result is None:
-                return {'success': False, 'error': 'Failed to create AP connection'}
-            
-            # Set password
-            if password:
-                update_cmd = f"nmcli connection modify '{ssid}' wifi-sec.key-mgmt wpa-psk wifi-sec.psk '{password}' 802-11-wireless-security.pmf disable"
-                CommandExecutor.safe_run_command(update_cmd)
-            
-            # Get the UUID of the new connection
-            uuid_output = CommandExecutor.safe_run_command(f"nmcli -t -f NAME,UUID connection show | grep '{ssid}' | cut -d: -f2")
-            return {'success': True, 'id': uuid_output}
+            command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect no ssid \"{ssid}\" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
+
+        result = CommandExecutor.safe_run_command(command)
+
+        if result is None:
+            return {f"success': False, 'error': 'Failed to create {mode} connection"}
+
+        # Add password to connection
+        command = None
+        if mode == 'infrastructure':
+            command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
+        elif mode == 'ap':
+            command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\" 802-11-wireless-security.pmf disable"
+
+        result = CommandExecutor.safe_run_command(command)
+        if result is None:
+            return {'success': False, 'error': 'Failed to set password'}
+
+        # Query SSID to confirm creation
+        command = f"nmcli -g 802-11-wireless.ssid con show \"{ssid}\""
+        ssid = CommandExecutor.safe_run_command(command)
+
+        return {'success': True, 'ssid': ssid, 'mode': mode}
+
     
     @staticmethod
     def _create_ethernet_connection(data):
         """Create a new Ethernet connection"""
         name = data.get('name', 'Ethernet Connection')
-        ip_method = data.get('ipMethod', 'auto')
-        
+        ipMethod = data.get('ipMethod', 'auto')
+        ipAddress = data.get('ipAddress')
+        autoconnect = data.get('autoconnect', 'yes')
+
+        if not name:
+            return {'success': False, 'error': 'Name is required'}
+
+        if ipMethod == 'static' and not ipAddress:
+            return {'success': False, 'error': 'IP address required for static IP'}
+
+
+        # Check if connection with this name already exists
+        command = f"nmcli -t -f NAME con show"
+        result = CommandExecutor.safe_run_command(command)
+
+        if re.search(rf"^{re.escape(name)}$", result, re.MULTILINE):
+            return {'success': False, 'error': 'Connection already exists'}
+
         # Create base ethernet connection
-        cmd = f"nmcli connection add type ethernet con-name '{name}' ifname '*'"
+        cmd = f"nmcli connection add type ethernet con-name '{name}' ifname '*' autoconnect {autoconnect}"
         result = CommandExecutor.safe_run_command(cmd)
         
         if result is None:
             return {'success': False, 'error': 'Failed to create ethernet connection'}
         
-        # Configure IP settings
-        uuid_output = CommandExecutor.safe_run_command(f"nmcli -t -f NAME,UUID connection show | grep '{name}' | cut -d: -f2")
+        if ipMethod == 'manual' and ipAddress:
+            command = f"nmcli connection modify {name} ipv4.method manual ipv4.addresses {ipAddress}"
+            CommandExecutor.safe_run_command(command)
         
-        if ip_method == 'manual':
-            ip_address = data.get('ipAddress')
-            gateway = data.get('gateway')
-            prefix = data.get('prefix', 24)
-            dns1 = data.get('dns1')
-            dns2 = data.get('dns2')
-            
-            if ip_address and gateway:
-                update_cmd = f"nmcli connection modify uuid {uuid_output} ipv4.method manual ipv4.addresses '{ip_address}/{prefix}' ipv4.gateway '{gateway}'"
-                
-                if dns1:
-                    dns_servers = dns1
-                    if dns2:
-                        dns_servers += f",{dns2}"
-                    update_cmd += f" ipv4.dns '{dns_servers}'"
-                
-                CommandExecutor.safe_run_command(update_cmd)
-        
-        return {'success': True, 'id': uuid_output}
+        return {'success': True, 'name': name}
     
-    @staticmethod
-    def delete_connection(connection_id):
-        """Delete a connection by UUID"""
-        result = CommandExecutor.safe_run_command(f"nmcli connection delete uuid {connection_id}")
-        return {'success': result is not None}
 
 
 @app.route('/network/connections', methods=['POST'])
 def api_create_connection():
-    """Create a new connection (WiFi and Ethernet only)"""
     logger.info("POST /network/connections called")
     return jsonify(ConnectionManager.create_connection(request.json))
 
 
 @app.route('/network/connections/<id>', methods=['DELETE'])
 def api_delete_connection(id):
-    """Delete a connection by UUID (WiFi and Ethernet only)"""
     logger.info(f"DELETE /network/connections/{id} called")
-    return jsonify(ConnectionManager.delete_connection(id))
+    result = CommandExecutor.safe_run_command(f"nmcli connection delete uuid {connection_id}")
+    return jsonify({'success': result is not None})
 
 
 @app.route('/network/wifi/scan', methods=['GET'])
