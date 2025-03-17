@@ -153,6 +153,8 @@ class NetworkConnectionManager:
                     type = 'wifi'
                 elif type == '802-3-ethernet':
                     type = 'ethernet'
+                elif type == 'gsm':
+                    type = 'lte'
 
                 # Get connection details
                 connection = {
@@ -168,7 +170,7 @@ class NetworkConnectionManager:
                     'signal': '',
                 }
 
-                # If Wifi check mode and ssid
+                # Get interface specific properties
                 if type == 'wifi':
                     connection['mode'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode con show \"{name}\"")
                     connection['ssid'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid con show \"{name}\"")
@@ -176,6 +178,8 @@ class NetworkConnectionManager:
                 elif type == 'ethernet':
                     connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.addresses con show  \"{name}\"")
                     connection['ipMethod'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.method con show  \"{name}\"")
+                if type == 'lte':
+                    connection['apn'] = CommandExecutor.safe_run_command(f"nmcli -g gsm.apn con show \"{name}\"")
 
                 connections.append(connection)
 
@@ -192,6 +196,8 @@ class NetworkConnectionManager:
         for connection in connections:
             if connection['type'] == 'wifi' and connection['ssid'] in wifi_signals:
                 connection['signal'] = wifi_signals[connection['ssid']]
+            elif connection['type'] == 'lte':
+                connection['signal'] = LteManager.get_lte_status().get('signal', 0)
 
         return connections
 
@@ -206,6 +212,10 @@ class ConnectionManager:
 
         elif type == 'ethernet':
             return ConnectionManager._create_ethernet_connection(data)
+
+        elif type == 'lte':
+            return ConnectionManager._create_lte_connection(data)
+
         else:
             return {'success': False, 'error': 'Unsupported connection type'}
 
@@ -297,6 +307,41 @@ class ConnectionManager:
         return {'success': True, 'name': name}
 
     @staticmethod
+    def _create_lte_connection(data):
+        """Create a new LTE connection"""
+        name = data.get('name', 'LTE Connection')
+        autoconnect = data.get('autoconnect', 'yes')
+        apn = data.get('apn', '')
+
+        if not name:
+            return {'success': False, 'error': 'Name is required'}
+
+        # Check if any LTE connection already exists. We can only allow 1.
+        command = f"nmcli -t -f TYPE con show"
+        result = CommandExecutor.safe_run_command(command)
+
+        if result is None:
+            return {'success': False, 'error': 'Failed to query connections'}
+
+        if 'gsm' in result:
+            return {'success': False, 'error': 'An LTE connection already exists'}
+
+        # Create LTE connection
+
+        # nmcli c add type gsm ifname cdc-wdm1 con-name LteTest gsm.apn "fast.t-mobile.com"
+
+        cmd = f"nmcli connection add type gsm con-name \"{name}\" gsm.apn \"{apn}\" autoconnect {autoconnect}"
+        result = CommandExecutor.safe_run_command(cmd)
+
+        if result is None:
+            return {'success': False, 'error': 'Failed to create LTE connection'}
+
+        # TODO: do we need to modify any settings?
+
+        return {'success': True, 'name': name}
+
+
+    @staticmethod
     def update_connection(name, data):
         """Update a connection configuration (WiFi and Ethernet only)"""
         connection_type = data.get('type')
@@ -305,6 +350,8 @@ class ConnectionManager:
             return ConnectionManager._update_wifi_connection(name, data)
         elif connection_type == 'ethernet':
             return ConnectionManager._update_ethernet_connection(name, data)
+        elif connection_type == 'lte':
+            return ConnectionManager._update_lte_connection(name, data)
         else:
             return {'success': False, 'error': 'Unsupported connection type'}
 
@@ -354,6 +401,26 @@ class ConnectionManager:
         logger.info(f"Updating ethernet connection {name}")
         logger.info(f"ipMethod {ipMethod}")
         logger.info(f"ipAddress  {ipAddress}")
+        logger.info(f"autoconnect {autoconnect}")
+
+        result = CommandExecutor.safe_run_command(cmd)
+        return {'success': result is not None}
+
+    @staticmethod
+    def _update_lte_connection(name, data):
+        """Update an LTE connection with new settings"""
+        apn = data.get('apn')
+        autoconnect = data.get('autoconnect', 'yes')
+
+        cmd = f"nmcli connection modify \"{name}\""
+
+        if apn:
+            cmd += f" gsm.apn \"{apn}\""
+        if autoconnect:
+            cmd += f" autoconnect {autoconnect}"
+
+        logger.info(f"Updating LTE connection {name}")
+        logger.info(f"apn {apn}")
         logger.info(f"autoconnect {autoconnect}")
 
         result = CommandExecutor.safe_run_command(cmd)
@@ -635,269 +702,79 @@ class LteManager:
         return status
 
 
-    @staticmethod
-    def connect_lte(requestedApn=None):
-        """Connect to LTE network with the specified APN. If no APN is specified a suggested APN
-        based on the SIM operator will be used instead. Performs setting initial bearer settings if necessary
-        and performs the simple-connect via modem manager.
-        """
-        try:
-            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
-            if not modem_index:
-                return {"success": False, "message": "No modem found"}, 404
-            
-            # Get current status to determine what actions to take
-            status = LteManager.get_lte_status()
-            state = status.get("state", "")
-            initialApn = status.get("initialApn", "")
-            suggestedApn = status.get("suggestedApn", "")
-
-            # Possible states:
-            # failed --> check "failed reason:" and strip colors (it's red)
-            # enabled --> not registered, meaning it needs initial bearer settings (apn)
-            # registered --> has initial bearer, not connected to network though
-            # connected --> ready to setup wireless interface, strip colors (it's green)
-
-            # If already connected, return current status
-            if state == "connected":
-                # Check if interface needs to be configured
-                if not status.get("interfaceState") == "up" and status.get("interface"):
-                    LteManager._setup_network_interface(status)
-                    updated_status = LteManager.get_lte_status()
-                    return {"success": True, "status": updated_status}, 200
-                
-                logger.info("Already connected")
-                return {"success": True, "message": "Already connected", "status": status}, 200
-
-            logger.info(f"Initial APN: {initialApn}")
-            logger.info(f"Requested APN: {requestedApn}")
-
-            # Set initial bearer APN if not set or different
-            apn = suggestedApn
-            setInitialApn = False
-
-            if requestedApn is not None:
-                if requestedApn != initialApn:
-                    logger.info(f"Setting APN to requested value: {requestedApn}")
-                    apn = requestedApn
-                    setInitialApn = True
-            elif not initialApn:
-                logger.info(f"Setting APN to suggested value: {suggestedApn}")
-                apn = suggestedApn
-                setInitialApn = True
-            else:
-                logger.info(f"Setting APN to initial APN value: {initialApn}")
-                apn = initialApn
-
-            # Set the initial APN settings if necessary
-            if setInitialApn:
-                logger.info(f"Setting initial bearer APN to {apn}")
-                command = f"sudo mmcli -m {modem_index} --3gpp-set-initial-eps-bearer-settings=\"apn={apn}\""
-                result = CommandExecutor.safe_run_command(command)
-                if not result and 'successfully' not in str(result).lower():
-                    return {"success": False, "message": f"Failed to set initial bearer APN: {result}"}, 500
-            
-            # If in 'registered' state, perform simple-connect
-            if state == 'registered':
-                logger.info(f"Modem registered, performing simple-connect")
-                command = f"sudo mmcli -m {modem_index} --simple-connect=\"apn={apn},ip-type=ipv4v6\""
-                connect_result = CommandExecutor.safe_run_command(command)
-
-                if not 'successfully connected' in connect_result:
-                    logger.error(f"Simple-connect failed: {connect_result}")
-                    return {"success": False, "message": "Failed to connect to network"}, 500
-
-                logger.info("Modem successfully connected!")
-
-                for i in range(10):
-                    new_status = LteManager.get_lte_status()
-                    ip_address = new_status.get("ipAddress")
-
-                    if ip_address:
-                        break;
-
-                    logger.info(f"Polling attempt {i+1}/10")
-                    time.sleep(3)
-
-                if ip_address:
-                    logger.info(f"Setting up wireless interface")
-                    LteManager._setup_network_interface(new_status)
-                    # Give it just a sec
-                    time.sleep(1)
-                    status = LteManager.get_lte_status()
-                    return {"success": True, "status": status}, 200
-
-                else:
-                    logger.info(f"Failed to get IP address")
-                    status = LteManager.get_lte_status()
-                    return {"success": False, "message": "Failed to get IP address", "status": status}, 200
-
-            else:
-                # TODO: better errors? Warn about antennas?
-                return {"success": False, "message": f"Modem not in registered state: {state}"}, 400
-                
-        except Exception as e:
-            logger.error(f"Error connecting to LTE: {e}")
-            return {"success": False, "message": str(e)}, 500
-    
-    @staticmethod
-    def _setup_network_interface(status_data):
-        """Set up the network interface using the bearer information
-        
-        This method configures the network interface with:
-        1. Sets the interface up
-        2. Assigns IP address
-        3. Disables ARP (required for LTE interfaces)
-        4. Sets MTU
-        5. Adds default route with very high metric
-        """
-        try:
-            interface = status_data.get("interface")
-            ip_address = status_data.get("ipAddress")
-            gateway = status_data.get("gateway")
-            prefix = status_data.get("prefix", "30")  # Default to /30 if not specified
-            mtu = status_data.get("mtu", "1500")  # Default to 1500 if not specified
-            
-            if not interface or not ip_address or not gateway:
-                logger.error("Missing interface information for setup")
-                return False
-            
-            # Set interface up
-            logger.info(f"Setting up interface {interface}")
-            CommandExecutor.safe_run_command(f"sudo ip link set {interface} up")
-            
-            # Set IP address and prefix
-            CommandExecutor.safe_run_command(f"sudo ip addr add {ip_address}/{prefix} dev {interface}")
-            
-            # Disable ARP
-            CommandExecutor.safe_run_command(f"sudo ip link set dev {interface} arp off")
-            
-            # Set MTU
-            CommandExecutor.safe_run_command(f"sudo ip link set {interface} mtu {mtu}")
-            
-            # Add default route with high metric
-            # Use very high metric to ensure other connection types are preferred
-            CommandExecutor.safe_run_command(f"sudo ip route add default via {gateway} dev {interface} metric 4294967295")
-            
-            # Check if everything succeeded
-            interface_status = CommandExecutor.safe_run_command(f"ip link show {interface} | grep 'state'")
-            if interface_status and "UP" in interface_status:
-                logger.info(f"Successfully setup interface {interface}")
-                return True
-            else:
-                logger.error(f"Failed to bring up interface {interface}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error setting up network interface: {e}")
-            return False
-
-
-    @staticmethod
-    def disconnect_lte():
-        """Disconnect from LTE network by removing all bearers and resetting the interface"""
-        try:
-            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
-            if not modem_index:
-                return {"success": False, "message": "No modem found"}, 404
-            
-            status = LteManager.get_lte_status()
-            state = status.get("state", "")
-            interface = status.get("interface", "")
-
-            if state != "connected":
-                logger.info("Not connected")
-                return {"success": True, "status": status}, 200
-
-            # Bring down the interface if it exists
-            if interface:
-                logger.info(f"Cleaning up interface {interface}")
-                CommandExecutor.safe_run_command(f"sudo ip route flush dev {interface}")
-                CommandExecutor.safe_run_command(f"sudo ip addr flush dev {interface}")
-                CommandExecutor.safe_run_command(f"sudo ip link set {interface} down")
-            
-
-            logger.info("Attempting simple-disconnect")
-            simple_result = CommandExecutor.safe_run_command(f"sudo mmcli -m {modem_index} --simple-disconnect")
-
-
-            # Check if we're still connected
-            status = LteManager.get_lte_status()
-            state = status.get("state", "")
-
-            if state != "connected":
-                return {"success": True, "status": status}, 200
-            else:
-                logger.info("Failed to disconnect!")
-                return {"success": False, "status": status}, 200
-                
-        except Exception as e:
-            logger.error(f"Error disconnecting LTE: {e}")
-            return {"success": False, "message": str(e)}, 500
-
-
-
 
 class NetworkStatsCollector:
     @staticmethod
     def collect_interface_stats():
         """
         Collect network interface statistics from activated NetworkManager connections.
-        Simplified to focus only on active connections and basic stats.
+        Uses GENERAL.IP-IFACE property to identify the actual data interface for all connection types.
         Returns a dictionary of interface stats with rx/tx bytes, packets, errors, dropped.
         """
         stats = {}
         try:
             # Get all activated NetworkManager connections
-            nm_output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,DEVICE,UUID,STATE connection show")
+            nm_output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,STATE connection show")
             if not nm_output:
                 logger.warning("Failed to get NetworkManager connections")
                 return stats
 
             active_connections = {}
-            
-            # Parse NetworkManager connections and find active ones with devices
+
+            # Parse NetworkManager connections and find active ones
             for line in nm_output.strip().split('\n'):
                 parts = line.split(':')
-                if len(parts) >= 5:
-                    name, conn_type, device, uuid, state = parts[:5]
-                    
-                    # Only process active connections with devices
-                    if state == 'activated' and device and device != '--':
+                if len(parts) >= 3:
+                    name, conn_type, state = parts[:3]
+
+                    # Only process active connections
+                    if state == 'activated':
                         # Map connection types
                         if conn_type == '802-11-wireless':
                             interface_type = 'wifi'
                         elif conn_type == '802-3-ethernet':
                             interface_type = 'ethernet'
+                        elif conn_type == 'gsm':
+                            interface_type = 'lte'
                         else:
                             interface_type = 'other'
-                            
-                        active_connections[device] = {
-                            'name': name,
-                            'type': interface_type,
-                            'uuid': uuid
-                        }
-            
+
+                        # Get the actual IP interface for this connection
+                        ip_iface = CommandExecutor.safe_run_command(f"nmcli -g GENERAL.IP-IFACE connection show \"{name}\"")
+
+                        if ip_iface and ip_iface.strip():
+                            device = ip_iface.strip()
+                            logger.debug(f"Connection '{name}' using IP interface: {device}")
+
+                            # Store connection info keyed by the actual interface
+                            active_connections[device] = {
+                                'name': name,
+                                'type': interface_type
+                            }
+                        else:
+                            logger.warning(f"Could not find IP interface for connection '{name}'")
+
             logger.debug(f"Found {len(active_connections)} active NetworkManager connections")
-            
-            # Process each active connection
+
+            # Process each active connection to collect statistics
             for device, info in active_connections.items():
                 # Get detailed stats using 'ip -s link show' command
                 stats_output = CommandExecutor.safe_run_command(f"ip -s link show {device}")
                 if not stats_output:
                     logger.warning(f"Failed to get stats for device {device}")
                     continue
-                
+
                 # Parse the stats output
                 interface_stats = NetworkStatsCollector._parse_ip_stats(stats_output)
                 if not interface_stats:
+                    logger.warning(f"Failed to parse stats for device {device}")
                     continue
-                
+
                 # Get IP address
                 ip_output = CommandExecutor.safe_run_command(
                     f"ip addr show {device} | grep -w inet | head -1 | awk '{{print $2}}' | cut -d/ -f1"
                 )
-                
+
                 # Create the stats entry with simplified data
                 device_stats = {
                     'interface': device,
@@ -917,26 +794,36 @@ class NetworkStatsCollector:
                     'timestamp': time.time(),
                     'ip_address': ip_output if ip_output else ''
                 }
-                
-                # Add WiFi-specific information if applicable
+
+                # Add connection-type specific information
                 if info['type'] == 'wifi':
-                    # Get signal strength
+                    # Get signal strength for WiFi
                     signal_output = CommandExecutor.safe_run_command(
                         f"nmcli -f SIGNAL device wifi list ifname {device} | grep -v SIGNAL | head -1 | awk '{{print $1}}'"
                     )
                     if signal_output and signal_output.isdigit():
                         device_stats['signal_strength'] = int(signal_output)
-                    
-                    # Get SSID
+
+                    # Get SSID for WiFi
                     ssid_output = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid connection show '{info['name']}'")
                     if ssid_output:
                         device_stats['ssid'] = ssid_output
-                
+
+                elif info['type'] == 'lte':
+                    # For LTE connections, try to get signal strength from ModemManager
+                    # This is optional and only works if ModemManager is available
+                    signal_output = CommandExecutor.safe_run_command(
+                        "mmcli -m 0 | grep 'signal quality' | awk -F': ' '{print $2}' | awk '{print $1}' | tr -d '%'"
+                    )
+                    if signal_output and signal_output.isdigit():
+                        device_stats['signal_strength'] = int(signal_output)
+
                 stats[device] = device_stats
                 logger.debug(f"Collected stats for {device} ({info['name']}): RX={device_stats['rx_bytes']}, TX={device_stats['tx_bytes']}")
 
         except Exception as e:
             logger.error(f"Error collecting interface stats: {e}")
+            logger.exception(e)  # Log full traceback for debugging
 
         return stats
 
@@ -1392,42 +1279,6 @@ def api_get_lte_status():
     """Get LTE modem status (Jetson platform only)"""
     logger.info("GET /network/lte/status called")
     return jsonify(LteManager.get_lte_status())
-
-@app.route('/network/lte/connect', methods=['POST'])
-def api_connect_lte():
-    """Connect to LTE network with specified APN (Jetson platform only)"""
-    logger.info("POST /network/lte/connect called")
-
-    # Log the request data for debugging
-    if request.json:
-        logger.info(f"Request data: {request.json}")
-        # Extract APN from request if provided
-        apn = request.json.get('apn')
-        if apn:
-            logger.info(f"APN provided in request: {apn}")
-    else:
-        logger.info("No request data provided")
-        apn = None
-
-    # Pass both the APN and full request data to the connect_lte function
-    result, status_code = LteManager.connect_lte(requestedApn=apn)
-
-    if isinstance(status_code, int):
-        return jsonify(result), status_code
-    else:
-        return jsonify(result)
-
-@app.route('/network/lte/disconnect', methods=['POST'])
-def api_disconnect_lte():
-    """Disconnect from LTE network (Jetson platform only)"""
-    logger.info("POST /network/lte/disconnect called")
-    result, status_code = LteManager.disconnect_lte()
-
-    if isinstance(status_code, int):
-        return jsonify(result), status_code
-    else:
-        return jsonify(result)
-
 
 class ApplicationRunner:
     @staticmethod
