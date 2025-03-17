@@ -137,10 +137,8 @@ class CommandExecutor:
 class NetworkConnectionManager:
     @staticmethod
     def get_network_connections():
-        """Get all network connections managed by NetworkManager (WiFi and Ethernet only)"""
         connections = []
 
-        # Get all NetworkManager connections
         output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,DEVICE,AUTOCONNECT,ACTIVE connection show")
         if not output:
             return connections
@@ -151,6 +149,11 @@ class NetworkConnectionManager:
             if len(parts) >= 5:
                 name, type, device, autoconnect, active = parts[:5]
 
+                if type == '802-11-wireless':
+                    type = 'wifi'
+                elif type == '802-3-ethernet':
+                    type = 'ethernet'
+
                 # Get connection details
                 connection = {
                     'name': name,
@@ -158,6 +161,7 @@ class NetworkConnectionManager:
                     'device': device,
                     'autoconnect': autoconnect,
                     'active': active,
+                    'ipAddress': '',
                     # Wifi only
                     'ssid': '',
                     'mode': '',
@@ -165,9 +169,13 @@ class NetworkConnectionManager:
                 }
 
                 # If Wifi check mode and ssid
-                if type == '802-11-wireless':
+                if type == 'wifi':
                     connection['mode'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode con show \"{name}\"")
                     connection['ssid'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid con show \"{name}\"")
+                    connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g IP4.ADDRESS con show \"{name}\"")
+                elif type == 'ethernet':
+                    connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.addresses con show  \"{name}\"")
+                    connection['ipMethod'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.method con show  \"{name}\"")
 
                 connections.append(connection)
 
@@ -182,120 +190,15 @@ class NetworkConnectionManager:
 
         # Add signal strength to all matching wifi connections
         for connection in connections:
-            if connection['type'] == '802-11-wireless' and connection['ssid'] in wifi_signals:
+            if connection['type'] == 'wifi' and connection['ssid'] in wifi_signals:
                 connection['signal'] = wifi_signals[connection['ssid']]
 
         return connections
 
 
-# API Routes
-@app.route('/network/connections', methods=['GET'])
-def api_get_connections():
-    logger.info("GET /network/connections called")
-    return jsonify(NetworkConnectionManager.get_network_connections())
-
-
-@app.route('/network/connections/<name>/connect', methods=['POST'])
-def api_connect_to_network(name):
-    logger.info(f"POST /network/connections/{name}/connect called")
-    result = CommandExecutor.safe_run_command(f"nmcli connection up {name}")
-    return jsonify({'success': result is not None})
-
-
-@app.route('/network/connections/<name>/disconnect', methods=['POST'])
-def api_disconnect_from_network(name):
-    logger.info(f"POST /network/connections/{name}/disconnect called")
-    result = CommandExecutor.safe_run_command(f"nmcli connection down {name}")
-    return jsonify({'success': result is not None})
-
-
-@app.route('/network/connections/<name>', methods=['PUT'])
-def api_update_connection(name):
-    logger.info(f"PUT /network/connections/{name} called")
-    return jsonify(ConnectionManager.update_connection(name, request.json))
-
-
 class ConnectionManager:
     @staticmethod
-    def update_connection(connection_id, data):
-        """Update a connection configuration (WiFi and Ethernet only)"""
-        connection_type = data.get('type')
-
-        if connection_type == 'wifi':
-            return ConnectionManager._update_wifi_connection(connection_id, data)
-        elif connection_type == 'ethernet':
-            return ConnectionManager._update_ethernet_connection(connection_id, data)
-        else:
-            return {'success': False, 'error': 'Unsupported connection type'}
-    
-    @staticmethod
-    def _update_wifi_connection(connection_id, data):
-        """Update a WiFi connection configuration"""
-        ssid = data.get('ssid')
-        password = data.get('password')
-        mode = data.get('mode', 'infrastructure')
-        
-        # Build the command based on the connection mode
-        cmd = f"nmcli connection modify uuid {connection_id}"
-
-        if ssid:
-            cmd += f" 802-11-wireless.ssid '{ssid}'"
-        if password:
-            cmd += f" wifi-sec.psk '{password}'"
-
-        # Add mode-specific parameters
-        if mode == 'ap':
-            # AP mode might need additional parameters here
-            pass
-
-        result = CommandExecutor.safe_run_command(cmd)
-        return {'success': result is not None}
-    
-    @staticmethod
-    def _update_ethernet_connection(connection_id, data):
-        """Update an Ethernet connection configuration"""
-        ip_method = data.get('ipMethod', 'auto')
-        
-        cmd = f"nmcli connection modify uuid {connection_id}"
-        
-        if ip_method == 'auto':
-            cmd += " ipv4.method auto"
-        elif ip_method == 'manual':
-            ip_address = data.get('ipAddress')
-            gateway = data.get('gateway')
-            prefix = data.get('prefix', 24)
-            dns1 = data.get('dns1')
-            dns2 = data.get('dns2')
-            
-            if ip_address and gateway:
-                cmd += f" ipv4.method manual ipv4.addresses '{ip_address}/{prefix}' ipv4.gateway '{gateway}'"
-                
-                if dns1:
-                    dns_servers = dns1
-                    if dns2:
-                        dns_servers += f",{dns2}"
-                    cmd += f" ipv4.dns '{dns_servers}'"
-            
-        result = CommandExecutor.safe_run_command(cmd)
-        return {'success': result is not None}
-
-    @staticmethod
     def create_connection(data):
-
-        # name --> matches ssid or eth name
-        # type --> wifi / ethernet
-        # autoconnect
-
-        # Wifi only
-        # ssid
-        # password
-        # mode --> infrastructure / ap
-
-        # Ethernet only
-        # ipMethod --> auto / static
-        # ipAddress -> if static
-        # The other settings should be auto?
-
         type = data.get('type')
 
         if type == 'wifi':
@@ -306,19 +209,18 @@ class ConnectionManager:
         else:
             return {'success': False, 'error': 'Unsupported connection type'}
 
-
     @staticmethod
     def _create_wifi_connection(data):
         ssid = data.get('ssid')
         password = data.get('password')
         mode = data.get('mode')
-        autoconnect = data.get('autoconnect')
+        autoconnect = data.get('autoconnect', 'yes')
 
         if not ssid:
             return {'success': False, 'error': 'SSID is required'}
 
-        if not password:
-            return {'success': False, 'error': 'Password is required'}
+        if len(password) < 8 or len(password) > 63:
+            return {'success': False, 'error': 'Invalid password'}
 
         if not mode:
             return {'success': False, 'error': 'Mode is required'}
@@ -360,7 +262,6 @@ class ConnectionManager:
 
         return {'success': True, 'ssid': ssid, 'mode': mode}
 
-    
     @staticmethod
     def _create_ethernet_connection(data):
         """Create a new Ethernet connection"""
@@ -372,9 +273,8 @@ class ConnectionManager:
         if not name:
             return {'success': False, 'error': 'Name is required'}
 
-        if ipMethod == 'static' and not ipAddress:
+        if ipMethod == 'manual' and not ipAddress:
             return {'success': False, 'error': 'IP address required for static IP'}
-
 
         # Check if connection with this name already exists
         command = f"nmcli -t -f NAME con show"
@@ -384,46 +284,88 @@ class ConnectionManager:
             return {'success': False, 'error': 'Connection already exists'}
 
         # Create base ethernet connection
-        cmd = f"nmcli connection add type ethernet con-name '{name}' ifname '*' autoconnect {autoconnect}"
+        cmd = f"nmcli connection add type ethernet con-name \"{name}\" ifname '*' autoconnect {autoconnect}"
         result = CommandExecutor.safe_run_command(cmd)
         
         if result is None:
             return {'success': False, 'error': 'Failed to create ethernet connection'}
         
         if ipMethod == 'manual' and ipAddress:
-            command = f"nmcli connection modify {name} ipv4.method manual ipv4.addresses {ipAddress}"
+            command = f"nmcli connection modify \"{name}\" ipv4.method manual ipv4.addresses {ipAddress}"
             CommandExecutor.safe_run_command(command)
         
         return {'success': True, 'name': name}
-    
 
+    @staticmethod
+    def update_connection(name, data):
+        """Update a connection configuration (WiFi and Ethernet only)"""
+        connection_type = data.get('type')
 
-@app.route('/network/connections', methods=['POST'])
-def api_create_connection():
-    logger.info("POST /network/connections called")
-    return jsonify(ConnectionManager.create_connection(request.json))
+        if connection_type == 'wifi':
+            return ConnectionManager._update_wifi_connection(name, data)
+        elif connection_type == 'ethernet':
+            return ConnectionManager._update_ethernet_connection(name, data)
+        else:
+            return {'success': False, 'error': 'Unsupported connection type'}
 
+    @staticmethod
+    def _update_wifi_connection(name, data):
+        ssid = data.get('ssid')
+        password = data.get('password')
+        autoconnect = data.get('autoconnect', 'yes')
+        mode = data.get('mode', 'infrastructure')
 
-@app.route('/network/connections/<id>', methods=['DELETE'])
-def api_delete_connection(id):
-    logger.info(f"DELETE /network/connections/{id} called")
-    result = CommandExecutor.safe_run_command(f"nmcli connection delete uuid {connection_id}")
-    return jsonify({'success': result is not None})
+        cmd = f"nmcli connection modify \"{name}\""
 
+        if ssid:
+            cmd += f" 802-11-wireless.ssid \"{ssid}\""
+        if autoconnect:
+            cmd +=f" autoconnect {autoconnect}"
+        if password:
+            cmd += f" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
 
-@app.route('/network/wifi/scan', methods=['GET'])
-def api_scan_wifi():
-    logger.info("GET /network/wifi/scan called")
-    return jsonify(WiFiNetworkManager.scan_wifi_networks())
+        logger.info(f"Updating wifi connection {name}")
+        logger.info(f"ssid {ssid}")
+        logger.info(f"password {password}")
+        logger.info(f"mode {mode}")
+        logger.info(f"autoconnect {autoconnect}")
+        result = CommandExecutor.safe_run_command(cmd)
+        return {'success': result is not None}
+
+    @staticmethod
+    def _update_ethernet_connection(name, data):
+        ipMethod = data.get('ipMethod', 'auto')
+        autoconnect = data.get('autoconnect', 'yes')
+
+        cmd = f"nmcli connection modify \"{name}\""
+
+        if autoconnect:
+            cmd +=f" autoconnect {autoconnect}"
+        if ipMethod == 'auto':
+            cmd += " ipv4.method auto"
+        elif ipMethod == 'manual':
+            ipAddress = data.get('ipAddress')
+
+            if not ipAddress:
+                {'success': False, 'error': 'Mising IP address'}
+
+            cmd += f" ipv4.method manual ipv4.addresses {ipAddress}"
+
+        logger.info(f"Updating ethernet connection {name}")
+        logger.info(f"ipMethod {ipMethod}")
+        logger.info(f"ipAddress  {ipAddress}")
+        logger.info(f"autoconnect {autoconnect}")
+
+        result = CommandExecutor.safe_run_command(cmd)
+        return {'success': result is not None}
+
 
 
 class WiFiNetworkManager:
     @staticmethod
     def scan_wifi_networks():
-        """Scan for available WiFi networks"""
         networks = []
 
-        # Trigger a scan
         CommandExecutor.safe_run_command("nmcli device wifi rescan")
 
         # Wait for scan to complete
@@ -438,10 +380,6 @@ class WiFiNetworkManager:
         lines = output.strip().split('\n')
         if len(lines) <= 1:  # Only header
             return networks
-
-        # Get current connections for checking which ones are connected
-        current_connections = NetworkConnectionManager.get_network_connections()
-        connected_ssids = [conn.get('ssid', '') for conn in current_connections if conn['type'] == 'wifi' and conn['status'] == 'active']
 
         # Process each network
         for line in lines[1:]:  # Skip header row
@@ -458,37 +396,13 @@ class WiFiNetworkManager:
                 # Create network entry
                 network = {
                     'ssid': ssid,
-                    'signalQuality': int(signal) if signal.isdigit() else 0,
+                    'signal': int(signal) if signal.isdigit() else 0,
                     'secured': security != '--',
-                    'connected': ssid in connected_ssids
                 }
 
                 networks.append(network)
 
         return networks
-
-    @staticmethod
-    def connect_wifi(data):
-        """Connect to WiFi network with the given SSID and password"""
-        ssid = data.get('ssid')
-        password = data.get('password')
-
-        if not ssid:
-            return {'success': False, 'error': 'SSID is required'}
-
-        cmd = f"nmcli device wifi connect '{ssid}'"
-        if password:
-            cmd += f" password '{password}'"
-
-        result = CommandExecutor.safe_run_command(cmd)
-        return {'success': result is not None}
-
-
-@app.route('/network/wifi/connect', methods=['POST'])
-def api_connect_wifi():
-    logger.info("POST /network/wifi/connect called")
-    return jsonify(WiFiNetworkManager.connect_wifi(request.json))
-
 
 
 class HostnameManager:
@@ -515,32 +429,6 @@ class HostnameManager:
         return True, new_hostname
 
 
-@app.route('/network/hostname', methods=['GET'])
-def api_get_hostname():
-    logger.info("GET /network/hostname called")
-    hostname = HostnameManager.get_hostname()
-    return jsonify({"hostname": hostname})
-
-
-@app.route('/network/hostname', methods=['POST'])
-def api_set_hostname():
-    logger.info("POST /network/hostname called")
-    data = request.json
-    new_hostname = data.get('hostname')
-    
-    success, message = HostnameManager.set_hostname(new_hostname)
-    
-    if success:
-        return jsonify({"status": "success", "hostname": message})
-    else:
-        return jsonify({"status": "error", "message": message}), 400
-
-
-@app.route('/network/lte/status', methods=['GET'])
-def api_get_lte_status():
-    """Get LTE modem status (Jetson platform only)"""
-    logger.info("GET /network/lte/status called")
-    return jsonify(LteManager.get_lte_status())
 
 
 class LteManager:
@@ -568,7 +456,7 @@ class LteManager:
             "failedReason": "",       # If state is "failed"
 
             # Signal information
-            "signalQuality": 0,
+            "signal": 0,
 
             # Identity information
             "imei": "",
@@ -638,7 +526,7 @@ class LteManager:
                     signal_parts = line.split('signal quality:')[1].strip().split()
                     # Parse "60% (recent)" format
                     if signal_parts and '%' in signal_parts[0]:
-                        status["signalQuality"] = int(signal_parts[0].replace('%', ''))
+                        status["signal"] = int(signal_parts[0].replace('%', ''))
                 elif '  state:' in line:  # Using two spaces to differentiate from other state fields (power state:)
                     status["state"] = strip_ansi_colors(line.split('state:')[1].strip())
 
@@ -948,41 +836,6 @@ class LteManager:
             return {"success": False, "message": str(e)}, 500
 
 
-@app.route('/network/lte/connect', methods=['POST'])
-def api_connect_lte():
-    """Connect to LTE network with specified APN (Jetson platform only)"""
-    logger.info("POST /network/lte/connect called")
-
-    # Log the request data for debugging
-    if request.json:
-        logger.info(f"Request data: {request.json}")
-        # Extract APN from request if provided
-        apn = request.json.get('apn')
-        if apn:
-            logger.info(f"APN provided in request: {apn}")
-    else:
-        logger.info("No request data provided")
-        apn = None
-
-    # Pass both the APN and full request data to the connect_lte function
-    result, status_code = LteManager.connect_lte(requestedApn=apn)
-    
-    if isinstance(status_code, int):
-        return jsonify(result), status_code
-    else:
-        return jsonify(result)
-
-
-@app.route('/network/lte/disconnect', methods=['POST'])
-def api_disconnect_lte():
-    """Disconnect from LTE network (Jetson platform only)"""
-    logger.info("POST /network/lte/disconnect called")
-    result, status_code = LteManager.disconnect_lte()
-    
-    if isinstance(status_code, int):
-        return jsonify(result), status_code
-    else:
-        return jsonify(result)
 
 
 class NetworkStatsCollector:
@@ -1282,7 +1135,7 @@ class NetworkReporting:
                 }
                 
                 if stats.get('type') == 'wifi':
-                    interface_summary['signalQuality'] = stats.get('signal_strength', 0)
+                    interface_summary['signal'] = stats.get('signal_strength', 0)
                 
                 summary.append(interface_summary)
 
@@ -1374,9 +1227,9 @@ class StatsThread:
                 # Send update to all connected clients
                 if State.active_stats_clients:
                     socketio.emit('network_stats_update', summary)
-                    logger.info(f"Sent stats update to {len(State.active_stats_clients)} clients")
-                    pretty_json = json.dumps(summary, indent=2, sort_keys=True)
-                    logger.info(f"stats: \n{pretty_json}")
+                    # logger.info(f"Sent stats update to {len(State.active_stats_clients)} clients")
+                    # pretty_json = json.dumps(summary, indent=2, sort_keys=True)
+                    # logger.info(f"stats: \n{pretty_json}")
                     State.last_stats_report = current_time
             except Exception as e:
                 logger.error(f"Failed to send stats update: {e}")
@@ -1466,6 +1319,114 @@ class SocketEventHandler:
 
         # Return False to prevent the error from propagating
         return False
+
+
+# API Routes
+
+# Get connections
+@app.route('/network/connections', methods=['GET'])
+def api_get_connections():
+    logger.info("GET /network/connections called")
+    return jsonify(NetworkConnectionManager.get_network_connections())
+
+# Create connection
+@app.route('/network/connections', methods=['POST'])
+def api_create_connection():
+    logger.info("POST /network/connections called")
+    return jsonify(ConnectionManager.create_connection(request.json))
+
+# Delete connection
+@app.route('/network/connections/<name>', methods=['DELETE'])
+def api_delete_connection(name):
+    logger.info(f"DELETE /network/connections/{name} called")
+    result = CommandExecutor.safe_run_command(f"nmcli connection delete \"{name}\"")
+    return jsonify({'success': result is not None})
+
+# Update connection
+@app.route('/network/connections/<name>', methods=['PUT'])
+def api_update_connection(name):
+    logger.info(f"PUT /network/connections/{name} called")
+    return jsonify(ConnectionManager.update_connection(name, request.json))
+
+# Connect to connection
+@app.route('/network/connections/<name>/connect', methods=['POST'])
+def api_connect_to_network(name):
+    logger.info(f"POST /network/connections/{name}/connect called")
+    result = CommandExecutor.safe_run_command(f"nmcli con up \"{name}\"")
+    return jsonify({'success': result is not None})
+
+# Disconnect from connection
+@app.route('/network/connections/<name>/disconnect', methods=['POST'])
+def api_disconnect_from_network(name):
+    logger.info(f"POST /network/connections/{name}/disconnect called")
+    result = CommandExecutor.safe_run_command(f"nmcli con down \"{name}\"")
+    return jsonify({'success': result is not None})
+
+# Scan for wifi networks
+@app.route('/network/wifi/scan', methods=['GET'])
+def api_scan_wifi():
+    logger.info("GET /network/wifi/scan called")
+    return jsonify(WiFiNetworkManager.scan_wifi_networks())
+
+@app.route('/network/hostname', methods=['GET'])
+def api_get_hostname():
+    logger.info("GET /network/hostname called")
+    hostname = HostnameManager.get_hostname()
+    return jsonify({"hostname": hostname})
+
+@app.route('/network/hostname', methods=['POST'])
+def api_set_hostname():
+    logger.info("POST /network/hostname called")
+    data = request.json
+    new_hostname = data.get('hostname')
+
+    success, message = HostnameManager.set_hostname(new_hostname)
+
+    if success:
+        return jsonify({"status": "success", "hostname": message})
+    else:
+        return jsonify({"status": "error", "message": message}), 400
+
+@app.route('/network/lte/status', methods=['GET'])
+def api_get_lte_status():
+    """Get LTE modem status (Jetson platform only)"""
+    logger.info("GET /network/lte/status called")
+    return jsonify(LteManager.get_lte_status())
+
+@app.route('/network/lte/connect', methods=['POST'])
+def api_connect_lte():
+    """Connect to LTE network with specified APN (Jetson platform only)"""
+    logger.info("POST /network/lte/connect called")
+
+    # Log the request data for debugging
+    if request.json:
+        logger.info(f"Request data: {request.json}")
+        # Extract APN from request if provided
+        apn = request.json.get('apn')
+        if apn:
+            logger.info(f"APN provided in request: {apn}")
+    else:
+        logger.info("No request data provided")
+        apn = None
+
+    # Pass both the APN and full request data to the connect_lte function
+    result, status_code = LteManager.connect_lte(requestedApn=apn)
+
+    if isinstance(status_code, int):
+        return jsonify(result), status_code
+    else:
+        return jsonify(result)
+
+@app.route('/network/lte/disconnect', methods=['POST'])
+def api_disconnect_lte():
+    """Disconnect from LTE network (Jetson platform only)"""
+    logger.info("POST /network/lte/disconnect called")
+    result, status_code = LteManager.disconnect_lte()
+
+    if isinstance(status_code, int):
+        return jsonify(result), status_code
+    else:
+        return jsonify(result)
 
 
 class ApplicationRunner:
