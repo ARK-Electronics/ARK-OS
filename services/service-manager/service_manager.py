@@ -330,85 +330,85 @@ class ServiceManager:
             return {"status": "fail", "data": f"Error saving config file: {str(e)}"}
 
 # API endpoints
-@app.route('/service/statuses', methods=['GET'])
+@app.route('/api/service/statuses', methods=['GET'])
 def get_service_statuses():
     """API endpoint to get all service statuses"""
-    print("GET /service/statuses called")
+    print("GET /api/service/statuses called")
     return jsonify(ServiceManager.get_service_statuses())
 
-@app.route('/service/start', methods=['POST'])
+@app.route('/api/service/start', methods=['POST'])
 def start_service():
     """API endpoint to start a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /service/start called for {service_name}")
+    print(f"POST /api/service/start called for {service_name}")
     result = ServiceManager.start_service(service_name)
     return jsonify(result)
 
-@app.route('/service/stop', methods=['POST'])
+@app.route('/api/service/stop', methods=['POST'])
 def stop_service():
     """API endpoint to stop a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /service/stop called for {service_name}")
+    print(f"POST /api/service/stop called for {service_name}")
     result = ServiceManager.stop_service(service_name)
     return jsonify(result)
 
-@app.route('/service/restart', methods=['POST'])
+@app.route('/api/service/restart', methods=['POST'])
 def restart_service():
     """API endpoint to restart a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /service/restart called for {service_name}")
+    print(f"POST /api/service/restart called for {service_name}")
     result = ServiceManager.restart_service(service_name)
     return jsonify(result)
 
-@app.route('/service/enable', methods=['POST'])
+@app.route('/api/service/enable', methods=['POST'])
 def enable_service():
     """API endpoint to enable a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /service/enable called for {service_name}")
+    print(f"POST /api/service/enable called for {service_name}")
     result = ServiceManager.enable_service(service_name)
     return jsonify(result)
 
-@app.route('/service/disable', methods=['POST'])
+@app.route('/api/service/disable', methods=['POST'])
 def disable_service():
     """API endpoint to disable a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /service/disable called for {service_name}")
+    print(f"POST /api/service/disable called for {service_name}")
     result = ServiceManager.disable_service(service_name)
     return jsonify(result)
 
-@app.route('/service/logs', methods=['GET'])
+@app.route('/api/service/logs', methods=['GET'])
 def get_service_logs():
     """API endpoint to get service logs"""
     service_name = request.args.get('serviceName')
-    print(f"GET /service/logs called for {service_name}")
+    print(f"GET /api/service/logs called for {service_name}")
     result = ServiceManager.get_logs(service_name)
     return jsonify(result)
 
-@app.route('/service/config', methods=['GET'])
+@app.route('/api/service/config', methods=['GET'])
 def get_service_config():
     """API endpoint to get service configuration"""
     service_name = request.args.get('serviceName')
-    print(f"GET /service/config called for {service_name}")
+    print(f"GET /api/service/config called for {service_name}")
     result = ServiceManager.get_config(service_name)
     return jsonify(result)
 
-@app.route('/service/config', methods=['POST'])
+@app.route('/api/service/config', methods=['POST'])
 def save_service_config():
     """API endpoint to save service configuration"""
     service_name = request.args.get('serviceName')
     config_data = request.json.get('config')
-    print(f"POST /service/config called for {service_name}")
-    
+    print(f"POST /api/service/config called for {service_name}")
+
     if not config_data:
         return jsonify({"status": "fail", "data": "No configuration data provided"})
-    
+
     result = ServiceManager.save_config(service_name, config_data)
     return jsonify(result)
 
 if __name__ == '__main__':
     # Hardcoded settings
     host = '0.0.0.0'
-    port = 3000
-    
+    port = 3002
+
     print(f"Starting Service Manager on {host}:{port}")
     app.run(host=host, port=port)

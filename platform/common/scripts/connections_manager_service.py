@@ -53,6 +53,10 @@ def setup_logging():
     return logging.getLogger('connections_manager')
 
 
+# CLAUDE: I want to enable logging with a single variable. I want my logs to be clean except for warnings o
+# errors, since this will ultimately end up in journalctl logs. I want to be able to enable logging easily
+# when I run the script from the command line for development and testing.
+
 # Initialize logger
 logger = setup_logging()
 
