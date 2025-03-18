@@ -242,13 +242,11 @@ class ConnectionManager:
         if re.search(rf"^{re.escape(ssid)}$", result, re.MULTILINE):
             return {'success': False, 'error': 'Connection already exists'}
 
-        command = None
-
         # Create the connection
-        if mode == 'infrastructure':
-            command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect {autoconnect} ssid \"{ssid}\""
-        elif mode == 'ap':
-            command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect no ssid \"{ssid}\" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
+        command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect {autoconnect} ssid \"{ssid}\""
+
+        if mode == 'ap':
+            command += f" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
 
         result = CommandExecutor.safe_run_command(command)
 
@@ -256,11 +254,9 @@ class ConnectionManager:
             return {f"success': False, 'error': 'Failed to create {mode} connection"}
 
         # Add password to connection
-        command = None
-        if mode == 'infrastructure':
-            command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
-        elif mode == 'ap':
-            command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\" 802-11-wireless-security.pmf disable"
+        command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
+        if mode == 'ap':
+            command += f" 802-11-wireless-security.pmf disable connection.autoconnect-priority -1"
 
         result = CommandExecutor.safe_run_command(command)
         if result is None:
@@ -327,9 +323,6 @@ class ConnectionManager:
             return {'success': False, 'error': 'An LTE connection already exists'}
 
         # Create LTE connection
-
-        # nmcli c add type gsm ifname cdc-wdm1 con-name LteTest gsm.apn "fast.t-mobile.com"
-
         cmd = f"nmcli connection add type gsm con-name \"{name}\" gsm.apn \"{apn}\" autoconnect {autoconnect}"
         result = CommandExecutor.safe_run_command(cmd)
 
@@ -362,48 +355,36 @@ class ConnectionManager:
         autoconnect = data.get('autoconnect', 'yes')
         mode = data.get('mode', 'infrastructure')
 
-        cmd = f"nmcli connection modify \"{name}\""
+        command = f"nmcli connection modify \"{name}\""
 
         if ssid:
-            cmd += f" 802-11-wireless.ssid \"{ssid}\""
+            command += f" 802-11-wireless.ssid \"{ssid}\""
         if autoconnect:
-            cmd +=f" autoconnect {autoconnect}"
+            command +=f" autoconnect {autoconnect}"
         if password:
-            cmd += f" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
+            command += f" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
 
-        logger.info(f"Updating wifi connection {name}")
-        logger.info(f"ssid {ssid}")
-        logger.info(f"password {password}")
-        logger.info(f"mode {mode}")
-        logger.info(f"autoconnect {autoconnect}")
-        result = CommandExecutor.safe_run_command(cmd)
+        result = CommandExecutor.safe_run_command(command)
         return {'success': result is not None}
 
     @staticmethod
     def _update_ethernet_connection(name, data):
         ipMethod = data.get('ipMethod', 'auto')
         autoconnect = data.get('autoconnect', 'yes')
+        ipAddress = data.get('ipAddress')
 
-        cmd = f"nmcli connection modify \"{name}\""
+        command = f"nmcli connection modify \"{name}\""
 
         if autoconnect:
-            cmd +=f" autoconnect {autoconnect}"
+            command +=f" autoconnect {autoconnect}"
         if ipMethod == 'auto':
-            cmd += " ipv4.method auto"
-        elif ipMethod == 'manual':
-            ipAddress = data.get('ipAddress')
+            command += " ipv4.method auto"
+        elif ipMethod == 'manual' and ipAddress:
+            command += f" ipv4.method manual ipv4.addresses {ipAddress}"
+        else:
+            return {'success': False, 'error': 'Missing ipAddress'}
 
-            if not ipAddress:
-                {'success': False, 'error': 'Mising IP address'}
-
-            cmd += f" ipv4.method manual ipv4.addresses {ipAddress}"
-
-        logger.info(f"Updating ethernet connection {name}")
-        logger.info(f"ipMethod {ipMethod}")
-        logger.info(f"ipAddress  {ipAddress}")
-        logger.info(f"autoconnect {autoconnect}")
-
-        result = CommandExecutor.safe_run_command(cmd)
+        result = CommandExecutor.safe_run_command(command)
         return {'success': result is not None}
 
     @staticmethod
