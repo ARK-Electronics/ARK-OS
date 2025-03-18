@@ -1156,7 +1156,6 @@ class SocketEventHandler:
                 summary = NetworkReporting.get_interface_usage_summary()
                 if summary:
                     logger.info(f"Sending initial stats to client: {client_id}")
-                    logger.info(f"Initial data: {summary}")
                     socketio.emit('network_stats_update', summary, room=client_id)
                 else:
                     logger.warning("No network interfaces found for initial stats")
