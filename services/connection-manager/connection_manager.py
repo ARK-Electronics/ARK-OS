@@ -10,6 +10,9 @@ This service provides a REST API for managing network connections, including:
 It's designed to work with NetworkManager and ModemManager.
 """
 
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import sys
 import json
@@ -22,9 +25,9 @@ import toml
 import collections
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit, disconnect
 import psutil
 import argparse
-from flask_socketio import SocketIO, emit, disconnect
 from pathlib import Path
 
 
@@ -53,40 +56,16 @@ def setup_logging():
     return logging.getLogger('connections_manager')
 
 
-# CLAUDE: I want to enable logging with a single variable. I want my logs to be clean except for warnings o
-# errors, since this will ultimately end up in journalctl logs. I want to be able to enable logging easily
-# when I run the script from the command line for development and testing.
+# pip install eventlet
 
 # Initialize logger
 logger = setup_logging()
 
+app = Flask(__name__)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', path='/socket.io/network-stats')
+# socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Initialize Flask and SocketIO
-def create_app():
-    """Create and configure the Flask application with SocketIO"""
-    app = Flask(__name__)
-
-    # Enable CORS for development and production
-    CORS(app, resources={r"/*": {"origins": "*"}})
-
-    # Create SocketIO instance with simplified configuration
-    logger.info("Initializing SocketIO...")
-    socketio = SocketIO(
-        app,
-        cors_allowed_origins="*",  # Allow all origins in development; production uses nginx
-        async_mode='threading',
-        logger=False,
-        engineio_logger=False,
-        path='/network/socket.io',  # Important: Custom path to avoid conflict with the Node.js socket.io
-        wsgi_app=app.wsgi_app
-    )
-    logger.info("SocketIO initialized with path='/network/socket.io'")
-
-    return app, socketio
-
-
-# Create Flask app and SocketIO instance
-app, socketio = create_app()
 
 # Global state
 class State:
@@ -953,7 +932,6 @@ class NetworkStatsProcessor:
                     stats['tx_rate_mbps'] = previous.get('tx_rate_mbps', 0)
         else:
             # First time seeing this interface, initialize rate values
-            logger.info(f"First collection for {interface} - initializing rate values")
             stats['rx_rate'] = 0
             stats['tx_rate'] = 0
             stats['rx_rate_mbps'] = 0
@@ -1028,7 +1006,6 @@ class StatsThread:
     def start_collection_thread():
         """Create and start the stats collection thread if not already running"""
         if not State.stats_thread_active and State.active_stats_clients:
-            logger.info("Starting network stats collection thread")
             State.stats_thread_active = True
             State.stats_thread = threading.Thread(
                 target=StatsThread.stats_collection_thread,
@@ -1042,7 +1019,6 @@ class StatsThread:
     def stop_collection_thread():
         """Signal the stats collection thread to stop"""
         if State.stats_thread_active:
-            logger.info("Stopping network stats collection thread")
             State.stats_thread_active = False
             return True
         return False
@@ -1053,7 +1029,7 @@ class StatsThread:
         Thread function to collect and report network statistics to connected clients.
         Only runs while there are active clients connected to the websocket.
         """
-        logger.info("Network stats collection thread started")
+        logger.info("Stats thread started")
 
         try:
             # Main collection loop - runs as long as there are active clients
@@ -1072,7 +1048,7 @@ class StatsThread:
                 # Sleep before next collection
                 time.sleep(1.0)
 
-            logger.info("Network stats collection thread stopping - no active clients")
+            logger.info("Stats thread stopping - no clients")
 
         except Exception as e:
             logger.error(f"Fatal error in stats collection thread: {e}")
@@ -1120,6 +1096,7 @@ class SocketEventHandler:
         Handle new websocket connection for network stats.
         Starts the stats collection thread if this is the first client.
         """
+
         try:
             client_id = request.sid
             logger.info(f"Network stats client connected: {client_id}")
@@ -1130,7 +1107,6 @@ class SocketEventHandler:
 
             # Start collection thread if this is the first client
             if not State.stats_thread_active:
-                logger.info("First client connected, starting stats collection thread")
                 StatsThread.start_collection_thread()
 
             # Make sure we have some initial stats
@@ -1140,7 +1116,6 @@ class SocketEventHandler:
             try:
                 summary = NetworkReporting.get_interface_usage_summary()
                 if summary:
-                    logger.info(f"Sending initial stats to client: {client_id}")
                     socketio.emit('network_stats_update', summary, room=client_id)
                 else:
                     logger.warning("No network interfaces found for initial stats")
@@ -1172,7 +1147,6 @@ class SocketEventHandler:
 
                 # Stop thread if no clients remain
                 if remaining == 0 and State.stats_thread_active:
-                    logger.info("Last client disconnected, stopping stats collection thread")
                     StatsThread.stop_collection_thread()
                     
         except Exception as e:
@@ -1185,69 +1159,59 @@ class SocketEventHandler:
             client_id = request.sid if hasattr(request, 'sid') else "unknown"
             logger.error(f"SocketIO error for client {client_id}: {str(e)}")
         except Exception as inner_error:
-            # Emergency fallback for errors in error handler
             logger.error(f"Error in error handler: {inner_error}")
 
-        # Return False to prevent the error from propagating
         return False
 
 
 # API Routes
-
-# Get connections
-@app.route('/network/connections', methods=['GET'])
+@app.route('/connections', methods=['GET'])
 def api_get_connections():
-    logger.info("GET /network/connections called")
+    logger.info("GET /connections called")
     return jsonify(NetworkConnectionManager.get_network_connections())
 
-# Create connection
-@app.route('/network/connections', methods=['POST'])
+@app.route('/connections', methods=['POST'])
 def api_create_connection():
-    logger.info("POST /network/connections called")
+    logger.info("POST /connections called")
     return jsonify(ConnectionManager.create_connection(request.json))
 
-# Delete connection
-@app.route('/network/connections/<name>', methods=['DELETE'])
+@app.route('/connections/<name>', methods=['DELETE'])
 def api_delete_connection(name):
-    logger.info(f"DELETE /network/connections/{name} called")
+    logger.info(f"DELETE /connections/{name} called")
     result = CommandExecutor.safe_run_command(f"nmcli connection delete \"{name}\"")
     return jsonify({'success': result is not None})
 
-# Update connection
-@app.route('/network/connections/<name>', methods=['PUT'])
+@app.route('/connections/<name>', methods=['PUT'])
 def api_update_connection(name):
-    logger.info(f"PUT /network/connections/{name} called")
+    logger.info(f"PUT /connections/{name} called")
     return jsonify(ConnectionManager.update_connection(name, request.json))
 
-# Connect to connection
-@app.route('/network/connections/<name>/connect', methods=['POST'])
+@app.route('/connections/<name>/connect', methods=['POST'])
 def api_connect_to_network(name):
-    logger.info(f"POST /network/connections/{name}/connect called")
+    logger.info(f"POST /connections/{name}/connect called")
     result = CommandExecutor.safe_run_command(f"nmcli con up \"{name}\"")
     return jsonify({'success': result is not None})
 
-# Disconnect from connection
-@app.route('/network/connections/<name>/disconnect', methods=['POST'])
+@app.route('/connections/<name>/disconnect', methods=['POST'])
 def api_disconnect_from_network(name):
-    logger.info(f"POST /network/connections/{name}/disconnect called")
+    logger.info(f"POST /connections/{name}/disconnect called")
     result = CommandExecutor.safe_run_command(f"nmcli con down \"{name}\"")
     return jsonify({'success': result is not None})
 
-# Scan for wifi networks
-@app.route('/network/wifi/scan', methods=['GET'])
+@app.route('/wifi/scan', methods=['GET'])
 def api_scan_wifi():
-    logger.info("GET /network/wifi/scan called")
+    logger.info("GET /wifi/scan called")
     return jsonify(WiFiNetworkManager.scan_wifi_networks())
 
-@app.route('/network/hostname', methods=['GET'])
+@app.route('/hostname', methods=['GET'])
 def api_get_hostname():
-    logger.info("GET /network/hostname called")
+    logger.info("GET /hostname called")
     hostname = HostnameManager.get_hostname()
     return jsonify({"hostname": hostname})
 
-@app.route('/network/hostname', methods=['POST'])
+@app.route('/hostname', methods=['POST'])
 def api_set_hostname():
-    logger.info("POST /network/hostname called")
+    logger.info("POST /hostname called")
     data = request.json
     new_hostname = data.get('hostname')
 
@@ -1258,10 +1222,9 @@ def api_set_hostname():
     else:
         return jsonify({"status": "error", "message": message}), 400
 
-@app.route('/network/lte/status', methods=['GET'])
+@app.route('/lte/status', methods=['GET'])
 def api_get_lte_status():
-    """Get LTE modem status (Jetson platform only)"""
-    logger.info("GET /network/lte/status called")
+    logger.info("GET /lte/status called")
     return jsonify(LteManager.get_lte_status())
 
 class ApplicationRunner:
@@ -1279,8 +1242,8 @@ class ApplicationRunner:
     
     @staticmethod
     def start_server():
-        host = '0.0.0.0'
-        port = '3001'
+        host = '127.0.0.1'
+        port = 3001
         debug = False;
 
         logger.info(f"Starting SocketIO server on {host}:{port}")

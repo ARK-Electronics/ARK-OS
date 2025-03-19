@@ -20,20 +20,15 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-# Initialize Flask
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 class ServiceManager:
-    """Core class for managing system services"""
     
     @staticmethod
     def run_systemctl(operation, service_name):
-        """Run a systemctl operation and return success/failure with appropriate message"""
         command = f"systemctl --user {operation} {service_name}"
         try:
-            # Run the command
-            print(f"Running: {command}")
             process = subprocess.run(
                 command,
                 shell=True,
@@ -42,11 +37,9 @@ class ServiceManager:
                 timeout=10
             )
             
-            # Strip color codes if present
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             output = ansi_escape.sub('', process.stdout + process.stderr).strip()
             
-            # Return success for zero exit code, otherwise error with output
             if process.returncode == 0:
                 return True, ""
             else:
@@ -57,10 +50,6 @@ class ServiceManager:
     
     @staticmethod
     def get_service_status(service_name, status_type="active"):
-        """
-        Get the status of a service
-        status_type can be "active" or "enabled"
-        """
         command = f"systemctl --user is-{status_type} {service_name}"
         try:
             process = subprocess.run(
@@ -69,7 +58,7 @@ class ServiceManager:
                 capture_output=True, 
                 text=True
             )
-            # Strip color codes if present
+
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             return ansi_escape.sub('', process.stdout).strip() or process.stderr.strip()
         except:
@@ -77,14 +66,11 @@ class ServiceManager:
     
     @staticmethod
     def get_service_config_file(service_name):
-        """Get the configuration file path for a service"""
         base_dir = os.path.expanduser("~/.local/share")
         service_dir = os.path.join(base_dir, service_name)
         
-        # Default config file name
         config_file_name = "config.toml"
         
-        # Check for manifest file
         manifest_file = os.path.join(service_dir, f"{service_name}.manifest.json")
         if os.path.isfile(manifest_file):
             try:
@@ -96,12 +82,10 @@ class ServiceManager:
             except Exception as e:
                 print(f"Error reading manifest file for {service_name}: {e}")
         
-        # Return full path to config file
         return os.path.join(service_dir, config_file_name)
     
     @staticmethod
     def is_service_visible(service_name):
-        """Check if a service should be visible in the UI"""
         base_dir = os.path.expanduser("~/.local/share")
         manifest_file = os.path.join(base_dir, service_name, f"{service_name}.manifest.json")
         
@@ -113,39 +97,29 @@ class ServiceManager:
             except:
                 pass
         
-        # Default to visible if no manifest exists or error occurs
         return True
     
     @staticmethod
     def get_service_statuses():
-        """Get statuses of all user services"""
-        print("Getting service statuses")
         services = []
         
-        # Get the user's systemd service directory
         service_dir = os.path.expanduser("~/.config/systemd/user")
         base_dir = os.path.expanduser("~/.local/share")
         
-        # Check if the directory exists
         if not os.path.isdir(service_dir):
-            print(f"Service directory not found: {service_dir}")
             return {"services": []}
         
-        # Find all service files
         service_files = [f for f in os.listdir(service_dir) if f.endswith('.service')]
         
         for service_file in service_files:
             service_name = service_file.replace('.service', '')
             
-            # Get enabled and active status
             enabled_status = ServiceManager.get_service_status(service_name, "enabled")
             active_status = ServiceManager.get_service_status(service_name, "active")
             
-            # Check for config file
             config_file = ServiceManager.get_service_config_file(service_name)
             config_file_name = os.path.basename(config_file) if os.path.isfile(config_file) else ""
             
-            # Check if service should be visible
             visible = "true" if ServiceManager.is_service_visible(service_name) else "false"
             
             services.append({
@@ -160,17 +134,12 @@ class ServiceManager:
     
     @staticmethod
     def start_service(service_name):
-        """Start a user service"""
-        print(f"Starting service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
-        # Try to start the service
         success, message = ServiceManager.run_systemctl("start", service_name)
         
         if success:
-            # Check if service is now active
             status = ServiceManager.get_service_status(service_name)
             if status == "active":
                 return {"status": "success", "service": service_name, "active": status}
@@ -182,17 +151,12 @@ class ServiceManager:
     
     @staticmethod
     def stop_service(service_name):
-        """Stop a user service"""
-        print(f"Stopping service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
-        # Try to stop the service
         success, message = ServiceManager.run_systemctl("stop", service_name)
         
         if success:
-            # Check if service is now inactive
             status = ServiceManager.get_service_status(service_name)
             if status == "inactive":
                 return {"status": "success", "service": service_name, "active": status}
@@ -204,17 +168,12 @@ class ServiceManager:
     
     @staticmethod
     def restart_service(service_name):
-        """Restart a user service"""
-        print(f"Restarting service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
-        # Try to restart the service
         success, message = ServiceManager.run_systemctl("restart", service_name)
         
         if success:
-            # Get current status
             status = ServiceManager.get_service_status(service_name)
             return {"status": "success", "service": service_name, "active": status}
         else:
@@ -222,13 +181,9 @@ class ServiceManager:
     
     @staticmethod
     def enable_service(service_name):
-        """Enable a user service"""
-        print(f"Enabling service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
-        # Try to enable the service
         success, message = ServiceManager.run_systemctl("enable", service_name)
         
         if success:
@@ -238,13 +193,9 @@ class ServiceManager:
     
     @staticmethod
     def disable_service(service_name):
-        """Disable a user service"""
-        print(f"Disabling service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
-        # Try to disable the service
         success, message = ServiceManager.run_systemctl("disable", service_name)
         
         if success:
@@ -254,14 +205,10 @@ class ServiceManager:
     
     @staticmethod
     def get_logs(service_name, num_lines=50):
-        """Get logs for a service"""
-        print(f"Getting logs for service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
         
         try:
-            # Run journalctl command to get logs
             command = f"journalctl --user -u {service_name} -n {num_lines} --no-pager -o cat"
             process = subprocess.run(
                 command,
@@ -271,7 +218,6 @@ class ServiceManager:
                 timeout=10
             )
             
-            # Strip color codes if present
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             logs = ansi_escape.sub('', process.stdout).strip()
             
@@ -281,23 +227,17 @@ class ServiceManager:
     
     @staticmethod
     def get_config(service_name):
-        """Get configuration for a service"""
-        print(f"Getting config for service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
         
-        # Get the config file path
         config_file = ServiceManager.get_service_config_file(service_name)
         
-        # If file doesn't exist, return error
         if not os.path.isfile(config_file):
             config_file_name = os.path.basename(config_file)
             service_dir = os.path.dirname(config_file)
             return {"status": "fail", "data": f"{config_file_name} not found in {service_dir}"}
         
         try:
-            # Read the config file
             with open(config_file, 'r') as f:
                 config_data = f.read()
                 return {"status": "success", "data": config_data}
@@ -306,23 +246,17 @@ class ServiceManager:
     
     @staticmethod
     def save_config(service_name, config_data):
-        """Save configuration for a service"""
-        print(f"Saving config for service: {service_name}")
-        
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
         
-        # Get the config file path
         config_file = ServiceManager.get_service_config_file(service_name)
         
-        # If file doesn't exist, return error
         if not os.path.isfile(config_file):
             config_file_name = os.path.basename(config_file)
             service_dir = os.path.dirname(config_file)
             return {"status": "fail", "data": f"{config_file_name} not found in {service_dir}"}
         
         try:
-            # Write the config file
             with open(config_file, 'w') as f:
                 f.write(config_data)
                 return {"status": "success", "data": "Configuration saved successfully"}
@@ -330,74 +264,65 @@ class ServiceManager:
             return {"status": "fail", "data": f"Error saving config file: {str(e)}"}
 
 # API endpoints
-@app.route('/api/service/statuses', methods=['GET'])
+@app.route('/statuses', methods=['GET'])
 def get_service_statuses():
-    """API endpoint to get all service statuses"""
-    print("GET /api/service/statuses called")
+    print("GET /statuses called")
     return jsonify(ServiceManager.get_service_statuses())
 
-@app.route('/api/service/start', methods=['POST'])
+@app.route('/start', methods=['POST'])
 def start_service():
-    """API endpoint to start a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /api/service/start called for {service_name}")
+    print(f"POST /start called for {service_name}")
     result = ServiceManager.start_service(service_name)
     return jsonify(result)
 
-@app.route('/api/service/stop', methods=['POST'])
+@app.route('/stop', methods=['POST'])
 def stop_service():
-    """API endpoint to stop a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /api/service/stop called for {service_name}")
+    print(f"POST /stop called for {service_name}")
     result = ServiceManager.stop_service(service_name)
     return jsonify(result)
 
-@app.route('/api/service/restart', methods=['POST'])
+@app.route('/restart', methods=['POST'])
 def restart_service():
-    """API endpoint to restart a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /api/service/restart called for {service_name}")
+    print(f"POST /restart called for {service_name}")
     result = ServiceManager.restart_service(service_name)
     return jsonify(result)
 
-@app.route('/api/service/enable', methods=['POST'])
+@app.route('/enable', methods=['POST'])
 def enable_service():
-    """API endpoint to enable a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /api/service/enable called for {service_name}")
+    print(f"POST /enable called for {service_name}")
     result = ServiceManager.enable_service(service_name)
     return jsonify(result)
 
-@app.route('/api/service/disable', methods=['POST'])
+@app.route('/disable', methods=['POST'])
 def disable_service():
-    """API endpoint to disable a service"""
     service_name = request.args.get('serviceName')
-    print(f"POST /api/service/disable called for {service_name}")
+    print(f"POST /disable called for {service_name}")
     result = ServiceManager.disable_service(service_name)
     return jsonify(result)
 
-@app.route('/api/service/logs', methods=['GET'])
+@app.route('/logs', methods=['GET'])
 def get_service_logs():
-    """API endpoint to get service logs"""
     service_name = request.args.get('serviceName')
-    print(f"GET /api/service/logs called for {service_name}")
+    print(f"GET /logs called for {service_name}")
     result = ServiceManager.get_logs(service_name)
     return jsonify(result)
 
-@app.route('/api/service/config', methods=['GET'])
+@app.route('/config', methods=['GET'])
 def get_service_config():
-    """API endpoint to get service configuration"""
     service_name = request.args.get('serviceName')
-    print(f"GET /api/service/config called for {service_name}")
+    print(f"GET /config called for {service_name}")
     result = ServiceManager.get_config(service_name)
     return jsonify(result)
 
-@app.route('/api/service/config', methods=['POST'])
+@app.route('/config', methods=['POST'])
 def save_service_config():
-    """API endpoint to save service configuration"""
     service_name = request.args.get('serviceName')
     config_data = request.json.get('config')
-    print(f"POST /api/service/config called for {service_name}")
+    print(f"POST /config called for {service_name}")
 
     if not config_data:
         return jsonify({"status": "fail", "data": "No configuration data provided"})
@@ -406,9 +331,8 @@ def save_service_config():
     return jsonify(result)
 
 if __name__ == '__main__':
-    # Hardcoded settings
-    host = '0.0.0.0'
+    host = '127.0.0.1'
     port = 3002
 
     print(f"Starting Service Manager on {host}:{port}")
-    app.run(host=host, port=port)
+    app.run(host=host, port=port, threaded=True)
