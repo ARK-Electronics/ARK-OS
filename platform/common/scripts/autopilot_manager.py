@@ -29,7 +29,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/vehicle-firm
                    async_mode='threading')
 
 class MAVLinkConnection:
-    def __init__(self, connection_string='udpin:localhost:14550'):
+    def __init__(self, connection_string='udpin:localhost:14571'):
         self.connection_string = connection_string
         self.mav_connection = None
         self.running = False
