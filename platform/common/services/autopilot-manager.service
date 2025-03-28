@@ -1,0 +1,14 @@
+[Unit]
+Description=Microservice backend for autopilot mavlink interactions
+After=network-online.target syslog.target
+Wants=network.target network-online.target syslog.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/autopilot_manager.py
+Restart=on-failure
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target
