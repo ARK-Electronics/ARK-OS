@@ -4,7 +4,7 @@ server {
 
     # Static files
     location / {
-        root /var/www/ark-os/ui;
+        root /var/www/ark-ui/html;
         index index.html;
         try_files $uri $uri/ /index.html;
     }

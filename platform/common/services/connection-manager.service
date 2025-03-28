@@ -5,7 +5,7 @@ Wants=network.target network-online.target syslog.target NetworkManager.service 
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/connections_manager.py
+ExecStart=python3 %h/.local/bin/connection_manager.py
 Restart=on-failure
 RestartSec=5
 Environment="PYTHONUNBUFFERED=1"
