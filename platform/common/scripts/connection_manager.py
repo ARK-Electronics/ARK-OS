@@ -84,7 +84,7 @@ def strip_ansi_colors(text):
 
 class CommandExecutor:
     @staticmethod
-    def run_command(command, timeout=10):
+    def run_command(command, timeout=30):
         """Run a shell command and return its output"""
         try:
             logger.debug(f"Running command: {command}")
@@ -110,7 +110,7 @@ class CommandExecutor:
             return None
 
     @staticmethod
-    def safe_run_command(command, default=None, timeout=10):
+    def safe_run_command(command, default=None, timeout=30):
         """Safely run a command and return the result or default value"""
         result = CommandExecutor.run_command(command, timeout)
         return result if result is not None else default
