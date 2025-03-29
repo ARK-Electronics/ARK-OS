@@ -59,7 +59,9 @@ class MAVLinkConnection:
             # This part is non-blocking, just creates the connection object
             self.mav_connection = mavutil.mavlink_connection(self.connection_string,
                                                             autoreconnect=True,
-                                                            source_system=255)  # Using 255 as system ID for ground station
+                                                            source_system=254) #TODO: configurable sysid?
+
+            self.mav_connection.target_component = mavlink.MAV_COMP_ID_AUTOPILOT1
 
             # Start the message loop which will also handle detecting the connection
             self.start_message_loop()
@@ -139,6 +141,11 @@ class MAVLinkConnection:
                 current_time = time.time()
 
                 if msg:
+
+                    # Ignore messages that do not originate from the autopilot
+                    if msg.compid != mavlink.MAV_COMP_ID_AUTOPILOT1:
+                        continue
+
                     # We received a message, connection is working
                     waiting_for_heartbeat = False
 
