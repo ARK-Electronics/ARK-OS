@@ -33,7 +33,7 @@ server {
     location /flight-review {
         rewrite ^/flight-review$ /flight-review/browse redirect;
         rewrite ^/flight-review/(.*)$ /$1 break;
-        proxy_pass http://127.0.0.1:5006;
+        proxy_pass http://localhost:5006;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
