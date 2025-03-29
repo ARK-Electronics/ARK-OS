@@ -143,7 +143,7 @@ class MAVLinkConnection:
                 if msg:
 
                     # Ignore messages that do not originate from the autopilot
-                    if msg.get_compid() != mavlink.MAV_COMP_ID_AUTOPILOT1:
+                    if msg.get_srcComponent() != mavlink.MAV_COMP_ID_AUTOPILOT1:
                         continue
 
                     # We received a message, connection is working
