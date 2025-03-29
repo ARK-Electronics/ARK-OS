@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-ARKV6X Autopilot Manager
-
-This service provides a REST API for managing the flight controller, including:
-- Retrieving autopilot details via MAVLink
-- Uploading and flashing firmware
-"""
-
 import os
 import json
 import subprocess
@@ -14,8 +5,10 @@ import tempfile
 import glob
 import threading
 import time
+import argparse
 from datetime import datetime
 import socket
+import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -25,12 +18,14 @@ from pymavlink.dialects.v20 import common as mavlink
 # Explicitly set async_mode to threading to avoid eventlet issues
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/vehicle-firmware-upload',
+socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/autopilot-firmware-upload',
                    async_mode='threading')
 
+
 class MAVLinkConnection:
-    def __init__(self, connection_string='udpin:localhost:14571'):
+    def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
         self.connection_string = connection_string
+        self.source_system = source_system
         self.mav_connection = None
         self.running = False
         self.thread = None
@@ -46,6 +41,7 @@ class MAVLinkConnection:
             "current": 0.0,
             "remaining": 0,
             "connected": False,
+            "in_bootloader": False,
             "last_heartbeat": None
         }
 
@@ -59,7 +55,7 @@ class MAVLinkConnection:
             # This part is non-blocking, just creates the connection object
             self.mav_connection = mavutil.mavlink_connection(self.connection_string,
                                                             autoreconnect=True,
-                                                            source_system=254) #TODO: configurable sysid?
+                                                            source_system=self.source_system)
 
             self.mav_connection.target_component = mavlink.MAV_COMP_ID_AUTOPILOT1
 
@@ -98,6 +94,28 @@ class MAVLinkConnection:
         time_since_heartbeat = (datetime.now() - self.last_heartbeat).total_seconds()
         return time_since_heartbeat < self.heartbeat_timeout
 
+    def check_bootloader_mode(self):
+        """Check if the autopilot is in bootloader mode using lsusb"""
+        try:
+            result = subprocess.run(
+                "lsusb",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                # Look for the ARK BL FPV.x pattern in lsusb output
+                for line in result.stdout.splitlines():
+                    if "ARK BL" in line:
+                        print(f"Detected bootloader: {line.strip()}")
+                        return True
+
+            return False
+        except Exception as e:
+            print(f"Error checking bootloader mode: {e}")
+            return False
+
     def request_autopilot_version(self):
         """Request the autopilot version information"""
         if not self.mav_connection:
@@ -125,7 +143,8 @@ class MAVLinkConnection:
         connection_attempts = 0
         last_version_request_time = 0
         waiting_for_heartbeat = True
-        reconnect_timeout = 10  # seconds to wait before attempting reconnection
+        reconnect_timeout = 5  # seconds to wait before attempting reconnection
+        bootloader_check_interval = 2  # Check bootloader every 2 seconds
 
         while self.running:
             try:
@@ -141,7 +160,6 @@ class MAVLinkConnection:
                 current_time = time.time()
 
                 if msg:
-
                     # Ignore messages that do not originate from the autopilot
                     if msg.get_srcComponent() != mavlink.MAV_COMP_ID_AUTOPILOT1:
                         continue
@@ -154,6 +172,7 @@ class MAVLinkConnection:
                         self.update_heartbeat_time()
                         self.autopilot_data["autopilot_type"] = self.get_autopilot_type(msg.autopilot)
                         self.autopilot_data["connected"] = True
+                        self.autopilot_data["in_bootloader"] = False  # If we get a heartbeat, we're not in bootloader
 
                         # Reset connection attempts on successful heartbeat
                         connection_attempts = 0
@@ -194,6 +213,12 @@ class MAVLinkConnection:
                 # If no message or heartbeat timeout occurred, check connection status
                 elif (self.last_heartbeat is None or
                       (datetime.now() - self.last_heartbeat).total_seconds() > reconnect_timeout):
+
+                    if self.check_bootloader_mode():
+                        self.autopilot_data["in_bootloader"] = True
+                        self.autopilot_data["autopilot_type"] = "Bootloader"
+                        continue
+
                     # No recent heartbeat, try to send one to elicit a response
                     if waiting_for_heartbeat and connection_attempts < 5:
                         try:
@@ -215,7 +240,7 @@ class MAVLinkConnection:
                             self.mav_connection = mavutil.mavlink_connection(
                                 self.connection_string,
                                 autoreconnect=True,
-                                source_system=255)
+                                source_system=self.source_system)
                             waiting_for_heartbeat = True
                             connection_attempts = 0
                         except Exception as reset_error:
@@ -238,7 +263,7 @@ class MAVLinkConnection:
                     self.mav_connection = mavutil.mavlink_connection(
                         self.connection_string,
                         autoreconnect=True,
-                        source_system=255)
+                        source_system=self.source_system)
                     waiting_for_heartbeat = True
                     connection_attempts = 0
                 except Exception as reset_error:
@@ -249,7 +274,6 @@ class MAVLinkConnection:
                 time.sleep(0.5)  # Brief pause before retrying
 
     def get_autopilot_type(self, autopilot_type):
-        """Convert MAVLink autopilot type to readable string"""
         types = {
             mavlink.MAV_AUTOPILOT_GENERIC: "Generic",
             mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA: "ArduPilot",
@@ -258,11 +282,9 @@ class MAVLinkConnection:
         return types.get(autopilot_type, f"Unknown({autopilot_type})")
 
     def start_message_loop(self):
-        """Start processing MAVLink messages in a background thread"""
         if self.thread and self.thread.is_alive():
             return
 
-        # Ensure we're in a clean state before starting
         self.running = True
         self.thread = threading.Thread(target=self.process_messages)
         self.thread.daemon = True
@@ -270,20 +292,14 @@ class MAVLinkConnection:
         print("MAVLink message processing thread started")
 
     def get_autopilot_details(self):
-        """Get the latest autopilot data (non-blocking)"""
-        # The connection is managed in the background thread
-        # Just update the connection status based on latest data
         self.autopilot_data["connected"] = self.is_connected()
-
-        # Add timestamp to help frontend determine data freshness
         self.autopilot_data["timestamp"] = datetime.now().isoformat()
-
         return self.autopilot_data
 
 
 class AutopilotManager:
-    def __init__(self):
-        self.mavlink = MAVLinkConnection()
+    def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
+        self.mavlink = MAVLinkConnection(connection_string=connection_string, source_system=source_system)
         # Start the connection process (non-blocking)
         self.mavlink.connect()
         # The message loop is started automatically in connect()
@@ -389,13 +405,13 @@ class AutopilotManager:
                                    text=True)
             if result.returncode == 0:
                 print(f"[DEBUG] Successfully reset FMU with {script}")
-                return True
+                return True, "Reset successful"
             else:
                 print(f"[DEBUG] Failed to reset FMU with {script}: {result.stderr}")
-                return False
+                return False, f"Reset failed: {result.stderr}"
         except Exception as e:
             print(f"[DEBUG] Error resetting FMU with {script}: {e}")
-            return False
+            return False, f"Reset error: {str(e)}"
 
     def flash_firmware(self, firmware_path, socket_id):
         """Flash firmware to the autopilot"""
@@ -466,13 +482,14 @@ class AutopilotManager:
             # Process output line by line to capture JSON progress updates
             for line in process.stdout:
                 print(f"[DEBUG] Uploader output: {line.strip()}")
-                try:
-                    # Try to parse as JSON for progress updates
-                    progress_data = json.loads(line.strip())
-                    socket.emit('progress', progress_data, room=socket_id)
-                except json.JSONDecodeError:
-                    # Not JSON, could be other output
-                    print(f"[DEBUG] Non-JSON output: {line.strip()}")
+                if line is not None:
+                    try:
+                        # Try to parse as JSON for progress updates
+                        progress_data = json.loads(line.strip())
+                        socket.emit('progress', progress_data, room=socket_id)
+                    except json.JSONDecodeError:
+                        # Not JSON, could be other output
+                        print(f"[DEBUG] Non-JSON output: {line.strip()}")
 
             # Wait for process to complete
             return_code = process.wait()
@@ -531,16 +548,38 @@ class AutopilotManager:
             return False
 
 
-# Create a singleton instance of AutopilotManager
-autopilot_manager = AutopilotManager()
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='ARKV6X Autopilot Manager')
+    parser.add_argument('--connection-string',
+                        default='udpin:localhost:14571',
+                        help='MAVLink connection string (default: udpin:localhost:14571)')
+    parser.add_argument('--host',
+                        default='0.0.0.0',
+                        help='Host address to bind (default: 0.0.0.0)')
+    parser.add_argument('--port',
+                        type=int,
+                        default=3003,
+                        help='Port to listen on (default: 3003)')
+    parser.add_argument('--source-system',
+                        type=int,
+                        default=254,
+                        help='MAVLink source system ID (default: 254)')
+    return parser.parse_args()
+
+
+# Store autopilot_manager as Flask app context
+app.autopilot_manager = None
+
 
 # API endpoints
-@app.route('/autopilot-details', methods=['GET'])
+@app.route('/details', methods=['GET'])
 def get_autopilot_details():
     """Get details about the connected autopilot"""
-    print("GET /autopilot-details called")
-    details = autopilot_manager.get_autopilot_details()
+    print("GET /details called")
+    details = app.autopilot_manager.get_autopilot_details()
     return jsonify(details)
+
 
 @app.route('/firmware-upload', methods=['POST'])
 def upload_firmware():
@@ -577,12 +616,39 @@ def upload_firmware():
         print(f"SocketIO error: {str(e)}")
 
     socketio.start_background_task(
-        autopilot_manager.flash_firmware,
+        app.autopilot_manager.flash_firmware,
         temp_path,
         socket_id
     )
 
     return jsonify({"status": "success", "message": "Firmware upload started"})
+
+
+@app.route('/reset-fmu', methods=['POST'])
+def reset_fmu():
+    """Reset the flight controller"""
+    print("POST /reset-fmu called")
+
+    success, message = app.autopilot_manager.reset_fmu(mode="fast")
+
+    if success:
+        return jsonify({"success": True, "message": message})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+
+@app.route('/reset-fmu-bootloader', methods=['POST'])
+def reset_fmu_bootloader():
+    """Reset the flight controller into bootloader mode"""
+    print("POST /reset-fmu-bootloader called")
+
+    success, message = app.autopilot_manager.reset_fmu(mode="wait_bl")
+
+    if success:
+        return jsonify({"success": True, "message": message})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
 
 @socketio.on('connect')
 def test_connect():
@@ -590,23 +656,31 @@ def test_connect():
     print(f'Client connected: {client_id}')
     return {'status': 'connected'}
 
+
 @socketio.on('disconnect')
 def test_disconnect():
     print('Client disconnected')
+
 
 # Error handler for SocketIO
 @socketio.on_error_default
 def default_error_handler(e):
     print(f'SocketIO error: {str(e)}')
 
-if __name__ == '__main__':
-    host = '0.0.0.0'
-    port = 3003
 
-    print(f"Starting Autopilot Manager on {host}:{port}")
+if __name__ == '__main__':
+    args = parse_arguments()
+
+    # Create the AutopilotManager instance with command line arguments
+    app.autopilot_manager = AutopilotManager(
+        connection_string=args.connection_string,
+        source_system=args.source_system
+    )
+
+    print(f"Starting Autopilot Manager on {args.host}:{args.port}")
     try:
         # For newer versions of Flask-SocketIO
-        socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
+        socketio.run(app, host=args.host, port=args.port, debug=False, allow_unsafe_werkzeug=True)
     except TypeError:
         # For older versions that don't have allow_unsafe_werkzeug parameter
-        socketio.run(app, host=host, port=port, debug=False)
+        socketio.run(app, host=args.host, port=args.port, debug=False)
