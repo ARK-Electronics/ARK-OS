@@ -49,8 +49,16 @@ sudo -u www-data stat $DEPLOY_PATH
 sudo nginx -t
 sudo systemctl restart nginx
 
+# Install ark-ui-backend proxy
 service_add_manifest ark-ui-backend
-
 service_install ark-ui-backend
+
+# Install each microservice backend
+service_add_manifest autopilot-manager
+service_add_manifest connection-manager
+service_add_manifest service-manager
+service_install autopilot-manager
+service_install connection-manager
+service_install service-manager
 
 echo "Finished $(basename $BASH_SOURCE)"

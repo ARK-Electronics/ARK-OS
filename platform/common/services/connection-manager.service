@@ -1,0 +1,14 @@
+[Unit]
+Description=Manages network connections via NetworkManager using Python and nmcli
+After=network-online.target syslog.target NetworkManager.service ModemManager.service
+Wants=network.target network-online.target syslog.target NetworkManager.service ModemManager.service
+
+[Service]
+Type=simple
+ExecStart=python3 %h/.local/bin/connection_manager.py
+Restart=on-failure
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target

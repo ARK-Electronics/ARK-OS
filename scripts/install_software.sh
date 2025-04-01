@@ -139,22 +139,33 @@ if [ "$TARGET" = "jetson" ]; then
 		echo "JetPack installation finished"
 	fi
 
+	# Required for FW updating ARK LTE
+	sudo apt-get install libqmi-utils -y
+
 	sudo pip3 install \
 		Jetson.GPIO \
 		smbus2 \
 		meson \
-		pyserial \
-		pymavlink \
-		dronecan
+		pyserial
 
 ########## pi dependencies ##########
 elif [ "$TARGET" = "pi" ]; then
 	sudo apt-get install python3-RPi.GPIO
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi
-	sudo pip3 install --break-system-packages \
-	pymavlink \
-	dronecan
+	PI_PYTHON_INSTALL_ARG="--break-system-packages"
 fi
+
+# Common python dependencies
+sudo pip3 install ${PI_PYTHON_INSTALL_ARG} \
+	pymavlink \
+	dronecan \
+	flask \
+	psutil \
+	toml \
+	eventlet \
+	flask-cors \
+	flask-socketio \
+	python-socketio
 
 ########## configure environment ##########
 echo "Configuring environment"
@@ -217,6 +228,9 @@ for alias_name in "${!aliases[@]}"; do
 	check_and_add_alias "$alias_name" "${aliases[$alias_name]}"
 done
 
+########## create hotspot connection ##########
+./scripts/create_hotspot_connection.sh
+
 ########## mavlink-router ##########
 ./scripts/install_mavlink_router.sh
 
@@ -230,11 +244,6 @@ fi
 
 ########## mavsdk-examples ##########
 ./scripts/install_mavsdk_examples.sh
-
-########## hotspot-control ##########
-service_uninstall hotspot-control
-service_add_manifest hotspot-control
-service_install hotspot-control
 
 ########## logloader ##########
 if [ "$INSTALL_LOGLOADER" = "y" ]; then

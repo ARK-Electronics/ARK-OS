@@ -1,0 +1,6 @@
+{
+  "displayName": "Connections Manager",
+  "visible": false,
+  "description": "Microservice backend for managing connections",
+  "configFile": ""
+}
