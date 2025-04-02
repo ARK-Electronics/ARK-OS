@@ -29,33 +29,14 @@ import psutil
 import argparse
 from pathlib import Path
 
-
-# Configure logging
 def setup_logging():
-    """Setup logging configuration with fallback to local log file if needed"""
-    try:
-        # Try to use system log location
-        log_handlers = [
-            logging.StreamHandler(),
-            logging.FileHandler('/var/log/connections_manager.log')
-        ]
-    except PermissionError:
-        # Fall back to local file if permission denied
-        print("Warning: Could not write to system log. Using local log file instead.")
-        log_handlers = [
-            logging.StreamHandler(),
-            logging.FileHandler('connections_manager.log')
-        ]
-
+    """Setup simple logging that will be captured by journald via stdout"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=log_handlers
+        handlers=[logging.StreamHandler()]
     )
-    return logging.getLogger('connections_manager')
-
-
-# pip install eventlet
+    return logging.getLogger('connection-manager')
 
 # Initialize logger
 logger = setup_logging()
