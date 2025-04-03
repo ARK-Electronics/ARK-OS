@@ -31,8 +31,7 @@ logger = setup_logging()
 # Explicitly set async_mode to threading to avoid eventlet issues
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/autopilot-firmware-upload',
-                   async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/autopilot-firmware-upload', async_mode='threading')
 
 
 class MAVLinkConnection:
@@ -156,8 +155,6 @@ class MAVLinkConnection:
         connection_attempts = 0
         last_version_request_time = 0
         waiting_for_heartbeat = True
-        reconnect_timeout = 5  # seconds to wait before attempting reconnection
-        bootloader_check_interval = 2  # Check bootloader every 2 seconds
 
         while self.running:
             try:
@@ -225,7 +222,7 @@ class MAVLinkConnection:
 
                 # If no message or heartbeat timeout occurred, check connection status
                 elif (self.last_heartbeat is None or
-                      (datetime.now() - self.last_heartbeat).total_seconds() > reconnect_timeout):
+                      (datetime.now() - self.last_heartbeat).total_seconds() > 5):
 
                     if self.check_bootloader_mode():
                         self.autopilot_data["in_bootloader"] = True
