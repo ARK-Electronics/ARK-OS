@@ -37,11 +37,11 @@ if [ -z "$AP_SSID" ]; then
     echo "Creating new hotspot: $AP_SSID"
 
     # Create AP connection
-    nmcli con add type wifi ifname '*' con-name "$AP_SSID" autoconnect yes ssid "$AP_SSID" \
+    sudo nmcli con add type wifi ifname '*' con-name "$AP_SSID" autoconnect yes ssid "$AP_SSID" \
         802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared
 
     # Configure security
-    nmcli con modify "$AP_SSID" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASSWORD" \
+    sudo nmcli con modify "$AP_SSID" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASSWORD" \
         802-11-wireless-security.pmf disable connection.autoconnect-priority -1
 
     echo "Created new AP: $AP_SSID with autoconnect enabled"
@@ -51,7 +51,7 @@ else
 
     if [ "$AUTOCONNECT" = "no" ]; then
         echo "Enabling autoconnect for existing AP: $AP_SSID"
-        nmcli con modify "$AP_SSID" connection.autoconnect yes
+        sudo nmcli con modify "$AP_SSID" connection.autoconnect yes
     else
         echo "AP already exists with autoconnect enabled: $AP_SSID"
     fi
