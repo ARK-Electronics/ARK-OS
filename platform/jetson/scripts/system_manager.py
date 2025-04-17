@@ -1,9 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import time
 import random
 import platform
 import os
 import psutil
+import subprocess
+import re
 
 app = Flask(__name__)
 
@@ -12,7 +14,25 @@ def get_mock_jetson_stats():
     # Get some real system data where possible
     hostname = platform.node()
     python_version = platform.python_version()
-    system_platform = f"{platform.system()} {platform.release()}"
+
+    # Get Linux distribution info from /etc/os-release
+    distribution = "Unknown Linux"
+    release = "unknown"
+    codename = "unknown"
+
+    try:
+        with open('/etc/os-release', 'r') as f:
+            os_info = {}
+            for line in f:
+                if '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    os_info[key] = value.strip('"\'')
+
+            distribution = os_info.get('PRETTY_NAME', 'Unknown Linux')
+            release = os_info.get('VERSION_ID', 'unknown')
+            codename = os_info.get('VERSION_CODENAME', 'unknown')
+    except Exception:
+        pass
 
     # Get disk usage for the root filesystem
     disk = psutil.disk_usage('/')
@@ -43,8 +63,8 @@ def get_mock_jetson_stats():
             "jetpack": "4.6.1"
         },
         "platform": {
-            "distribution": system_platform,
-            "release": "dummy",
+            "distribution": distribution,
+            "release": codename,  # Use the codename (e.g., "jammy") as the release
             "python": python_version
         },
         "libraries": {
@@ -78,6 +98,7 @@ def get_mock_jetson_stats():
     }
 
     return mock_data
+
 
 def get_jetson_stats():
     """Collect and return data from Jetson device or mock data if not available"""
@@ -146,6 +167,47 @@ def get_jetson_stats():
         print(f"Error: {str(e)}, using mock data instead")
         return get_mock_jetson_stats()
 
+
+def is_valid_hostname(hostname):
+    """
+    Validate hostname format according to RFC 1123 and RFC 952:
+    - Can contain alphanumeric characters and hyphens
+    - Cannot start or end with a hyphen
+    - Maximum length of 63 characters
+    """
+    if not hostname or len(hostname) > 63:
+        return False
+
+    # Regex: start with alnum, then up to 61 alnum-or-hyphens, end with alnum
+    pattern = r'^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+    return bool(re.match(pattern, hostname))
+
+
+def set_hostname(new_hostname):
+    try:
+        if not is_valid_hostname(new_hostname):
+            return {
+                "success": False,
+                "message": "Invalid hostname format. Hostname must contain only alphanumeric characters and hyphens, cannot start or end with a hyphen, and must be 63 characters or less."
+            }
+        old_hostname = platform.node()
+        try:
+            subprocess.run(["hostnamectl", "set-hostname", new_hostname], check=True)
+            return {
+                "success": True,
+                "message": f"Hostname changed from {old_hostname} to {new_hostname}. A system reboot is required for the change to take effect."
+            }
+        except subprocess.CalledProcessError as e:
+            return {
+                "success": False,
+                "message": f"Failed to set hostname: {str(e)}"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Failed to change hostname: {str(e)}"
+        }
+
 '''
 Example usage:
 curl -X GET http://localhost:3004/stats | jq
@@ -157,6 +219,35 @@ def jetson_stats():
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+'''
+Example usage:
+curl -X POST http://localhost:3004/hostname -H "Content-Type: application/json" -d '{"hostname":"new-hostname"}'
+'''
+@app.route('/hostname', methods=['POST'])
+def update_hostname():
+    try:
+        data = request.get_json()
+
+        if not data or 'hostname' not in data:
+            return jsonify({
+                "success": False,
+                "message": "Missing hostname parameter"
+            }), 400
+
+        new_hostname = data['hostname']
+        result = set_hostname(new_hostname)
+
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }), 500
 
 
 if __name__ == '__main__':
