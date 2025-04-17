@@ -1,0 +1,55 @@
+# Ignore node_modules in both the frontend and backend
+node_modules/
+ark-ui/node_modules/
+backend/node_modules/
+
+# Ignore build output in the frontend
+ark-ui/dist/
+
+# Ignore environment variable files
+*.env
+*.local
+
+# Ignore log files
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore temporary files
+*.tmp
+*.temp
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Ignore npm and yarn lock files if using one package manager
+# If using npm
+yarn.lock
+
+# If using yarn
+package-lock.json
+
+# Ignore coverage reports
+coverage/
+*.lcov
+
+
+# Ignore the 'public' directory in the backend if it exists
+backend/public/
+
+# Ignore compiled files
+*.out
+*.class
+
+# Ignore binaries
+bin/
+obj/
