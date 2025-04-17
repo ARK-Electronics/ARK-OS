@@ -57,8 +57,10 @@ service_install ark-ui-backend
 service_add_manifest autopilot-manager
 service_add_manifest connection-manager
 service_add_manifest service-manager
+service_add_manifest system-manager
 service_install autopilot-manager
 service_install connection-manager
 service_install service-manager
+service_install system-manager
 
 echo "Finished $(basename $BASH_SOURCE)"

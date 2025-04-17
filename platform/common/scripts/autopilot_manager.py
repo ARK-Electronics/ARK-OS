@@ -558,30 +558,6 @@ class AutopilotManager:
             return False
 
 
-def parse_arguments():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='ARKV6X Autopilot Manager')
-    parser.add_argument('--connection-string',
-                        default='udpin:localhost:14571',
-                        help='MAVLink connection string (default: udpin:localhost:14571)')
-    parser.add_argument('--host',
-                        default='0.0.0.0',
-                        help='Host address to bind (default: 0.0.0.0)')
-    parser.add_argument('--port',
-                        type=int,
-                        default=3003,
-                        help='Port to listen on (default: 3003)')
-    parser.add_argument('--source-system',
-                        type=int,
-                        default=254,
-                        help='MAVLink source system ID (default: 254)')
-    parser.add_argument('--log-level',
-                        default='info',
-                        choices=['debug', 'info', 'warning', 'error', 'critical'],
-                        help='Logging level (default: info)')
-    return parser.parse_args()
-
-
 # Store autopilot_manager as Flask app context
 app.autopilot_manager = None
 
@@ -684,6 +660,30 @@ def test_disconnect():
 @socketio.on_error_default
 def default_error_handler(e):
     logger.error(f'SocketIO error: {str(e)}')
+
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='ARKV6X Autopilot Manager')
+    parser.add_argument('--connection-string',
+                        default='udpin:localhost:14571',
+                        help='MAVLink connection string (default: udpin:localhost:14571)')
+    parser.add_argument('--host',
+                        default='0.0.0.0',
+                        help='Host address to bind (default: 0.0.0.0)')
+    parser.add_argument('--port',
+                        type=int,
+                        default=3003,
+                        help='Port to listen on (default: 3003)')
+    parser.add_argument('--source-system',
+                        type=int,
+                        default=254,
+                        help='MAVLink source system ID (default: 254)')
+    parser.add_argument('--log-level',
+                        default='info',
+                        choices=['debug', 'info', 'warning', 'error', 'critical'],
+                        help='Logging level (default: info)')
+    return parser.parse_args()
 
 
 if __name__ == '__main__':

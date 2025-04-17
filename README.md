@@ -17,9 +17,12 @@ Run the install script on the device. You will be prompted y/n to install the se
 You can skip the interactive prompt by copying the **default.env** file and renaming it **user.env**. You can adjust the options in the **user.env**. This script can be safely run multiple times to update your system.
 
 ## ARK-UI
-A web based UI is provided to more easily manage your device. The main page shows the status of the services and includes controls to edit their settings, start/stop, and view journal log files. There are also pages to manage your network connections and update the flight controller firmware. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
+A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
 
-![alt text](ark-ui.png)
+![alt text](ark-ui1.png)
+![alt text](ark-ui2.png)
+![alt text](ark-ui3.png)
+![alt text](ark-ui4.png)
 
 ## Services
 When running the **install.sh** script you will be prompted to install the below services. The services are installed as [systemd user services](https://www.unixsysadmin.com/systemd-user-services/) and conform to the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/index.html).
@@ -45,10 +48,19 @@ This service provides an RTSP server via gstreamer. The stream from the first co
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.
 
 **ark-ui-backend.service** <br>
-This service provides a REST API backend for ARK-UI.
+This service provides an API gateway for the ARK UI.
 
-**hotspot-control.service** <br>
-This service creates a WiFi Hotspot if the device is unable to connect to a WiFi network within 1 minute after booting. You can then use the ARK-UI to put the device into Station mode and connect to your local WiFi network. The default ssid and password are `<serialnumber>-<hostname>` and `password`.
+**system-manager.service** <br>
+This service provides a REST API for linux system management via the ARK UI.
+
+**autopilot-manager.service** <br>
+This service provides a REST API for autopilot management via the ARK UI.
+
+**connecton-manager.service** <br>
+This service provides a REST API for connection management via the ARK UI.
+
+**service-manager.service** <br>
+This service provides a REST API for systemd user service management via the ARK UI.
 
 ### Jetson only
 

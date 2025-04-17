@@ -129,7 +129,8 @@ sudo apt-get install -y \
 		snap \
 		snapd \
 		avahi-daemon \
-		libssl-dev
+		libssl-dev \
+		libsqlite3-dev
 
 ########## jetson dependencies ##########
 if [ "$TARGET" = "jetson" ]; then
@@ -146,7 +147,8 @@ if [ "$TARGET" = "jetson" ]; then
 		Jetson.GPIO \
 		smbus2 \
 		meson \
-		pyserial
+		pyserial \
+		jetson-stats
 
 ########## pi dependencies ##########
 elif [ "$TARGET" = "pi" ]; then
