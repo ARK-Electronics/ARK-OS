@@ -9,7 +9,7 @@ import re
 
 app = Flask(__name__)
 
-def get_mock_jetson_stats():
+def get_mock_jetson_info():
     """Generate mock Jetson data for testing on non-Jetson devices"""
     # Get some real system data where possible
     hostname = platform.node()
@@ -56,6 +56,7 @@ def get_mock_jetson_stats():
     # Create mock data structure
     mock_data = {
         "hardware": {
+            "type": "jetson",
             "model": "NVIDIA Jetson Mock Device",
             "module": "NVIDIA Jetson Nano (4GB ram)",
             "serial_number": "MOCK12345678",
@@ -100,7 +101,7 @@ def get_mock_jetson_stats():
     return mock_data
 
 
-def get_jetson_stats():
+def get_jetson_info():
     """Collect and return data from Jetson device or mock data if not available"""
     try:
         # Try to import jtop
@@ -109,7 +110,7 @@ def get_jetson_stats():
         with jtop() as jetson:
             if not jetson.ok():
                 print("Failed to connect to Jetson device, using mock data instead")
-                return get_mock_jetson_stats()
+                return get_mock_jetson_info()
 
             # Wait for data collection
             time.sleep(0.5)
@@ -117,6 +118,7 @@ def get_jetson_stats():
             # Collect data specified in the requirements
             data = {
                 "hardware": {
+                    "type": "jetson",
                     "model": jetson.board["hardware"]["Model"],
                     "module": jetson.board["hardware"]["Module"],
                     "serial_number": jetson.board["hardware"]["Serial Number"],
@@ -162,10 +164,10 @@ def get_jetson_stats():
 
     except (ImportError, ModuleNotFoundError):
         print("jtop module not found, using mock data instead")
-        return get_mock_jetson_stats()
+        return get_mock_jetson_info()
     except Exception as e:
         print(f"Error: {str(e)}, using mock data instead")
-        return get_mock_jetson_stats()
+        return get_mock_jetson_info()
 
 
 def is_valid_hostname(hostname):
@@ -210,12 +212,12 @@ def set_hostname(new_hostname):
 
 '''
 Example usage:
-curl -X GET http://localhost:3004/stats | jq
+curl -X GET http://localhost:3004/info | jq
 '''
-@app.route('/stats', methods=['GET'])
-def jetson_stats():
+@app.route('/info', methods=['GET'])
+def jetson_info():
     try:
-        data = get_jetson_stats()
+        data = get_jetson_info()
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
