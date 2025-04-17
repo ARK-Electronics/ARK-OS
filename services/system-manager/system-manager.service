@@ -5,7 +5,7 @@ Wants=network.target network-online.target syslog.target
 
 [Service]
 Type=simple
-ExecStart=python3 %h/.local/bin/jetson_system_manager.py
+ExecStart=python3 %h/.local/bin/system_manager.py
 Restart=on-failure
 RestartSec=5
 Environment="PYTHONUNBUFFERED=1"

@@ -1,7 +1,11 @@
 {
   "displayName": "System Manager",
-  "visible": false,
-  "description": "Microservice backend for managing linux system",
+  "description": "Microservice backend for managing the linux system",
+  "platform": ["all"],
   "configFile": "",
-  "platform": ["jetson", "pi", "ubuntu"]
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "",
+  "install_files": ["system_manager.py"]
 }

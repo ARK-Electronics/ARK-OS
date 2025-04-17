@@ -12,7 +12,7 @@ sudo rm /usr/local/bin/polaris &>/dev/null
 # Install dependencies
 sudo apt-get install -y libssl-dev libgflags-dev libgoogle-glog-dev libboost-all-dev
 pushd .
-cd $PROJECT_ROOT/submodules/polaris-client-mavlink
+cd polaris-client-mavlink
 make install
 sudo ldconfig
 popd

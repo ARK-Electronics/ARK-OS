@@ -115,7 +115,18 @@ function install_service_files() {
     fi
 }
 
-# Function to install a service
+function uninstall_service() {
+    sudo systemctl stop $1.service &>/dev/null
+    sudo systemctl disable $1.service &>/dev/null
+    systemctl --user stop $1.service &>/dev/null
+    systemctl --user disable $1.service &>/dev/null
+    sudo rm /etc/systemd/system/$1.service &>/dev/null
+    sudo rm /lib/systemd/system/$1.service &>/dev/null
+    sudo rm $XDG_CONFIG_HOME/systemd/user/$1.service &>/dev/null
+    sudo systemctl daemon-reload
+    systemctl --user daemon-reload
+}
+
 function install_service() {
     local SERVICE_NAME="$1"
     local SERVICE_DIR="$SERVICES_DIR/$SERVICE_NAME"
@@ -138,12 +149,12 @@ function install_service() {
     # Check if service is enabled in configuration
     if ! is_service_enabled "$MANIFEST_FILE"; then
         echo "Service $SERVICE_NAME is disabled in configuration, skipping."
-        service_uninstall "$SERVICE_NAME"
+        uninstall_service "$SERVICE_NAME"
         return 0
     fi
 
     # Uninstall first to ensure clean installation
-    service_uninstall "$SERVICE_NAME"
+    uninstall_service "$SERVICE_NAME"
 
     # Get the install script from the manifest
     local install_script=$(read_json_value "$MANIFEST_FILE" "install_script" "")
@@ -214,7 +225,7 @@ if [ $# -gt 0 ]; then
             ;;
         uninstall)
             if [ -n "$2" ]; then
-                service_uninstall "$2"
+                uninstall_service "$2"
                 echo "$2 uninstalled."
             else
                 echo "Error: Please specify a service to uninstall."

@@ -255,5 +255,6 @@ def update_hostname():
 if __name__ == '__main__':
     host = '127.0.0.1'
     port = 3004
+    # TODO: add pi and ubuntu support
     print(f"Starting Jetson System Manager on {host}:{port}")
     app.run(host=host, port=port, threaded=True)
