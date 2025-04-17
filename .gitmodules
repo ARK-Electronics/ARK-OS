@@ -1,6 +1,3 @@
-[submodule "submodules/ark-ui"]
-	path = submodules/ark-ui
-	url = https://github.com/ARK-Electronics/ark-ui.git
 [submodule "submodules/flight_review"]
 	path = submodules/flight_review
 	url = https://github.com/PX4/flight_review.git
