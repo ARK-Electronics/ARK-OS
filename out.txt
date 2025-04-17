@@ -1,0 +1,337 @@
+.
+├── all_submodules_main.sh
+├── ark-ui1.png
+├── ark-ui2.png
+├── ark-ui3.png
+├── ark-ui4.png
+├── CLAUDE.md
+├── default.env
+├── frontend
+│   ├── ark-ui
+│   │   ├── ark-ui
+│   │   │   ├── babel.config.js
+│   │   │   ├── dist
+│   │   │   ├── jsconfig.json
+│   │   │   ├── node_modules
+│   │   │   ├── package.json
+│   │   │   ├── package-lock.json
+│   │   │   ├── public
+│   │   │   ├── README.md
+│   │   │   ├── src
+│   │   │   └── vue.config.js
+│   │   ├── backend
+│   │   │   ├── index.js
+│   │   │   ├── node_modules
+│   │   │   ├── package.json
+│   │   │   └── package-lock.json
+│   │   ├── install.sh
+│   │   ├── LICENSE
+│   │   ├── README.md
+│   │   └── run.sh
+│   └── ark-ui.nginx
+├── install.sh
+├── LICENSE
+├── manifests
+│   ├── autopilot-manager.manifest.json
+│   ├── connection-manager.manifest.json
+│   ├── dds-agent.manifest.json
+│   ├── flight-review.manifest.json
+│   ├── logloader.manifest.json
+│   ├── mavlink-router.manifest.json
+│   ├── polaris.manifest.json
+│   ├── rid-transmitter.manifest.json
+│   ├── rtsp-server.manifest.json
+│   ├── service-manager.manifest.json
+│   └── system-manager.manifest.json
+├── output.txt
+├── out.txt
+├── platform
+│   ├── common
+│   │   ├── ark_scripts.sudoers
+│   │   ├── scripts
+│   │   │   ├── autopilot_manager.py
+│   │   │   ├── connection_manager.py
+│   │   │   ├── mavlink_ftp_upload.sh
+│   │   │   ├── mavlink_shell.py
+│   │   │   ├── px4_flash.sh
+│   │   │   ├── px4_shell_command.py
+│   │   │   ├── px_uploader.py
+│   │   │   ├── service_manager.py
+│   │   │   ├── start_flight_review.sh
+│   │   │   └── start_mavlink_router.sh
+│   │   ├── services
+│   │   │   ├── autopilot-manager.service
+│   │   │   ├── connection-manager.service
+│   │   │   ├── flight-review.service
+│   │   │   ├── logloader.service
+│   │   │   ├── mavlink-router.service
+│   │   │   ├── polaris.service
+│   │   │   ├── rtsp-server.service
+│   │   │   └── service-manager.service
+│   │   └── wifi
+│   │       ├── 02-network-manager.rules
+│   │       ├── 99-network.pkla
+│   │       └── ConnectionTemplate.nmconnection
+│   ├── jetson
+│   │   ├── 99-gpio.rules
+│   │   ├── main.conf
+│   │   ├── scripts
+│   │   │   ├── get_serial_number.py
+│   │   │   ├── icm42688p_driver.py
+│   │   │   ├── ina238_test.py
+│   │   │   ├── jetson_system_manager.py
+│   │   │   ├── pcie_set_speed.sh
+│   │   │   ├── reset_fmu_fast.py
+│   │   │   ├── reset_fmu_wait_bl.py
+│   │   │   ├── self_test.sh
+│   │   │   ├── start_can_interface.sh
+│   │   │   ├── stop_can_interface.sh
+│   │   │   ├── test_jtop.py
+│   │   │   ├── vbus_disable.py
+│   │   │   └── vbus_enable.py
+│   │   └── services
+│   │       ├── dds-agent.service
+│   │       ├── jetson-can.service
+│   │       ├── rid-transmitter.service
+│   │       └── system-manager.service
+│   └── pi
+│       ├── main.conf
+│       ├── scripts
+│       │   ├── reset_fmu_fast.py
+│       │   ├── reset_fmu_wait_bl.py
+│       │   ├── vbus_disable.py
+│       │   └── vbus_enable.py
+│       └── services
+│           └── dds-agent.service
+├── README.md
+├── scripts
+│   ├── create_hotspot_connection.sh
+│   ├── functions.sh
+│   ├── install_ark_ui.sh
+│   ├── install_dds_agent.sh
+│   ├── install_flight_review.sh
+│   ├── install_logloader.sh
+│   ├── install_mavlink_router.sh
+│   ├── install_mavsdk_examples.sh
+│   ├── install_mavsdk.sh
+│   ├── install_opencv.sh
+│   ├── install_polaris.sh
+│   ├── install_rid_transmitter.sh
+│   ├── install_ros2.sh
+│   ├── install_rtsp_server.sh
+│   └── install_software.sh
+├── services
+│   └── ark-ui-backend
+│       ├── ark-ui-backend.manifest.json
+│       ├── ark-ui-backend.service
+│       └── start_ark_ui_backend.sh
+└── submodules
+    ├── flight_review
+    │   ├── app
+    │   │   ├── backup_db.py
+    │   │   ├── config_default.ini
+    │   │   ├── delete_db_entry.py
+    │   │   ├── Dockerfile
+    │   │   ├── download_logs.py
+    │   │   ├── generate_overview_img.py
+    │   │   ├── notebook_helper.py
+    │   │   ├── plot_app
+    │   │   ├── prune_old_logs.py
+    │   │   ├── pylintrc
+    │   │   ├── requirements.txt
+    │   │   ├── run.sh
+    │   │   ├── serve.py
+    │   │   ├── setup_db.py
+    │   │   ├── testing_notebook.ipynb
+    │   │   └── tornado_handlers
+    │   ├── data
+    │   ├── docker-compose.dev.yml
+    │   ├── docker-compose.prod.yml
+    │   ├── docker-compose.yml
+    │   ├── init-letsencrypt.sh
+    │   ├── letsencrypt
+    │   │   ├── Dockerfile
+    │   │   └── letsencrypt-renew
+    │   ├── LICENSE.md
+    │   ├── nginx
+    │   │   ├── default.conf
+    │   │   ├── default_ssl.conf
+    │   │   ├── Dockerfile
+    │   │   └── README.md
+    │   ├── README.md
+    │   ├── run_pylint.sh
+    │   └── screenshots
+    │       ├── 3d_view.gif
+    │       └── plot_view.png
+    ├── logloader
+    │   ├── astylerc
+    │   ├── CMakeLists.txt
+    │   ├── config.toml
+    │   ├── install_openssl.sh
+    │   ├── install.sh
+    │   ├── LICENSE
+    │   ├── logloader_logo.png
+    │   ├── Makefile
+    │   ├── README.md
+    │   ├── src
+    │   │   ├── Log.hpp
+    │   │   ├── LogLoader.cpp
+    │   │   ├── LogLoader.hpp
+    │   │   ├── main.cpp
+    │   │   ├── ServerInterface.cpp
+    │   │   └── ServerInterface.hpp
+    │   └── third_party
+    │       ├── cpp-httplib
+    │       └── tomlplusplus
+    ├── mavlink-router
+    │   ├── clangtidy-checks.md
+    │   ├── examples
+    │   │   ├── arm-authorizer.cpp
+    │   │   ├── arm.py
+    │   │   ├── config.sample
+    │   │   ├── Dockerfile.alpine
+    │   │   ├── Dockerfile.ubuntu
+    │   │   ├── heartbeat-print.cpp
+    │   │   ├── heartbeat-print.py
+    │   │   ├── heartbeat-print-tcp.py
+    │   │   ├── heartbeat-sender.py
+    │   │   ├── meson.build
+    │   │   ├── px4-offboard-mode.cpp
+    │   │   ├── receiver.py
+    │   │   └── sender.py
+    │   ├── LICENSE
+    │   ├── mavlink-router.service.in
+    │   ├── meson.build
+    │   ├── meson-cross-aarch64.ini
+    │   ├── meson-cross-armhf.ini
+    │   ├── meson-cross-i686.ini
+    │   ├── meson-cross-sysroot.ini.in
+    │   ├── meson_options.txt
+    │   ├── modules
+    │   │   └── mavlink_c_library_v2
+    │   ├── NEWS
+    │   ├── README.md
+    │   ├── src
+    │   │   ├── autolog.cpp
+    │   │   ├── autolog.h
+    │   │   ├── binlog.cpp
+    │   │   ├── binlog.h
+    │   │   ├── comm.h
+    │   │   ├── common
+    │   │   ├── dedup.cpp
+    │   │   ├── dedup.h
+    │   │   ├── endpoint.cpp
+    │   │   ├── endpoint.h
+    │   │   ├── endpoints_test.cpp
+    │   │   ├── git_version.cpp
+    │   │   ├── logendpoint.cpp
+    │   │   ├── logendpoint.h
+    │   │   ├── main.cpp
+    │   │   ├── mainloop.cpp
+    │   │   ├── mainloop.h
+    │   │   ├── mainloop_test.cpp
+    │   │   ├── meson.build
+    │   │   ├── pollable.cpp
+    │   │   ├── pollable.h
+    │   │   ├── timeout.cpp
+    │   │   ├── timeout.h
+    │   │   ├── tlog.cpp
+    │   │   ├── tlog.h
+    │   │   ├── ulog.cpp
+    │   │   ├── ulog.h
+    │   │   └── version.h.in
+    │   ├── tests
+    │   │   └── routing_test.py
+    │   └── tools
+    │       ├── checkpatch -> git-clang-format
+    │       ├── checkpython
+    │       ├── ci-create-rootfs.sh
+    │       ├── Dockerfile
+    │       ├── gen-git-version.sh
+    │       ├── git-clang-format
+    │       ├── meson-clang-tidy.sh
+    │       ├── meson-i686-ubuntu-pkg-config
+    │       ├── meson-native-ubuntu-pkg-config
+    │       └── meson-vcs-tag.sh
+    ├── mavsdk-examples
+    │   ├── build
+    │   │   ├── CMakeCache.txt
+    │   │   ├── CMakeFiles
+    │   │   ├── cmake_install.cmake
+    │   │   ├── ftp_client
+    │   │   ├── Makefile
+    │   │   ├── system_info
+    │   │   ├── tester1
+    │   │   └── tester2
+    │   ├── CMakeLists.txt
+    │   ├── ftp_client
+    │   │   ├── CMakeLists.txt
+    │   │   └── ftp_client.cpp
+    │   ├── Makefile
+    │   ├── README.md
+    │   ├── system_info
+    │   │   ├── CMakeLists.txt
+    │   │   └── system_info.cpp
+    │   ├── tester1
+    │   │   ├── CMakeLists.txt
+    │   │   └── tester1.cpp
+    │   ├── tester2
+    │   │   ├── CMakeLists.txt
+    │   │   └── tester2.cpp
+    │   └── upload.sh
+    ├── polaris-client-mavlink
+    │   ├── astylerc
+    │   ├── CMakeLists.txt
+    │   ├── config.toml
+    │   ├── install.sh
+    │   ├── LICENSE
+    │   ├── Makefile
+    │   ├── README.md
+    │   ├── src
+    │   │   ├── main.cpp
+    │   │   ├── PolarisClientMavlink.cpp
+    │   │   └── PolarisClientMavlink.hpp
+    │   └── third_party
+    │       └── tomlplusplus
+    ├── RemoteIDTransmitter
+    │   ├── astylerc
+    │   ├── CMakeLists.txt
+    │   ├── config.toml
+    │   ├── install.sh
+    │   ├── libraries
+    │   │   ├── bluez
+    │   │   ├── opendroneid-core-c
+    │   │   └── tomlplusplus
+    │   ├── LICENSE
+    │   ├── Makefile
+    │   ├── README.md
+    │   └── src
+    │       ├── Bluetooth
+    │       ├── main.cpp
+    │       ├── misc
+    │       └── Transmitter
+    └── rtsp-server
+        ├── astylerc
+        ├── build
+        │   ├── CMakeCache.txt
+        │   ├── CMakeFiles
+        │   ├── cmake_install.cmake
+        │   ├── Makefile
+        │   └── rtsp-server
+        ├── CMakeLists.txt
+        ├── config.toml
+        ├── install.sh
+        ├── LICENSE
+        ├── Makefile
+        ├── notes.txt
+        ├── README.md
+        ├── src
+        │   ├── Config.cpp
+        │   ├── Config.hpp
+        │   ├── main.cpp
+        │   ├── RtspServer.cpp
+        │   └── RtspServer.hpp
+        └── third_party
+            └── tomlplusplus
+
+76 directories, 258 files

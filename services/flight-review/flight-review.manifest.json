@@ -2,5 +2,6 @@
   "displayName": "Flight Review",
   "visible": true,
   "description": "Flight Review server hosted locally.",
-  "configFile": ""
+  "configFile": "",
+  "platform": ["jetson", "pi"]
 }

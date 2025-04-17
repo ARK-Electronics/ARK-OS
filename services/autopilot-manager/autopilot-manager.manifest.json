@@ -2,5 +2,6 @@
   "displayName": "Autopilot Manager",
   "visible": false,
   "description": "Microservice backend for managing the autopilot",
-  "configFile": ""
+  "configFile": "",
+  "platform": ["jetson", "pi", "ubuntu"]
 }

@@ -1,21 +1,21 @@
 [submodule "submodules/flight_review"]
-	path = submodules/flight_review
+	path = services/flight-review/flight-review
 	url = https://github.com/PX4/flight_review.git
 [submodule "submodules/logloader"]
-	path = submodules/logloader
+	path = services/logloader/logloader
 	url = https://github.com/ARK-Electronics/logloader.git
 [submodule "submodules/mavlink-router"]
-	path = submodules/mavlink-router
+	path = services/mavlink-router/mavlink-router
 	url = https://github.com/mavlink-router/mavlink-router.git
 [submodule "submodules/mavsdk-examples"]
-	path = submodules/mavsdk-examples
+	path = misc/mavsdk-examples
 	url = https://github.com/ARK-Electronics/mavsdk-examples.git
 [submodule "submodules/polaris-client-mavlink"]
-	path = submodules/polaris-client-mavlink
+	path = services/polaris/polaris-client-mavlink
 	url = https://github.com/ARK-Electronics/polaris-client-mavlink.git
 [submodule "submodules/RemoteIDTransmitter"]
-	path = submodules/RemoteIDTransmitter
+	path = services/rid-transmitter/RemoteIDTransmitter
 	url = https://github.com/ARK-Electronics/RemoteIDTransmitter.git
 [submodule "submodules/rtsp-server"]
-	path = submodules/rtsp-server
+	path = services/rtsp-server/rtsp-server
 	url = https://github.com/ARK-Electronics/rtsp-server.git

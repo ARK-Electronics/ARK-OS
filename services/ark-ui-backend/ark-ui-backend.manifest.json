@@ -2,5 +2,6 @@
   "displayName": "ARK UI Backend",
   "visible": false,
   "description": "Backend for ARK UI Web App.",
-  "configFile": ""
+  "configFile": "",
+  "platform": ["jetson", "pi", "ubuntu"]
 }

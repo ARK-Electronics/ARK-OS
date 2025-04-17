@@ -2,5 +2,6 @@
   "displayName": "RTSP Server",
   "visible": true,
   "description": "RTSP Server for connected cameras.",
-  "configFile": "config.toml"
+  "configFile": "config.toml",
+  "platform": ["jetson", "pi"]
 }
