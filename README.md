@@ -45,10 +45,16 @@ This service provides an RTSP server via gstreamer. The stream from the first co
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.
 
 **ark-ui-backend.service** <br>
-This service provides a REST API backend for ARK-UI.
+This service provides an API gateway for the ARK UI.
 
-**hotspot-control.service** <br>
-This service creates a WiFi Hotspot if the device is unable to connect to a WiFi network within 1 minute after booting. You can then use the ARK-UI to put the device into Station mode and connect to your local WiFi network. The default ssid and password are `<serialnumber>-<hostname>` and `password`.
+**connecton-manager.service** <br>
+This service provides a REST API for connection management via the ARK UI.
+
+**autopilot-manager.service** <br>
+This service provides a REST API for autopilot management via the ARK UI.
+
+**service-manager.service** <br>
+This service provides a REST API for systemd user service management via the ARK UI.
 
 ### Jetson only
 
