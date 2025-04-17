@@ -16,14 +16,10 @@ cd $PROJECT_ROOT/frontend/ark-ui
 ./install.sh
 popd
 
-NGINX_CONFIG_FILE_PATH="/etc/nginx/sites-available/ark-ui"
 DEPLOY_PATH="/var/www/ark-ui"
 
 # Copy nginx config
-sudo cp "$COMMON_DIR/ark-ui.nginx" $NGINX_CONFIG_FILE_PATH
-
-# Modify the Nginx config to set the correct root path based on the user
-# sudo sed -i "s|^\([[:space:]]*root\) .*;|\1 $DEPLOY_PATH/html;|" $NGINX_CONFIG_FILE_PATH
+sudo cp $PROJECT_ROOT/frontend/ark-ui.nginx /etc/nginx/sites-available/ark-ui
 
 # Copy frontend and backend files to deployment path
 sudo mkdir -p $DEPLOY_PATH/html
@@ -36,7 +32,7 @@ sudo chown -R www-data:www-data $DEPLOY_PATH
 sudo chmod -R 755 $DEPLOY_PATH
 
 if [ ! -L /etc/nginx/sites-enabled/ark-ui ]; then
-  sudo ln -s $NGINX_CONFIG_FILE_PATH /etc/nginx/sites-enabled/ark-ui
+  sudo ln -s /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui
 fi
 
 # Remove default configuration
