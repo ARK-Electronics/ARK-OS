@@ -1,7 +1,11 @@
 {
-  "displayName": "Remote ID Transmitter",
-  "visible": true,
-  "description": "Remote ID Transmitter via Bluetooth",
+  "displayName": "RemoteID Transmitter",
+  "description": "Transmit RemoteID packets via Bluetooth",
+  "platform": ["jetson"],
   "configFile": "config.toml",
-  "platform": ["jetson", "pi"]
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_RID_TRANSMITTER",
+  "install_script": "install_rid_transmitter.sh",
+  "install_files": []
 }

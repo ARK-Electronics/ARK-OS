@@ -233,58 +233,17 @@ done
 ########## create hotspot connection ##########
 ~/.local/bin/create_hotspot_connection.sh
 
-########## mavlink-router ##########
-./setup/install_mavlink_router.sh
-
-########## dds-agent ##########
-if [ "$INSTALL_DDS_AGENT" = "y" ]; then
-	./setup/install_dds_agent.sh
-fi
-
 ########## Always install MAVSDK ##########
 ./setup/install_mavsdk.sh
 
 ########## mavsdk-examples ##########
 ./setup/install_mavsdk_examples.sh
 
-########## logloader ##########
-if [ "$INSTALL_LOGLOADER" = "y" ]; then
-	./setup/install_logloader.sh
-	./setup/install_flight_review.sh
-fi
+########## Install all services using the service_setup.sh script ##########
+echo "Installing services..."
+./setup/service_setup.sh install
 
-########## polaris-client-mavlink ##########
-if [ "$INSTALL_POLARIS" = "y" ]; then
-	./setup/install_polaris.sh
-fi
-
-########## rtsp-server ##########
-if [ "$INSTALL_RTSP_SERVER" = "y" ]; then
-	./setup/install_rtsp_server.sh
-fi
-
-########## ark-ui ##########
-if [ "$INSTALL_ARK_UI" = "y" ]; then
-	./setup/install_ark_ui.sh
-fi
-
-########## jetson specific services ##########
-if [ "$TARGET" = "jetson" ]; then
-
-	########## rid-transmitter ##########
-	if [ "$INSTALL_RID_TRANSMITTER" = "y" ]; then
-		./setup/install_rid_transmitter.sh
-	fi
-
-	# these services run as root
-	echo "Installing Jetson services"
-	sudo install -m 755 $TARGET_DIR/scripts/start_can_interface.sh /usr/local/bin/
-	sudo cp $TARGET_DIR/services/jetson-can.service /etc/systemd/system/
-	sudo systemctl daemon-reload
-	sudo systemctl enable jetson-can.service
-	sudo systemctl restart jetson-can.service
-fi
-
+########## Ensure time synchronization ##########
 sudo systemctl enable systemd-time-wait-sync.service
 
 sync

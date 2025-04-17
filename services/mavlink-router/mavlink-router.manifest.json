@@ -1,7 +1,12 @@
 {
   "displayName": "Mavlink Router",
-  "visible": true,
   "description": "Routes mavlink data between endpoints.",
+  "platform": ["all"],
   "configFile": "main.conf",
-  "platform": ["jetson", "pi"]
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "install_mavlink_router.sh",
+  "install_files": ["start_mavlink_router.sh"]
+}
 }

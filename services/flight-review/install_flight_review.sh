@@ -3,12 +3,10 @@ source $(dirname $BASH_SOURCE)/functions.sh
 
 echo "Installing flight_review"
 
-service_uninstall flight-review
-
 sudo rm -rf /opt/flight_review
 
 pushd .
-cd $PROJECT_ROOT/submodules/flight_review
+cd flight_review
 
 # Install dependencies
 if [ "$TARGET" = "jetson" ]; then
@@ -45,8 +43,3 @@ sudo chown -R $USER:$USER $XDG_DATA_HOME/flight_review
 
 # Initialize database
 $APP_DIR/setup_db.py
-
-service_add_manifest flight-review
-
-service_install flight-review
-

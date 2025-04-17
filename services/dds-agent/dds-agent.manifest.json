@@ -1,7 +1,11 @@
 {
   "displayName": "DDS Agent",
-  "visible": true,
   "description": "DDS Bridge between PX4 and ROS2 over High Speed UART.",
+  "platform": ["jetson", "pi"],
   "configFile": "",
-  "platform": ["jetson", "pi"]
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_DDS_AGENT",
+  "install_script": "install_dds_agent.sh",
+  "install_files": ["start_dds_agent.sh"]
 }

@@ -1,8 +1,10 @@
 #!/bin/bash
 source $(dirname $BASH_SOURCE)/functions.sh
 
-echo "Installing mavsdk-examples"
+echo "Installing RemoteIDTransmitter"
+
 pushd .
-cd $PROJECT_ROOT/misc/mavsdk-examples
+cd RemoteIDTransmitter
 make install
+sudo ldconfig
 popd

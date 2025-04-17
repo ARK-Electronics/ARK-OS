@@ -1,7 +1,11 @@
 {
   "displayName": "Connections Manager",
-  "visible": false,
   "description": "Microservice backend for managing connections",
+  "platform": ["all"],
   "configFile": "",
-  "platform": ["jetson", "pi", "ubuntu"]
+  "visible": false,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "",
+  "install_files": ["connection_manager.py"]
 }

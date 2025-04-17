@@ -2,10 +2,6 @@
 source $(dirname $BASH_SOURCE)/functions.sh
 echo "Installing ARK-UI"
 
-# Remove old ark-ui
-service_uninstall pilot-portal
-service_uninstall ark-ui-backend
-
 # clean up old nginx
 sudo rm /etc/nginx/sites-enabled/ark-ui &>/dev/null
 sudo rm /etc/nginx/sites-available/ark-ui &>/dev/null
@@ -44,19 +40,5 @@ sudo -u www-data stat $DEPLOY_PATH
 # Test the configuration and restart nginx
 sudo nginx -t
 sudo systemctl restart nginx
-
-# Install ark-ui-backend proxy
-service_add_manifest ark-ui-backend
-service_install ark-ui-backend
-
-# Install each microservice backend
-service_add_manifest autopilot-manager
-service_add_manifest connection-manager
-service_add_manifest service-manager
-service_add_manifest system-manager
-service_install autopilot-manager
-service_install connection-manager
-service_install service-manager
-service_install system-manager
 
 echo "Finished $(basename $BASH_SOURCE)"

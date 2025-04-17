@@ -1,7 +1,11 @@
 {
-  "displayName": "Connections Manager",
-  "visible": false,
-  "description": "Microservice backend for managing connections",
-  "configFile": "",
-  "platform": ["jetson", "pi", "ubuntu"]
+  "displayName": "Service Manager",
+  "description": "Microservice backend for managing systemd service",
+  "platform": ["all"],
+  "configFile": "config.toml",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "",
+  "install_files": ["service_manager.py"]
 }

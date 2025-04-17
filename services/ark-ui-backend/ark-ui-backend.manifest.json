@@ -1,7 +1,11 @@
 {
   "displayName": "ARK UI Backend",
-  "visible": false,
   "description": "Backend for ARK UI Web App.",
+  "platform": ["jetson", "pi"],
   "configFile": "",
-  "platform": ["jetson", "pi", "ubuntu"]
+  "visible": false,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "install_ark_ui.sh",
+  "install_files": ["start_ark_ui_backend.sh"]
 }
