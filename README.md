@@ -17,9 +17,12 @@ Run the install script on the device. You will be prompted y/n to install the se
 You can skip the interactive prompt by copying the **default.env** file and renaming it **user.env**. You can adjust the options in the **user.env**. This script can be safely run multiple times to update your system.
 
 ## ARK-UI
-A web based UI is provided to more easily manage your device. The main page shows the status of the services and includes controls to edit their settings, start/stop, and view journal log files. There are also pages to manage your network connections and update the flight controller firmware. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
+A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
 
-![alt text](ark-ui.png)
+![alt text](ark-ui1.png)
+![alt text](ark-ui2.png)
+![alt text](ark-ui3.png)
+![alt text](ark-ui4.png)
 
 ## Services
 When running the **install.sh** script you will be prompted to install the below services. The services are installed as [systemd user services](https://www.unixsysadmin.com/systemd-user-services/) and conform to the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/index.html).
