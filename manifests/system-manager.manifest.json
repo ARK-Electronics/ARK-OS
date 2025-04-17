@@ -1,0 +1,6 @@
+{
+  "displayName": "System Manager",
+  "visible": false,
+  "description": "Microservice backend for managing linux system",
+  "configFile": ""
+}
