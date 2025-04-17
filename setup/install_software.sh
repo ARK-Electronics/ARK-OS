@@ -89,7 +89,6 @@ else
 		fi
 	fi
 
-	ask_yes_no "Install ark-ui?" INSTALL_ARK_UI
 	ask_yes_no "Install polaris-client-mavlink?" INSTALL_POLARIS
 
 	if [ "$INSTALL_POLARIS" = "y" ]; then
