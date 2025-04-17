@@ -47,11 +47,14 @@ This service receives RTCM corrections from the PointOne GNSS Corrections servic
 **ark-ui-backend.service** <br>
 This service provides an API gateway for the ARK UI.
 
-**connecton-manager.service** <br>
-This service provides a REST API for connection management via the ARK UI.
+**system-manager.service** <br>
+This service provides a REST API for linux system management via the ARK UI.
 
 **autopilot-manager.service** <br>
 This service provides a REST API for autopilot management via the ARK UI.
+
+**connecton-manager.service** <br>
+This service provides a REST API for connection management via the ARK UI.
 
 **service-manager.service** <br>
 This service provides a REST API for systemd user service management via the ARK UI.
