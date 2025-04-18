@@ -158,7 +158,8 @@ function install_service() {
     # Run service-specific install script if specified in manifest
     if [ -n "$install_script" ] && [ -f "$SERVICE_DIR/$install_script" ]; then
         echo "Running installation script: $install_script"
-        bash "$SERVICE_DIR/$install_script"
+        # Execute the script with proper path
+        (cd "$SERVICE_DIR" && bash "./$install_script")
     fi
 
     # Check if service requires sudo
