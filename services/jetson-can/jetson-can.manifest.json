@@ -7,5 +7,5 @@
   "requires_sudo": true,
   "env_var": "",
   "install_script": "",
-  "install_files": []
+  "install_files": ["start_can_interface.sh", "stop_can_interface.sh"]
 }
