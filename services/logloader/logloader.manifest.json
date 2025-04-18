@@ -1,0 +1,11 @@
+{
+  "displayName": "Logloader",
+  "description": "Automatically downloads log files from the vehicle SD card and optionally uploads to both a local and remote server.",
+  "platform": ["jetson", "pi"],
+  "configFile": "config.toml",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_LOGLOADER",
+  "install_script": "install_logloader.sh",
+  "install_files": []
+}

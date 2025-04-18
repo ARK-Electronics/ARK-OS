@@ -1,0 +1,11 @@
+{
+  "displayName": "Flight Review",
+  "description": "Flight Review server hosted locally.",
+  "platform": ["jetson", "pi"],
+  "configFile": "",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_LOGLOADER",
+  "install_script": "install_flight_review.sh",
+  "install_files": ["start_flight_review.sh"]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Micro-XRCE-DDS-Agent
+Wants=network.target
+After=dev-ttyTHS1.device dev-ttyAMA4.device syslog.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/start_dds_agent.sh
+Restart=on-failure
+RestartSec=5
+# Add a slight delay to ensure devices are fully initialized
+ExecStartPre=/bin/sleep 2
+
+[Install]
+WantedBy=default.target

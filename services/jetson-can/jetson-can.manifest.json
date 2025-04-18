@@ -1,0 +1,11 @@
+{
+  "displayName": "Jetson CAN",
+  "description": "Enables Jetson CAN interface",
+  "platform": ["jetson"],
+  "configFile": "",
+  "visible": false,
+  "requires_sudo": true,
+  "env_var": "",
+  "install_script": "",
+  "install_files": []
+}

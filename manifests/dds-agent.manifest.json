@@ -1,6 +1,0 @@
-{
-  "displayName": "DDS Agent",
-  "visible": true,
-  "description": "DDS Bridge between PX4 and ROS2 over High Speed UART.",
-  "configFile": ""
-}

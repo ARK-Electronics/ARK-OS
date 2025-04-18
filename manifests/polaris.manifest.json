@@ -1,6 +1,0 @@
-{
-  "displayName": "Polaris Mavlink",
-  "visible": true,
-  "description": "Client for the Polaris RTK Corrections Network to provide corrections over Mavlink.",
-  "configFile": "config.toml"
-}

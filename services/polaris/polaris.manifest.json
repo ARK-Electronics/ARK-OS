@@ -1,0 +1,11 @@
+{
+  "displayName": "Polaris Mavlink",
+  "description": "Client for the Polaris RTK Corrections Network to provide corrections over Mavlink.",
+  "platform": ["jetson", "pi"],
+  "configFile": "config.toml",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_POLARIS",
+  "install_script": "install_polaris.sh",
+  "install_files": []
+}

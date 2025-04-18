@@ -1,0 +1,14 @@
+[Unit]
+Description=Microservice backend for monitoring and managing the linux system
+After=network-online.target syslog.target
+Wants=network.target network-online.target syslog.target
+
+[Service]
+Type=simple
+ExecStart=python3 %h/.local/bin/system_manager.py
+Restart=on-failure
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+{
+  "displayName": "Connections Manager",
+  "description": "Microservice backend for managing connections",
+  "platform": ["all"],
+  "configFile": "",
+  "visible": false,
+  "requires_sudo": false,
+  "env_var": "",
+  "install_script": "",
+  "install_files": ["connection_manager.py"]
+}

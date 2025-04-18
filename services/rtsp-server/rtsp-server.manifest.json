@@ -1,0 +1,11 @@
+{
+  "displayName": "RTSP Server",
+  "description": "RTSP Server for connected cameras.",
+  "platform": ["jetson", "pi"],
+  "configFile": "config.toml",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_RTSP_SERVER",
+  "install_script": "install_rtsp_server.sh",
+  "install_files": []
+}
