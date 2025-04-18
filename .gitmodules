@@ -1,5 +1,5 @@
 [submodule "submodules/flight_review"]
-	path = services/flight-review/flight-review
+	path = services/flight-review/flight_review
 	url = https://github.com/PX4/flight_review.git
 [submodule "submodules/logloader"]
 	path = services/logloader/logloader

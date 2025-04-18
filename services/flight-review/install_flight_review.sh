@@ -10,7 +10,7 @@ echo "Installing flight_review"
 sudo rm -rf /opt/flight_review
 
 pushd .
-cd flight-review
+cd flight_review
 
 # Install dependencies
 if [ "$TARGET" = "jetson" ]; then

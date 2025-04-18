@@ -35,15 +35,21 @@ function read_json_value() {
 # Function to check if current platform is in the platform list
 function is_platform_supported() {
     local manifest_file="$1"
-    local platforms=$(read_json_value "$manifest_file" "platform" "all")
+    # Always expect an array from JSON
+    local platforms=$(jq -r '.platform | if type == "array" then . else [.] end | @json' "$manifest_file" 2>/dev/null)
 
-    # If platform is "all" or not specified, assume all platforms are supported
-    if [ "$platforms" = "all" ]; then
+    # If jq fails or returns null, default to ["all"]
+    if [ -z "$platforms" ] || [ "$platforms" = "null" ]; then
+        platforms='["all"]'
+    fi
+
+    # Check if "all" is in the array
+    if [[ "$platforms" == *"\"all\""* ]]; then
         return 0
     fi
 
-    # Check if current platform is in the comma-separated list
-    if [[ "$platforms" == *"$TARGET"* ]]; then
+    # Check if current platform is in the array
+    if [[ "$platforms" == *"\"$TARGET\""* ]]; then
         return 0
     fi
 
