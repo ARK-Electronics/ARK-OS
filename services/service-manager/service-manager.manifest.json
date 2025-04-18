@@ -3,7 +3,7 @@
   "description": "Microservice backend for managing systemd service",
   "platform": ["all"],
   "configFile": "config.toml",
-  "visible": true,
+  "visible": false,
   "requires_sudo": false,
   "env_var": "",
   "install_script": "",

@@ -3,7 +3,7 @@
   "description": "Microservice backend for managing the linux system",
   "platform": ["all"],
   "configFile": "",
-  "visible": true,
+  "visible": false,
   "requires_sudo": false,
   "env_var": "",
   "install_script": "",
