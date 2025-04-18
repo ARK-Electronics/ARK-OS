@@ -10,17 +10,6 @@ if [ -f "$SCRIPT_DIR/../user.env" ]; then
     source "$SCRIPT_DIR/../user.env"
 fi
 
-# Detect target platform
-if uname -ar | grep -q tegra; then
-    export TARGET=jetson
-elif [ -f /proc/device-tree/model ] && grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
-    export TARGET=pi
-else
-    export TARGET=ubuntu
-fi
-
-echo "Detected platform: $TARGET"
-
 # Set up paths
 SERVICES_DIR="$(realpath "$SCRIPT_DIR/../services")"
 
@@ -123,6 +112,7 @@ function uninstall_service() {
     sudo rm /etc/systemd/system/$1.service &>/dev/null
     sudo rm /lib/systemd/system/$1.service &>/dev/null
     sudo rm $XDG_CONFIG_HOME/systemd/user/$1.service &>/dev/null
+    sudo rm -rf "$XDG_DATA_HOME/$1"
     sudo systemctl daemon-reload
     systemctl --user daemon-reload
 }

@@ -1,5 +1,25 @@
 #!/bin/bash
-source $(dirname $BASH_SOURCE)/functions.sh
+function git_clone_retry() {
+	local url="$1" dir="$2" branch="$3" retries=3 delay=5
+
+	if [ -n "$branch" ]; then
+		# Clone with a specific branch and avoid shallow clone
+		until git clone --recurse-submodules -b "$branch" "$url" "$dir"; do
+			((retries--)) || return 1
+			echo "git clone failed, retrying in $delay seconds..."
+			rm -rf "$dir" &>/dev/null
+			sleep $delay
+		done
+	else
+		# Shallow clone if no branch is specified
+		until git clone --recurse-submodules --depth=1 --shallow-submodules "$url" "$dir"; do
+			((retries--)) || return 1
+			echo "git clone failed, retrying in $delay seconds..."
+			rm -rf "$dir" &>/dev/null
+			sleep $delay
+		done
+	fi
+}
 
 # Check if we are on 20.04 or 22.04
 codename=$(lsb_release -c | awk '{print $2}')

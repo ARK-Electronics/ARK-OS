@@ -13,6 +13,54 @@ fi
 # Load helper functions
 source $(dirname $BASH_SOURCE)/functions.sh
 
+function sudo_refresh_loop() {
+	while true; do
+		sudo -v
+		sleep 5
+	done
+}
+
+function ask_yes_no() {
+	local prompt="$1"
+	local var_name="$2"
+	local default="$3"
+	local default_display="${!var_name^^}"  # Convert to uppercase for display purposes
+
+	while true; do
+		echo "$prompt (y/n) [default: $default_display]"
+		read -r REPLY
+		if [ -z "$REPLY" ]; then
+			REPLY="${!var_name}"
+		fi
+		case "$REPLY" in
+			y|Y) eval $var_name="y"; break ;;
+			n|N) eval $var_name="n"; break ;;
+			*) echo "Invalid input. Please enter y or n." ;;
+		esac
+	done
+}
+
+function check_and_add_alias() {
+	local name="$1"
+	local command="$2"
+	local file="$HOME/.bash_aliases"
+
+	# Check if the alias file exists, create if not
+	[ -f "$file" ] || touch "$file"
+
+	# Check if the alias already exists
+	if grep -q "^alias $name=" "$file"; then
+		echo "Alias '$name' already exists."
+	else
+		# Add the new alias
+		echo "alias $name='$command'" >> "$file"
+		echo "Alias '$name' added."
+	fi
+
+	# Source the aliases file
+	source "$file"
+}
+
 function cleanup() {
 	kill -9 $SUDO_PID
 	exit 0
@@ -106,6 +154,9 @@ git submodule update --init --recursive
 git submodule foreach git reset --hard
 git submodule foreach git clean -fd
 
+# TODO: some of these dependencies should be part of
+# the specific service install script. Next pass should be to install
+# each service independently to determine what deps are missing.
 ########## install dependencies ##########
 echo "Installing dependencies"
 sudo apt-get update
