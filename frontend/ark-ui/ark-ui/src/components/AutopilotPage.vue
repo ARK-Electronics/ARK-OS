@@ -308,11 +308,12 @@
     </div>
 
     <!-- Reset Confirmation Dialog -->
+    <!-- Reset Confirmation Dialog -->
     <div v-if="showResetConfirmation" class="dialog-overlay">
       <div class="dialog-container">
         <div class="dialog-header">
           <h3 class="dialog-title">Reset Flight Controller</h3>
-          <button @click="showResetConfirmation = false" class="close-button">
+          <button @click="showResetConfirmation = false" class="close-button" :disabled="isResetting">
             <i class="fas fa-times"></i>
           </button>
         </div>
@@ -325,20 +326,30 @@
           </p>
           <div class="reset-options">
             <div class="reset-option">
-              <input type="radio" id="reset-normal" v-model="resetMode" value="normal">
+              <input type="radio" id="reset-normal" v-model="resetMode" value="normal" :disabled="isResetting">
               <label for="reset-normal">Normal Reset</label>
               <p class="reset-description">Standard restart of the autopilot.</p>
             </div>
             <div class="reset-option">
-              <input type="radio" id="reset-bootloader" v-model="resetMode" value="bootloader">
+              <input type="radio" id="reset-bootloader" v-model="resetMode" value="bootloader" :disabled="isResetting">
               <label for="reset-bootloader">Bootloader</label>
               <p class="reset-description">Reset to bootloader (use only for firmware updates).</p>
             </div>
           </div>
+
+          <!-- Reset Status Message -->
+          <div v-if="isResetting" class="reset-status">
+            <div class="reset-spinner">
+              <i class="fas fa-spinner fa-spin"></i>
+            </div>
+            <div class="reset-message">
+              Resetting flight controller...
+            </div>
+          </div>
+
           <div class="dialog-actions">
-            <button @click="showResetConfirmation = false" class="cancel-button">Cancel</button>
-            <button @click="resetFlightController" class="confirm-button"
-                    :class="{'loading': isResetting}">
+            <button @click="showResetConfirmation = false" class="cancel-button" :disabled="isResetting">Cancel</button>
+            <button @click="resetFlightController" class="confirm-button" :disabled="isResetting">
               <i v-if="isResetting" class="fas fa-spinner fa-spin"></i>
               <span v-else>Reset Controller</span>
             </button>
@@ -610,10 +621,29 @@ export default {
           this.statusMessage = 'Flight controller reset successfully.';
           this.uploadError = false;
 
-          // Wait a few seconds for the controller to restart
+          // Wait a few seconds for the controller to restart before polling
           setTimeout(() => {
             this.fetchAutopilotData();
-            this.showResetConfirmation = false;
+
+            // Set up a polling interval specifically for reset completion
+            const resetCheckInterval = setInterval(() => {
+              // If we detect a connection after reset, close the dialog
+              if (this.isConnected || this.isInBootloader) {
+                clearInterval(resetCheckInterval);
+                this.isResetting = false;
+                this.showResetConfirmation = false;
+              }
+            }, 1000);
+
+            // Safety timeout - if no connection after 15 seconds, give up
+            setTimeout(() => {
+              if (this.isResetting) {
+                clearInterval(resetCheckInterval);
+                this.isResetting = false;
+                this.statusMessage = 'Reset initiated, but reconnection timed out. Please check device status.';
+              }
+            }, 15000);
+
           }, 3000);
         } else {
           throw new Error(response.data.message || 'Reset failed');
@@ -622,7 +652,6 @@ export default {
         console.error('Reset failed:', error);
         this.statusMessage = `Reset failed: ${error.message}`;
         this.uploadError = true;
-      } finally {
         this.isResetting = false;
       }
     }
@@ -1471,4 +1500,36 @@ export default {
   }
 }
 
+/* Reset Status Message Styles */
+.reset-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  background-color: rgba(52, 152, 219, 0.1);
+  border-radius: 8px;
+  width: 100%;
+}
+
+.reset-spinner {
+  font-size: 2rem;
+  color: var(--ark-color-blue);
+}
+
+.reset-message {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--ark-color-blue);
+  text-align: center;
+}
+
+/* Disabled controls during reset */
+.dialog-container button:disabled,
+.reset-options input:disabled,
+.reset-options input:disabled + label {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 </style>
