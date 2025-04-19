@@ -284,14 +284,14 @@ done
 ~/.local/bin/create_hotspot_connection.sh
 
 ########## Always install MAVSDK ##########
-./setup/install_mavsdk.sh
+./tools/install_mavsdk.sh
 
 ########## mavsdk-examples ##########
-./setup/install_mavsdk_examples.sh
+./tools/install_mavsdk_examples.sh
 
-########## Install all services using the service_setup.sh script ##########
+########## install services ##########
 echo "Installing services..."
-./setup/service_setup.sh install
+./tools/serivce_control.sh install
 
 ########## Ensure time synchronization ##########
 sudo systemctl enable systemd-time-wait-sync.service

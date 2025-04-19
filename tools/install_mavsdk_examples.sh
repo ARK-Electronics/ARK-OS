@@ -6,6 +6,6 @@ source "$PROJECT_ROOT/setup/functions.sh"
 
 echo "Installing mavsdk-examples"
 pushd .
-cd $PROJECT_ROOT/misc/mavsdk-examples
+cd $PROJECT_ROOT/libs/mavsdk-examples
 make install
 popd

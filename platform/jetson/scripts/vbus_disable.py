@@ -19,35 +19,14 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import Jetson.GPIO as GPIO
 import os
-
-def detect_jetson_model():
-    try:
-        with open("/proc/device-tree/model", "r") as f:
-            model = f.read().lower()
-            if "orin nx" in model:
-                return "JETSON_ORIN_NX"
-            elif "orin nano" in model:
-                return "JETSON_ORIN_NANO"
-            else:
-                print(f"Warning: Unknown Jetson model detected: {model}")
-                return None
-    except FileNotFoundError:
-        print("Warning: Could not detect Jetson model")
-        return None
-
-# Detect and set model before importing RPi.GPIO
-jetson_model = detect_jetson_model()
-if jetson_model:
-    os.environ['JETSON_MODEL_NAME'] = jetson_model
-    print(f"Detected and set JETSON_MODEL_NAME={jetson_model}")
-else:
-    print("Could not set JETSON_MODEL_NAME environment variable")
-
-import RPi.GPIO as GPIO
 import time
 
-# Pin Definitions
+# Pin definitions at:
+# ark_jetson_orin_nano_nx_device_tree/Linux_for_Tegra/source/hardware/nvidia/
+#   t23x/nv-public/include/platforms/dt-bindings/tegra234-p3767-0000-common.h
+
 vbus_det_pin = 32
 
 def main():
@@ -58,9 +37,8 @@ def main():
         print("Jetpack version is R36, skipping VBUS Disable")
         return
 
-    # Pin Setup:
-    GPIO.setmode(GPIO.BOARD)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
+    # Configure VBUS_SENSE_BOOTLOADER
+    GPIO.setmode(GPIO.BOARD)
     GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
     value = GPIO.LOW

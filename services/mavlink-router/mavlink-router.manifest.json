@@ -9,4 +9,3 @@
   "install_script": "install_mavlink_router.sh",
   "install_files": ["start_mavlink_router.sh"]
 }
-}
