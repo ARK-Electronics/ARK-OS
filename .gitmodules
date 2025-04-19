@@ -8,7 +8,7 @@
 	path = services/mavlink-router/mavlink-router
 	url = https://github.com/mavlink-router/mavlink-router.git
 [submodule "submodules/mavsdk-examples"]
-	path = misc/mavsdk-examples
+	path = libs/mavsdk-examples
 	url = https://github.com/ARK-Electronics/mavsdk-examples.git
 [submodule "submodules/polaris-client-mavlink"]
 	path = services/polaris/polaris-client-mavlink
