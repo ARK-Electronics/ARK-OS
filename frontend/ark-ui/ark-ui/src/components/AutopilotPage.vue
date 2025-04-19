@@ -310,39 +310,51 @@
     <!-- Reset Confirmation Dialog -->
     <div v-if="showResetConfirmation" class="dialog-overlay">
       <div class="dialog-container">
-        <div class="dialog-header">
-          <h3 class="dialog-title">Reset Flight Controller</h3>
-          <button @click="showResetConfirmation = false" class="close-button">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-        <div class="dialog-content">
-          <div class="warning-icon">
-            <i class="fas fa-exclamation-triangle"></i>
-          </div>
-          <p class="dialog-text">
-            Are you sure you want to reset the flight controller?
-          </p>
-          <div class="reset-options">
-            <div class="reset-option">
-              <input type="radio" id="reset-normal" v-model="resetMode" value="normal">
-              <label for="reset-normal">Normal Reset</label>
-              <p class="reset-description">Standard restart of the autopilot.</p>
-            </div>
-            <div class="reset-option">
-              <input type="radio" id="reset-bootloader" v-model="resetMode" value="bootloader">
-              <label for="reset-bootloader">Bootloader</label>
-              <p class="reset-description">Reset to bootloader (use only for firmware updates).</p>
-            </div>
-          </div>
-          <div class="dialog-actions">
-            <button @click="showResetConfirmation = false" class="cancel-button">Cancel</button>
-            <button @click="resetFlightController" class="confirm-button"
-                    :class="{'loading': isResetting}">
-              <i v-if="isResetting" class="fas fa-spinner fa-spin"></i>
-              <span v-else>Reset Controller</span>
+        <div v-if="!isResetting">
+          <!-- Pre-reset confirmation view -->
+          <div class="dialog-header">
+            <h3 class="dialog-title">Reset Flight Controller</h3>
+            <button @click="showResetConfirmation = false" class="close-button">
+              <i class="fas fa-times"></i>
             </button>
           </div>
+          <div class="dialog-content">
+            <div class="warning-icon">
+              <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <p class="dialog-text">
+              Are you sure you want to reset the flight controller?
+            </p>
+            <div class="reset-options">
+              <div class="reset-option">
+                <input type="radio" id="reset-normal" v-model="resetMode" value="normal">
+                <label for="reset-normal">Normal Reset</label>
+                <p class="reset-description">Standard restart of the autopilot.</p>
+              </div>
+              <div class="reset-option">
+                <input type="radio" id="reset-bootloader" v-model="resetMode" value="bootloader">
+                <label for="reset-bootloader">Bootloader</label>
+                <p class="reset-description">Reset to bootloader (use only for firmware updates).</p>
+              </div>
+            </div>
+            <div class="dialog-actions">
+              <button @click="showResetConfirmation = false" class="cancel-button">Cancel</button>
+              <button @click="resetFlightController" class="confirm-button">
+                Reset Controller
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reset in progress view -->
+        <div v-else class="dialog-content loading-content">
+          <div class="reset-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+          </div>
+          <h3 class="loading-title">Resetting Flight Controller</h3>
+          <p class="loading-text">
+            Please wait while the controller restarts...
+          </p>
         </div>
       </div>
     </div>
@@ -595,6 +607,7 @@ export default {
       return 'gauge-low';
     },
     async resetFlightController() {
+      // Set resetting state to true - this will show the loading screen
       this.isResetting = true;
 
       try {
@@ -607,14 +620,54 @@ export default {
         }
 
         if (response.data.success) {
+          // Success! The reset command was sent successfully
           this.statusMessage = 'Flight controller reset successfully.';
           this.uploadError = false;
 
-          // Wait a few seconds for the controller to restart
-          setTimeout(() => {
-            this.fetchAutopilotData();
-            this.showResetConfirmation = false;
-          }, 3000);
+          // First wait for the controller to start restarting
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // Start polling for reconnection
+          const waitForReconnection = async () => {
+            // Time to wait between polls
+            const pollInterval = 1000; // 1 second
+            // Maximum time to wait for reconnection
+            const maxWaitTime = 20000; // 20 seconds
+            // Total time waited so far
+            let timeWaited = 0;
+
+            while (timeWaited < maxWaitTime) {
+              // Try to fetch autopilot data
+              await this.fetchAutopilotData();
+
+              // If we're connected or in bootloader, we're done
+              if (this.isConnected || this.isInBootloader) {
+                // Wait a moment to ensure we're stable
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return true;
+              }
+
+              // Wait for the next check
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              timeWaited += pollInterval;
+            }
+
+            // If we get here, we timed out
+            return false;
+          };
+
+          // Wait for reconnection
+          const reconnected = await waitForReconnection();
+
+          if (!reconnected) {
+            // We timed out waiting for reconnection
+            console.warn('Timed out waiting for autopilot to reconnect');
+            this.statusMessage = 'Reset initiated, but reconnection timed out. Please check device status.';
+          }
+
+          // Close the dialog regardless of outcome
+          this.isResetting = false;
+          this.showResetConfirmation = false;
         } else {
           throw new Error(response.data.message || 'Reset failed');
         }
@@ -622,7 +675,6 @@ export default {
         console.error('Reset failed:', error);
         this.statusMessage = `Reset failed: ${error.message}`;
         this.uploadError = true;
-      } finally {
         this.isResetting = false;
       }
     }
@@ -1469,6 +1521,79 @@ export default {
   .connection-status {
     align-self: center;
   }
+}
+
+/* Reset Status Message Styles */
+.reset-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  background-color: rgba(52, 152, 219, 0.1);
+  border-radius: 8px;
+  width: 100%;
+}
+
+.reset-spinner {
+  font-size: 2rem;
+  color: var(--ark-color-blue);
+}
+
+.reset-message {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--ark-color-blue);
+  text-align: center;
+}
+
+/* Disabled controls during reset */
+.dialog-container button:disabled,
+.reset-options input:disabled,
+.reset-options input:disabled + label {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Reset Loading State Styles */
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.reset-spinner {
+  font-size: 3rem;
+  color: var(--ark-color-blue);
+  margin-bottom: 24px;
+}
+
+.loading-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: var(--ark-color-black);
+}
+
+.loading-text {
+  font-size: 1rem;
+  color: var(--ark-color-black);
+  opacity: 0.8;
+  margin: 0;
+}
+
+/* Animation for the spinner */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.fa-spin {
+  animation: spin 1.2s linear infinite;
 }
 
 </style>
