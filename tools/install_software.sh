@@ -291,7 +291,7 @@ done
 
 ########## install services ##########
 echo "Installing services..."
-./tools/serivce_control.sh install
+./tools/service_control.sh install
 
 ########## Ensure time synchronization ##########
 sudo systemctl enable systemd-time-wait-sync.service
