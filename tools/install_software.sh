@@ -4,6 +4,12 @@ DEFAULT_XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
+if ! detect_platform; then
+    echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
+    echo "Running this script on a host computer may cause unintended system modifications."
+    exit 1
+fi
+
 # Check if system is holding package management lock
 if fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
     echo "Another apt process is running. Please try again later."
