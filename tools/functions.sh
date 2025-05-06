@@ -16,13 +16,6 @@ DEFAULT_XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
-# Determine target platform
-if uname -ar | grep -q tegra; then
-	export TARGET=jetson
-else
-	export TARGET=pi
-fi
-
 function detect_platform() {
 	if [ -f /proc/device-tree/model ] && grep -q "Raspberry Pi" /proc/device-tree/model; then
 		export TARGET=pi
@@ -39,15 +32,3 @@ function detect_platform() {
 }
 
 detect_platform
-
-
-# Setup paths
-export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export TARGET_DIR="$PROJECT_ROOT/platform/$TARGET"
-export COMMON_DIR="$PROJECT_ROOT/platform/common"
-
-
-
-
-
-
