@@ -46,6 +46,14 @@ if [ -z "$AP_SSID" ]; then
 
     echo "Created new AP: $AP_SSID with autoconnect enabled"
 else
+    # Check connection priority and set to -1 if necessary
+    PRIORITY=$(nmcli -g connection.autoconnect-priority con show "$AP_SSID")
+
+    if [ "$PRIORITY" != "-1" ]; then
+        echo "Setting autoconnect priority to -1 for existing AP: $AP_SSID"
+        sudo nmcli con modify "$AP_SSID" connection.autoconnect-priority -1
+    fi
+
     # AP exists, check if autoconnect is enabled
     AUTOCONNECT=$(nmcli -g connection.autoconnect con show "$AP_SSID")
 
