@@ -155,9 +155,8 @@ class MAVLinkConnection:
 
         try:
             logger.info(f"Sending system time {int(current_time * 1e6)}")
-            # TODO: fill with proper UTC timestamp
             time_unix_usec = int(current_time * 1e6);
-            time_boot_ms = 0;
+            time_boot_ms = 0; # unused in PX4
             self.mav_connection.mav.system_time_send(
                 time_unix_usec,
                 time_boot_ms
