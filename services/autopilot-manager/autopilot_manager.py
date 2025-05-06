@@ -149,11 +149,30 @@ class MAVLinkConnection:
             logger.error(f"Error requesting autopilot version: {e}")
             return False
 
+    def send_system_time(self, current_time):
+        if not self.mav_connection:
+            return False
+
+        try:
+            logger.info(f"Sending system time {int(current_time * 1e6)}")
+            # TODO: fill with proper UTC timestamp
+            time_unix_usec = int(current_time * 1e6);
+            time_boot_ms = 0;
+            self.mav_connection.mav.system_time_send(
+                time_unix_usec,
+                time_boot_ms
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error sending system time: {e}")
+            return False
+
     def process_messages(self):
         """Process incoming MAVLink messages in a loop"""
         self.running = True
         connection_attempts = 0
         last_version_request_time = 0
+        last_system_time_update_time = 0
         waiting_for_heartbeat = True
 
         while self.running:
@@ -192,6 +211,13 @@ class MAVLinkConnection:
                             if self.autopilot_data["version"] == "Unknown":
                                 self.request_autopilot_version()
                                 last_version_request_time = current_time
+
+
+                        # Periodically send system time
+                        if current_time - last_system_time_update_time > 5:
+                            self.send_system_time(current_time)
+                            last_system_time_update_time = current_time
+
 
                     elif msg.get_type() == 'AUTOPILOT_VERSION':
                         # Extract version and git hash
