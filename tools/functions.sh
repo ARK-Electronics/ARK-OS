@@ -33,7 +33,7 @@ function detect_platform() {
 
 		export TARGET=jetson
 		return 0
-	}
+	fi
 
 	return 1
 }
