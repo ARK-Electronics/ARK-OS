@@ -228,8 +228,8 @@ class MAVLinkConnection:
 
                         # Convert git hash bytes to hex string
                         if hasattr(msg, 'flight_custom_version'):
-                            # take first 8 bytes, then reverse to MSB‑first
-                            hash_bytes = msg.flight_custom_version[:8][::-1]
+                            # take first 5 bytes (PX4 only sends 5), then reverse to MSB‑first
+                            hash_bytes = msg.flight_custom_version[:5][::-1]
                             hex_hash = ''.join(f'{b:02x}' for b in hash_bytes)
                             self.autopilot_data["git_hash"] = hex_hash
 
