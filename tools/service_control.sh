@@ -65,11 +65,13 @@ function is_service_enabled() {
 
     # If no environment variable specified, service is always enabled
     if [ -z "$env_var" ]; then
+        echo "No env var specified, enabling service"
         return 0
     fi
 
     # Check the value of the environment variable
     if [ "${!env_var}" = "y" ]; then
+        echo "Env var enabled"
         return 0
     fi
 
