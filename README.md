@@ -6,6 +6,21 @@ ARK-OS is a collection of software services and tools for drones. These services
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
 
 # Getting started
+If you haven't set up an internet connection on your device, ssh in and connect to your wifi network.
+```
+ssh <user>@<hostname>.local
+```
+
+| User   | Password | Hostname |
+|--------|----------|----------|
+| jetson | jetson   | jetson   |
+| pi     | pi       | pi6x     |
+
+Connect to your WiFi network using Network Manager
+```
+sudo nmcli dev wifi connect <ssid> password <password>
+```
+
 Clone this repository on the device
 ```
 git clone --recurse-submodules https://github.com/ARK-Electronics/ARK-OS.git
