@@ -193,6 +193,10 @@ sudo apt-get install -y \
 
 ########## jetson dependencies ##########
 if [ "$TARGET" = "jetson" ]; then
+
+	# Upgrading these packages can break things like Wi-Fi. Don't allow these to be updated.
+	sudo apt-mark hold linux-firmware nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-firmware nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers wireless-regdb
+
 	if [ "$INSTALL_JETPACK" = "y" ]; then
 		echo "Installing JetPack"
 		sudo apt-get install -y nvidia-jetpack
