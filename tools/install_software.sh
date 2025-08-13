@@ -216,6 +216,10 @@ if [ "$TARGET" = "jetson" ]; then
 ########## pi dependencies ##########
 elif [ "$TARGET" = "pi" ]; then
 	sudo apt-get install python3-RPi.GPIO
+ 	# Enable Wi-Fi radio
+	sudo nmcli radio wifi on
+	# Set Pi hostname
+	sudo hostnamectl set-hostname pi6x
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi
 	PI_PYTHON_INSTALL_ARG="--break-system-packages"
 fi
