@@ -6,15 +6,17 @@ ARK-OS is a collection of software services and tools for drones. These services
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
 
 # Getting started
-If you haven't set up an internet connection on your device, ssh in and connect to your wifi network.
+If there is no Wifi connection configured a hotspot should come up.
+
+| Device | User   | Password | Hostname    | Hotspot SSID         | Hotspot Password |
+| ------ | ------ | -------- | ----------- | -------------------- | ---------------- |
+| Jetson | jetson | jetson   | jetson      | jetson-<serial>      | password         |
+| Pi     | pi     | pi       | raspberrypi | raspberrypi-<serial> | password         |
+
+If you haven't set up an internet connection on your device, ssh in and connect to your wifi network or use ARK OS to do so.
 ```
 ssh <user>@<hostname>.local
 ```
-
-| User   | Password | Hostname |
-|--------|----------|----------|
-| jetson | jetson   | jetson   |
-| pi     | pi       | pi6x     |
 
 Connect to your WiFi network using Network Manager
 ```
@@ -32,7 +34,7 @@ Run the install script on the device. You will be prompted y/n to install the se
 You can skip the interactive prompt by copying the **default.env** file and renaming it **user.env**. You can adjust the options in the **user.env**. This script can be safely run multiple times to update your system.
 
 ## ARK-UI
-A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
+A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://raspberrypi.local/.
 
 ![alt text](ark-ui1.png)
 ![alt text](ark-ui2.png)
