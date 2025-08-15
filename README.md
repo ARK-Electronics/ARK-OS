@@ -8,10 +8,10 @@ ARK-OS is a collection of software services and tools for drones. These services
 # Getting started
 If there is no Wifi connection configured a hotspot should come up.
 
-| Device | User   | Password | Hostname    | Hotspot SSID         | Hotspot Password |
-| ------ | ------ | -------- | ----------- | -------------------- | ---------------- |
-| Jetson | jetson | jetson   | jetson      | jetson-<serial>      | password         |
-| Pi     | pi     | pi       | raspberrypi | raspberrypi-<serial> | password         |
+| Device | User   | Password | Hostname    | Hotspot SSID           | Hotspot Password |
+| ------ | ------ | -------- | ----------- | ---------------------- | ---------------- |
+| Jetson | jetson | jetson   | jetson      | `jetson-<serial>`      | password         |
+| Pi     | pi     | pi       | raspberrypi | `raspberrypi-<serial>` | password         |
 
 If you haven't set up an internet connection on your device, ssh in and connect to your wifi network or use ARK OS to do so.
 ```
