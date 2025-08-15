@@ -13,7 +13,7 @@ If there is no Wifi connection configured a hotspot should come up.
 | Jetson | jetson | jetson   | jetson      | `jetson-<serial>`      | password         |
 | Pi     | pi     | raspberry       | raspberrypi | `raspberrypi-<serial>` | password         |
 
-If you haven't set up an internet connection on your device, ssh in and connect to your wifi network or use ARK OS to do so.
+If you haven't set up an internet connection on your device, ssh in and connect to your wifi network.
 ```
 ssh <user>@<hostname>.local
 ```
