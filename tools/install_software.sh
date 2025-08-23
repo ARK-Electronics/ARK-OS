@@ -8,15 +8,15 @@ export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
 if ! detect_platform; then
-    echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
-    echo "Running this script on a host computer may cause unintended system modifications."
-    exit 1
+	echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
+	echo "Running this script on a host computer may cause unintended system modifications."
+	exit 1
 fi
 
 # Check if system is holding package management lock
 if fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
-    echo "Another apt process is running. Please try again later."
-    exit 1
+	echo "Another apt process is running. Please try again later."
+	exit 1
 fi
 
 # Load helper functions
@@ -42,8 +42,8 @@ function ask_yes_no() {
 			REPLY="${!var_name}"
 		fi
 		case "$REPLY" in
-			y|Y) eval $var_name="y"; break ;;
-			n|N) eval $var_name="n"; break ;;
+			y|Y) eval "export $var_name='y'"; break ;;
+			n|N) eval "export $var_name='n'"; break ;;
 			*) echo "Invalid input. Please enter y or n." ;;
 		esac
 	done
