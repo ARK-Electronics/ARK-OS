@@ -158,6 +158,33 @@ else
 	fi
 fi
 
+echo ""
+echo "=== Installation Summary ==="
+echo "The following components will be installed:"
+echo ""
+
+[ "$INSTALL_DDS_AGENT" = "y" ] && echo "  ✓ micro-xrce-dds-agent"
+[ "$INSTALL_LOGLOADER" = "y" ] && echo "  ✓ logloader"
+[ "$INSTALL_LOGLOADER" = "y" ] && [ "$UPLOAD_TO_FLIGHT_REVIEW" = "y" ] && echo "    - Auto-upload to PX4 Flight Review: Yes (Email: $USER_EMAIL, Public: $PUBLIC_LOGS)"
+[ "$INSTALL_RTSP_SERVER" = "y" ] && echo "  ✓ rtsp-server"
+
+if [ "$TARGET" = "jetson" ]; then
+    [ "$INSTALL_RID_TRANSMITTER" = "y" ] && echo "  ✓ rid-transmitter (Manufacturer: $MANUFACTURER_CODE, Serial: $SERIAL_NUMBER)"
+    [ "$INSTALL_JETPACK" = "y" ] && echo "  ✓ JetPack"
+fi
+
+[ "$INSTALL_POLARIS" = "y" ] && echo "  ✓ polaris-client-mavlink"
+[ "$INSTALL_POLARIS" = "y" ] && [ -n "$POLARIS_API_KEY" ] && echo "    - API Key configured"
+
+echo ""
+echo "Plus standard components:"
+echo "  ✓ MAVSDK"
+echo "  ✓ MAVSDK Examples"
+echo "  ✓ System dependencies and configuration"
+echo ""
+echo "============================"
+echo ""
+
 ########## validate submodules ##########
 git submodule update --init --recursive
 git submodule foreach git reset --hard
