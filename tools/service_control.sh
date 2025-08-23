@@ -3,12 +3,6 @@
 # Source functions and configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/functions.sh"
-source "$SCRIPT_DIR/../default.env"
-
-# Optional user overrides
-if [ -f "$SCRIPT_DIR/../user.env" ]; then
-    source "$SCRIPT_DIR/../user.env"
-fi
 
 # Set up paths
 SERVICES_DIR="$(realpath "$SCRIPT_DIR/../services")"
