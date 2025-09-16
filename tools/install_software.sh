@@ -8,15 +8,15 @@ export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
 if ! detect_platform; then
-    echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
-    echo "Running this script on a host computer may cause unintended system modifications."
-    exit 1
+	echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
+	echo "Running this script on a host computer may cause unintended system modifications."
+	exit 1
 fi
 
 # Check if system is holding package management lock
 if fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
-    echo "Another apt process is running. Please try again later."
-    exit 1
+	echo "Another apt process is running. Please try again later."
+	exit 1
 fi
 
 # Load helper functions
@@ -42,8 +42,8 @@ function ask_yes_no() {
 			REPLY="${!var_name}"
 		fi
 		case "$REPLY" in
-			y|Y) eval $var_name="y"; break ;;
-			n|N) eval $var_name="n"; break ;;
+			y|Y) eval "export $var_name='y'"; break ;;
+			n|N) eval "export $var_name='n'"; break ;;
 			*) echo "Invalid input. Please enter y or n." ;;
 		esac
 	done
@@ -157,6 +157,33 @@ else
 		ask_yes_no "Install JetPack?" INSTALL_JETPACK
 	fi
 fi
+
+echo ""
+echo "=== Installation Summary ==="
+echo "The following components will be installed:"
+echo ""
+
+[ "$INSTALL_DDS_AGENT" = "y" ] && echo "  ✓ micro-xrce-dds-agent"
+[ "$INSTALL_LOGLOADER" = "y" ] && echo "  ✓ logloader"
+[ "$INSTALL_LOGLOADER" = "y" ] && [ "$UPLOAD_TO_FLIGHT_REVIEW" = "y" ] && echo "    - Auto-upload to PX4 Flight Review: Yes (Email: $USER_EMAIL, Public: $PUBLIC_LOGS)"
+[ "$INSTALL_RTSP_SERVER" = "y" ] && echo "  ✓ rtsp-server"
+
+if [ "$TARGET" = "jetson" ]; then
+    [ "$INSTALL_RID_TRANSMITTER" = "y" ] && echo "  ✓ rid-transmitter (Manufacturer: $MANUFACTURER_CODE, Serial: $SERIAL_NUMBER)"
+    [ "$INSTALL_JETPACK" = "y" ] && echo "  ✓ JetPack"
+fi
+
+[ "$INSTALL_POLARIS" = "y" ] && echo "  ✓ polaris-client-mavlink"
+[ "$INSTALL_POLARIS" = "y" ] && [ -n "$POLARIS_API_KEY" ] && echo "    - API Key configured"
+
+echo ""
+echo "Plus standard components:"
+echo "  ✓ MAVSDK"
+echo "  ✓ MAVSDK Examples"
+echo "  ✓ System dependencies and configuration"
+echo ""
+echo "============================"
+echo ""
 
 ########## validate submodules ##########
 git submodule update --init --recursive
