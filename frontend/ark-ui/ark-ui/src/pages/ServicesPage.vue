@@ -64,9 +64,9 @@
 
 <script>
 import axios from 'axios';
-import TomlEditor from './TomlEditor.vue';
-import MavlinkRouterEditor from './MavlinkRouterEditor.vue';
-import LogViewer from './LogViewer.vue';
+import TomlEditor from './components/TomlEditor.vue';
+import MavlinkRouterEditor from './components/MavlinkRouterEditor.vue';
+import LogViewer from './components/LogViewer.vue';
 
 export default {
   components: {
