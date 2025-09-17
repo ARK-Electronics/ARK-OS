@@ -1,14 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import ServicesPage from '../components/ServicesPage.vue';
-import ConnectionsPage from '../components/ConnectionsPage.vue';
-import AutopilotPage from '../components/AutopilotPage.vue';
-import SystemPageLoader from '../components/SystemPageLoader.vue';
+import ServicesPage from '../pages/ServicesPage.vue';
+import ConnectionsPage from '../pages/ConnectionsPage.vue';
+import AutopilotPage from '../pages/AutopilotPage.vue';
+import SystemPage from '../pages/SystemPage.vue';
 
 const routes = [
   {
     path: '/',
     name: 'SystemPage',
-    component: SystemPageLoader
+    component: SystemPage
   },
   {
     path: '/autopilot-page',

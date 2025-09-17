@@ -261,47 +261,44 @@ class GenericLinuxCollector(SystemInfoCollector):
 
 
 def get_system_info():
-    """Main function to collect all system information"""
+    """Main function to collect all system information with unified structure"""
     # Start with common info
     system_info = SystemInfoCollector.get_common_info()
 
     # Get temperature info
     temp_info = SystemInfoCollector.get_temperature_info()
 
-    # Determine device type and collect specific info
-    device_type = "unknown"
-    device_specific = {}
-
-    if JetsonCollector.is_jetson():
-        device_type = "jetson"
-        jetson_data = JetsonCollector.get_jetson_info()
-        if jetson_data:
-            device_specific = jetson_data
-        else:
-            device_specific = {"error": "Jetson detected but jtop not available"}
-    elif RaspberryPiCollector.is_raspberry_pi():
-        device_type = "pi"
-        device_specific = {
-            "hardware": {
-                "type": "pi",
-                **RaspberryPiCollector.get_pi_info()
-            }
-        }
-    else:
-        device_type = "generic"
-        device_specific = {
-            "hardware": GenericLinuxCollector.get_info()
-        }
-
-    # Combine all information
+    # Initialize with default structure
     result = {
-        "device_type": device_type,
+        "device_type": "unknown",
+        "hardware": {
+            "model": "Not available",
+            "module": "Not available",
+            "serial_number": "Not available",
+            "l4t": "Not available",
+            "jetpack": "Not available"
+        },
         "platform": {
             "distribution": system_info["distribution"],
             "release": system_info["codename"],
-            "kernel": system_info.get("kernel_version", platform.release()),
+            "kernel": platform.release(),
             "python": system_info["python_version"],
             "architecture": system_info["architecture"]
+        },
+        "libraries": {
+            "cuda": "Not available",
+            "opencv": "Not available",
+            "opencv_cuda": False,
+            "cudnn": "Not available",
+            "tensorrt": "Not available",
+            "vpi": "Not available",
+            "vulkan": "Not available"
+        },
+        "power": {
+            "nvpmodel": "Not available",
+            "jetson_clocks": False,
+            "total": 0,
+            "temperature": {}
         },
         "resources": {
             "memory": system_info["memory"],
@@ -312,15 +309,38 @@ def get_system_info():
             "hostname": system_info["hostname"],
             "interfaces": system_info["network_interfaces"]
         },
-        "temperature": temp_info if temp_info else {"message": "Temperature data unavailable"}
+        "temperature": temp_info if temp_info else {}
     }
 
-    # Merge device-specific data
-    result.update(device_specific)
+    # Detect device type and update specific fields
+    if JetsonCollector.is_jetson():
+        result["device_type"] = "jetson"
+        jetson_data = JetsonCollector.get_jetson_info()
+        if jetson_data:
+            # Update with Jetson-specific data
+            if "hardware" in jetson_data:
+                result["hardware"].update(jetson_data["hardware"])
+            if "libraries" in jetson_data:
+                result["libraries"] = jetson_data["libraries"]
+            if "power" in jetson_data:
+                result["power"] = jetson_data["power"]
+                # Merge temperatures
+                if "temperature" in jetson_data["power"]:
+                    result["temperature"].update(jetson_data["power"]["temperature"])
 
-    # For compatibility with existing frontend
-    if device_type == "jetson" and "hardware" in device_specific:
-        result["interfaces"] = result["network"]  # Map network to interfaces for compatibility
+    elif RaspberryPiCollector.is_raspberry_pi():
+        result["device_type"] = "pi"
+        pi_info = RaspberryPiCollector.get_pi_info()
+        result["hardware"]["model"] = pi_info.get("model", "Raspberry Pi")
+        result["hardware"]["serial_number"] = pi_info.get("serial_number", "Unknown")
+
+    else:
+        result["device_type"] = "generic"
+        generic_info = GenericLinuxCollector.get_info()
+        result["hardware"]["model"] = generic_info.get("cpu_model", "Generic Linux System")
+
+    # Backward compatibility
+    result["interfaces"] = result["network"]
 
     return result
 

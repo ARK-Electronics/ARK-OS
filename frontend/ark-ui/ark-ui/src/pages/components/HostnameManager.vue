@@ -115,8 +115,7 @@ export default {
 
     canChangeHostname() {
       return this.isValidHostname &&
-             !this.isChanging &&
-             this.newHostname !== this.currentHostname;
+             !this.isChanging;
     },
 
     messageClass() {
