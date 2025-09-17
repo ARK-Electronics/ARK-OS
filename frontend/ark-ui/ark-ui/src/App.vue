@@ -44,7 +44,7 @@ export default {
         maxWidth = Math.max(maxWidth, link.offsetWidth);
       });
       // Adjust for padding and any extra space you might want
-      this.sidebarWidth = maxWidth + 40; // Extra 40px for padding
+      this.sidebarWidth = maxWidth + 10; // Extra 40px for padding
     },
     fetchHostname() {
       axios.get('/api/system/info')
@@ -155,6 +155,7 @@ export default {
 .content {
   flex-grow: 1;
   padding-left: 4vh;
+  padding-right: 4vh;
   overflow-y: auto; /* Enable scrolling */
   color: var(--ark-color-black-bold); /* Text color black */
   background-color: var(--ark-color-white); /* Light gray background for the content area, change to white if necessary */
