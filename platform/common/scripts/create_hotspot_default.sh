@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Function to find existing AP mode connections
 find_existing_ap() {
     local IFS=$'\n'  # Change the Internal Field Separator to new line
     local connections=$(nmcli -t -f NAME,TYPE con show | grep "802-11-wireless")
@@ -28,25 +27,24 @@ fi
 AP_SSID="$(find_existing_ap)"
 
 if [ -z "$AP_SSID" ]; then
-    # No AP found, create one
-    HOSTNAME=$(hostname)
-    SERIAL=$(cat /proc/device-tree/serial-number 2>/dev/null || echo "unknown")
-    AP_SSID="${HOSTNAME}-${SERIAL}"
+    # Hot spot does not exist, create it. Note: the hotspot-updater.service will rename to <hostname>-<serial>
+    AP_SSID="hotspot-default"
     AP_PASSWORD="password"
 
     echo "Creating new hotspot: $AP_SSID"
 
-    # Create AP connection
     sudo nmcli con add type wifi ifname '*' con-name "$AP_SSID" autoconnect yes ssid "$AP_SSID" \
         802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared
 
-    # Configure security
     sudo nmcli con modify "$AP_SSID" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASSWORD" \
         802-11-wireless-security.pmf disable connection.autoconnect-priority -1
 
     echo "Created new AP: $AP_SSID with autoconnect enabled"
 else
-    # Check connection priority and set to -1 if necessary
+    # Hot spot exists
+    # - set priority to -1
+    # - enable autoconnect
+
     PRIORITY=$(nmcli -g connection.autoconnect-priority con show "$AP_SSID")
 
     if [ "$PRIORITY" != "-1" ]; then
@@ -54,7 +52,6 @@ else
         sudo nmcli con modify "$AP_SSID" connection.autoconnect-priority -1
     fi
 
-    # AP exists, check if autoconnect is enabled
     AUTOCONNECT=$(nmcli -g connection.autoconnect con show "$AP_SSID")
 
     if [ "$AUTOCONNECT" = "no" ]; then
