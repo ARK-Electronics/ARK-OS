@@ -119,6 +119,22 @@ class JetsonCollector(SystemInfoCollector):
                 if not jetson.ok():
                     return None
 
+                # Collect all temperature data
+                temperatures = {}
+                if hasattr(jetson, 'temperature') and jetson.temperature:
+                    for sensor_name, sensor_data in jetson.temperature.items():
+                        # Only include online sensors with valid temperatures
+                        if isinstance(sensor_data, dict):
+                            temp = sensor_data.get('temp', 0)
+                            online = sensor_data.get('online', False)
+                            # Include if online and temperature is valid (not -256)
+                            if online and temp > -100:
+                                temperatures[sensor_name] = temp
+                        elif isinstance(sensor_data, (int, float)):
+                            # Handle case where it might just be a number
+                            if sensor_data > -100:
+                                temperatures[sensor_name] = sensor_data
+
                 # Collect Jetson-specific data
                 data = {
                     "hardware": {
@@ -142,11 +158,7 @@ class JetsonCollector(SystemInfoCollector):
                         "nvpmodel": str(jetson.nvpmodel) if jetson.nvpmodel else "Unknown",
                         "jetson_clocks": "Active" if (hasattr(jetson, 'jetson_clocks') and jetson.jetson_clocks) else "Inactive" if hasattr(jetson, 'jetson_clocks') else None,
                         "total": jetson.power.get("tot", {}).get("power", 0) if hasattr(jetson, 'power') else 0,
-                        "temperature": {
-                            "cpu": jetson.temperature.get("cpu", {}).get("temp", 0) if hasattr(jetson, 'temperature') else 0,
-                            "gpu": jetson.temperature.get("gpu", {}).get("temp", 0) if hasattr(jetson, 'temperature') else 0,
-                            "tj": jetson.temperature.get("tj", {}).get("temp", 0) if hasattr(jetson, 'temperature') else 0
-                        }
+                        "temperature": temperatures  # Use all collected temperatures
                     }
                 }
 

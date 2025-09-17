@@ -385,6 +385,13 @@ export default {
         'cpu': 'CPU',
         'gpu': 'GPU',
         'tj': 'Junction',
+        'soc0': 'SoC 0',
+        'soc1': 'SoC 1',
+        'soc2': 'SoC 2',
+        'cv0': 'CV 0',
+        'cv1': 'CV 1',
+        'cv2': 'CV 2',
+        'iwlwifi': 'WiFi',
         'thermal_zone0': 'Zone 0',
         'thermal_zone1': 'Zone 1',
         'thermal_zone2': 'Zone 2'
