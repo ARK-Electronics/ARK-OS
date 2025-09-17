@@ -323,7 +323,7 @@ for alias_name in "${!aliases[@]}"; do
 done
 
 ########## create hotspot connection ##########
-~/.local/bin/create_hotspot_connection.sh
+~/.local/bin/create_hotspot_default.sh
 
 ########## Always install MAVSDK ##########
 ./tools/install_mavsdk.sh
