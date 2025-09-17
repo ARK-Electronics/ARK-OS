@@ -34,6 +34,59 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/autopilot-firmware-upload', async_mode='threading')
 
 
+class DeviceDetector:
+    """Handles USB device detection for ARK autopilots"""
+
+    @staticmethod
+    def check_device_status():
+        """Check if ARK device is connected and determine its mode"""
+        try:
+            result = subprocess.run(
+                "lsusb",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                device_status = {
+                    "device_connected": False,
+                    "in_bootloader": False,
+                    "device_name": None
+                }
+
+                for line in result.stdout.splitlines():
+                    # Check for bootloader mode
+                    if "ARK BL" in line:
+                        logger.info(f"Detected bootloader: {line.strip()}")
+                        device_status["device_connected"] = True
+                        device_status["in_bootloader"] = True
+                        device_status["device_name"] = "ARK Bootloader"
+                        return device_status
+                    # Check for normal ARK device (application firmware)
+                    elif "ARK" in line and "BL" not in line:
+                        logger.info(f"Detected ARK device: {line.strip()}")
+                        device_status["device_connected"] = True
+                        device_status["in_bootloader"] = False
+                        device_status["device_name"] = "ARK Flight Controller"
+                        return device_status
+
+                return device_status
+
+            return {
+                "device_connected": False,
+                "in_bootloader": False,
+                "device_name": None
+            }
+        except Exception as e:
+            logger.error(f"Error checking device status: {e}")
+            return {
+                "device_connected": False,
+                "in_bootloader": False,
+                "device_name": None
+            }
+
+
 class MAVLinkConnection:
     def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
         self.connection_string = connection_string
@@ -43,6 +96,7 @@ class MAVLinkConnection:
         self.thread = None
         self.heartbeat_timeout = 3  # seconds
         self.last_heartbeat = None
+        self.device_detector = DeviceDetector()
 
         # Store the latest autopilot data
         self.autopilot_data = {
@@ -52,8 +106,10 @@ class MAVLinkConnection:
             "voltage": 0.0,
             "current": 0.0,
             "remaining": 0,
-            "connected": False,
+            "mavlink_connected": False,
+            "device_connected": False,
             "in_bootloader": False,
+            "device_name": None,
             "last_heartbeat": None
         }
 
@@ -91,42 +147,20 @@ class MAVLinkConnection:
                 logger.error(f"Error closing MAVLink connection: {e}")
             finally:
                 self.mav_connection = None
-                self.autopilot_data["connected"] = False
+                self.autopilot_data["mavlink_connected"] = False
 
     def update_heartbeat_time(self):
         """Update the last heartbeat timestamp"""
         self.last_heartbeat = datetime.now()
         self.autopilot_data["last_heartbeat"] = self.last_heartbeat.isoformat()
 
-    def is_connected(self):
+    def is_mavlink_connected(self):
         """Check if the MAVLink connection is active based on recent heartbeats"""
         if not self.last_heartbeat:
             return False
 
         time_since_heartbeat = (datetime.now() - self.last_heartbeat).total_seconds()
         return time_since_heartbeat < self.heartbeat_timeout
-
-    def check_bootloader_mode(self):
-        """Check if the autopilot is in bootloader mode using lsusb"""
-        try:
-            result = subprocess.run(
-                "lsusb",
-                shell=True,
-                capture_output=True,
-                text=True
-            )
-
-            if result.returncode == 0:
-                # Look for the ARK BL FPV.x pattern in lsusb output
-                for line in result.stdout.splitlines():
-                    if "ARK BL" in line:
-                        logger.info(f"Detected bootloader: {line.strip()}")
-                        return True
-
-            return False
-        except Exception as e:
-            logger.error(f"Error checking bootloader mode: {e}")
-            return False
 
     def request_autopilot_version(self):
         """Request the autopilot version information"""
@@ -166,16 +200,35 @@ class MAVLinkConnection:
             logger.error(f"Error sending system time: {e}")
             return False
 
+    def update_device_status(self):
+        """Update device connection status via USB detection"""
+        device_status = self.device_detector.check_device_status()
+        self.autopilot_data["device_connected"] = device_status["device_connected"]
+        self.autopilot_data["in_bootloader"] = device_status["in_bootloader"]
+        self.autopilot_data["device_name"] = device_status["device_name"]
+
+        # If in bootloader, set appropriate autopilot type
+        if device_status["in_bootloader"]:
+            self.autopilot_data["autopilot_type"] = "Bootloader"
+
     def process_messages(self):
         """Process incoming MAVLink messages in a loop"""
         self.running = True
         connection_attempts = 0
         last_version_request_time = 0
         last_system_time_update_time = 0
+        last_device_check_time = 0
         waiting_for_heartbeat = True
 
         while self.running:
             try:
+                current_time = time.time()
+
+                # Periodically check device status (every 2 seconds)
+                if current_time - last_device_check_time > 2:
+                    self.update_device_status()
+                    last_device_check_time = current_time
+
                 if self.mav_connection is None:
                     time.sleep(1)
                     continue
@@ -183,9 +236,6 @@ class MAVLinkConnection:
                 # Use blocking mode with a timeout - this is more efficient than sleep
                 # as it will wake up immediately when a message arrives
                 msg = self.mav_connection.recv_match(blocking=True, timeout=0.5)
-
-                # Send periodic heartbeats if we're waiting for initial connection
-                current_time = time.time()
 
                 if msg:
                     # Ignore messages that do not originate from the autopilot
@@ -199,8 +249,7 @@ class MAVLinkConnection:
                     if msg.get_type() == 'HEARTBEAT':
                         self.update_heartbeat_time()
                         self.autopilot_data["autopilot_type"] = self.get_autopilot_type(msg.autopilot)
-                        self.autopilot_data["connected"] = True
-                        self.autopilot_data["in_bootloader"] = False  # If we get a heartbeat, we're not in bootloader
+                        self.autopilot_data["mavlink_connected"] = True
 
                         # Reset connection attempts on successful heartbeat
                         connection_attempts = 0
@@ -211,12 +260,10 @@ class MAVLinkConnection:
                                 self.request_autopilot_version()
                                 last_version_request_time = current_time
 
-
                         # Periodically send system time
                         if current_time - last_system_time_update_time > 5:
                             self.send_system_time(current_time)
                             last_system_time_update_time = current_time
-
 
                     elif msg.get_type() == 'AUTOPILOT_VERSION':
                         # Extract version and git hash
@@ -228,7 +275,7 @@ class MAVLinkConnection:
 
                         # Convert git hash bytes to hex string
                         if hasattr(msg, 'flight_custom_version'):
-                            # take first 8 bytes, reverse to MSB‑first, take only first 5 bytes (PX4 only uses 5)
+                            # take first 8 bytes, reverse to MSB-first, take only first 5 bytes (PX4 only uses 5)
                             hash_bytes = msg.flight_custom_version[:8][::-1][:5]
                             hex_hash = ''.join(f'{b:02x}' for b in hash_bytes)
                             self.autopilot_data["git_hash"] = hex_hash
@@ -250,10 +297,7 @@ class MAVLinkConnection:
                 elif (self.last_heartbeat is None or
                       (datetime.now() - self.last_heartbeat).total_seconds() > 5):
 
-                    if self.check_bootloader_mode():
-                        self.autopilot_data["in_bootloader"] = True
-                        self.autopilot_data["autopilot_type"] = "Bootloader"
-                        continue
+                    self.autopilot_data["mavlink_connected"] = False
 
                     # No recent heartbeat, try to send one to elicit a response
                     if waiting_for_heartbeat and connection_attempts < 5:
@@ -270,7 +314,7 @@ class MAVLinkConnection:
                     elif connection_attempts >= 5:
                         try:
                             logger.warning("Connection issues detected, attempting to reset MAVLink connection")
-                            self.autopilot_data["connected"] = False
+                            self.autopilot_data["mavlink_connected"] = False
                             if self.mav_connection:
                                 self.mav_connection.close()
                             self.mav_connection = mavutil.mavlink_connection(
@@ -290,7 +334,7 @@ class MAVLinkConnection:
                 pass
             except ConnectionResetError as cre:
                 logger.warning(f"Connection reset: {cre}")
-                self.autopilot_data["connected"] = False
+                self.autopilot_data["mavlink_connected"] = False
                 # Give a short pause before attempting reconnection
                 time.sleep(1)
                 try:
@@ -328,7 +372,12 @@ class MAVLinkConnection:
         logger.info("MAVLink message processing thread started")
 
     def get_autopilot_details(self):
-        self.autopilot_data["connected"] = self.is_connected()
+        # Update MAVLink connection status
+        self.autopilot_data["mavlink_connected"] = self.is_mavlink_connected()
+
+        # Make sure device status is current
+        self.update_device_status()
+
         self.autopilot_data["timestamp"] = datetime.now().isoformat()
         return self.autopilot_data
 

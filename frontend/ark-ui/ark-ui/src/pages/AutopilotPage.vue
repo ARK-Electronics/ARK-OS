@@ -57,6 +57,16 @@
           </div>
         </div>
 
+        <!-- Device Status Info (if device connected but no MAVLink) -->
+        <div v-if="isDeviceConnected && !isMavlinkConnected && !isInBootloader" class="device-info-card">
+          <div class="device-info-content">
+            <i class="fas fa-info-circle"></i>
+            <span>{{ autopilot.device_name || 'ARK Device' }} detected via USB. MAVLink communication not available.
+              <strong>Check if mavlink-router service is running.</strong>
+            </span>
+          </div>
+        </div>
+
         <!-- Autopilot Details -->
         <div class="status-cards">
           <!-- System Info Card -->
@@ -66,16 +76,20 @@
             </h3>
             <div class="info-grid">
               <div class="info-item">
+                <span class="info-label">Device:</span>
+                <span class="info-value">{{ autopilot.device_name || 'Not Detected' }}</span>
+              </div>
+              <div class="info-item">
                 <span class="info-label">Autopilot Type:</span>
-                <span class="info-value">{{ autopilot.autopilot_type }}</span>
+                <span class="info-value">{{ isMavlinkConnected ? autopilot.autopilot_type : '--' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Version:</span>
-                <span class="info-value">{{ autopilot.version }}</span>
+                <span class="info-value">{{ isMavlinkConnected ? autopilot.version : '--' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Git Hash:</span>
-                <span class="info-value monospace">{{ autopilot.git_hash }}</span>
+                <span class="info-value monospace">{{ isMavlinkConnected ? autopilot.git_hash : '--' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Last Heartbeat:</span>
@@ -89,7 +103,7 @@
             <h3 class="card-title power-title">
               <i class="fas fa-bolt"></i> Power Status
             </h3>
-            <div class="power-grid">
+            <div v-if="isMavlinkConnected" class="power-grid">
               <!-- Voltage -->
               <div class="power-item">
                 <div class="power-gauge">
@@ -131,6 +145,10 @@
                 </div>
               </div>
             </div>
+            <div v-else class="no-mavlink-message">
+              <i class="fas fa-exclamation-triangle"></i>
+              <span>MAVLink data unavailable</span>
+            </div>
           </div>
         </div>
       </div>
@@ -147,16 +165,20 @@
             <div class="version-header">Current Version</div>
             <div class="version-details">
               <div class="version-item">
+                <span class="version-label">Device:</span>
+                <span class="version-value">{{ autopilot.device_name || 'Not Detected' }}</span>
+              </div>
+              <div class="version-item">
                 <span class="version-label">Type:</span>
-                <span class="version-value">{{ autopilot.autopilot_type }}</span>
+                <span class="version-value">{{ isMavlinkConnected ? autopilot.autopilot_type : '--' }}</span>
               </div>
               <div class="version-item">
                 <span class="version-label">Version:</span>
-                <span class="version-value">{{ autopilot.version }}</span>
+                <span class="version-value">{{ isMavlinkConnected ? autopilot.version : '--' }}</span>
               </div>
               <div class="version-item">
                 <span class="version-label">Git Hash:</span>
-                <span class="version-value monospace">{{ autopilot.git_hash }}</span>
+                <span class="version-value monospace">{{ isMavlinkConnected ? autopilot.git_hash : '--' }}</span>
               </div>
             </div>
           </div>
@@ -209,11 +231,21 @@
             <span>{{ statusMessage }}</span>
           </div>
 
+          <!-- Info message for firmware upload -->
+          <div v-if="!isDeviceConnected" class="firmware-info-message warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>No ARK device detected. Connect the autopilot via USB to upload firmware.</span>
+          </div>
+          <div v-else-if="isDeviceConnected && !isMavlinkConnected && !isInBootloader" class="firmware-info-message info">
+            <i class="fas fa-info-circle"></i>
+            <span>Device detected. You can upload firmware even without MAVLink connection.</span>
+          </div>
+
           <div class="upload-actions">
             <button @click="uploadFirmware"
                     class="upload-btn"
-                    :disabled="!file || (!isConnected && !isInBootloader) || isUploading"
-                    :class="{'disabled': !file || (!isConnected && !isInBootloader) || isUploading}">
+                    :disabled="!file || !isDeviceConnected || isUploading"
+                    :class="{'disabled': !file || !isDeviceConnected || isUploading}">
               <i class="fas fa-upload"></i> Upload Firmware
             </button>
           </div>
@@ -241,8 +273,8 @@
               <div class="maintenance-actions">
                 <button @click="showResetConfirmation = true"
                         class="maintenance-button"
-                        :disabled="!isConnected && !isInBootloader"
-                        :class="{'disabled': !isConnected && !isInBootloader}">
+                        :disabled="!isDeviceConnected"
+                        :class="{'disabled': !isDeviceConnected}">
                   Reset Controller
                 </button>
               </div>
@@ -365,8 +397,10 @@ export default {
         voltage: 0,
         remaining: 0,
         current: 0,
-        connected: false,
+        mavlink_connected: false,
+        device_connected: false,
         in_bootloader: false,
+        device_name: null,
         last_heartbeat: null
       },
       file: null,
@@ -382,30 +416,39 @@ export default {
     };
   },
   computed: {
-    isConnected() {
-      return this.autopilot.connected;
+    isMavlinkConnected() {
+      return this.autopilot.mavlink_connected;
+    },
+    isDeviceConnected() {
+      return this.autopilot.device_connected;
     },
     isInBootloader() {
       return this.autopilot.in_bootloader;
     },
     statusText() {
-      if (this.isConnected) return 'Connected';
-      if (this.isInBootloader) return 'Bootloader';
-      return 'Disconnected';
+      if (this.isMavlinkConnected && this.isDeviceConnected) return 'MAVLink Connected';
+      if (this.isDeviceConnected && !this.isMavlinkConnected) {
+        if (this.isInBootloader) return 'Bootloader Mode';
+        return 'Device Connected (No MAVLink)';
+      }
+      return 'Not Connected';
     },
     connectionStatusIcon() {
-      if (this.isConnected) return 'fas fa-check-circle';
-      if (this.isInBootloader) return 'fas fa-microchip';
+      if (this.isMavlinkConnected) return 'fas fa-check-circle';
+      if (this.isDeviceConnected && this.isInBootloader) return 'fas fa-microchip';
+      if (this.isDeviceConnected) return 'fas fa-usb';
       return 'fas fa-exclamation-triangle';
     },
     connectionStatusClass() {
-      if (this.isConnected) return 'connected';
-      if (this.isInBootloader) return 'bootloader';
+      if (this.isMavlinkConnected) return 'connected';
+      if (this.isDeviceConnected && this.isInBootloader) return 'bootloader';
+      if (this.isDeviceConnected) return 'device-only';
       return 'disconnected';
     },
     connectionBannerClass() {
-      if (this.isConnected) return 'connected';
-      if (this.isInBootloader) return 'bootloader';
+      if (this.isMavlinkConnected) return 'connected';
+      if (this.isDeviceConnected && this.isInBootloader) return 'bootloader';
+      if (this.isDeviceConnected) return 'device-only';
       return 'disconnected';
     }
   },
@@ -474,7 +517,8 @@ export default {
         this.autopilot = response.data;
       } catch (error) {
         console.error('Error fetching autopilot data:', error);
-        this.autopilot.connected = false;
+        this.autopilot.mavlink_connected = false;
+        this.autopilot.device_connected = false;
         this.autopilot.in_bootloader = false;
       } finally {
         this.isRefreshing = false;
@@ -496,7 +540,7 @@ export default {
       this.handleFileUpload({ target: { files: event.dataTransfer.files } });
     },
     async uploadFirmware() {
-      if (!this.file || (!this.isConnected && !this.isInBootloader)) return;
+      if (!this.file || !this.isDeviceConnected) return;
 
       this.isUploading = true;
       this.progress = 0;
@@ -532,7 +576,7 @@ export default {
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     },
     formatHeartbeatTime(timestamp) {
-      if (!timestamp) return 'Never';
+      if (!timestamp || !this.isMavlinkConnected) return 'No MAVLink';
 
       try {
         const heartbeatTime = new Date(timestamp);
@@ -670,7 +714,7 @@ export default {
   background-color: var(--ark-color-white);
   padding: 8px 0;
   box-sizing: border-box;
-  min-width: 100%; /* Critical: prevents width changes */
+  min-width: 100%;
 }
 
 .tab-button {
@@ -718,7 +762,7 @@ export default {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  overflow: hidden; /* Prevents expansion */
+  overflow: hidden;
 }
 
 .section-container {
@@ -731,7 +775,7 @@ export default {
   border-radius: 8px;
   padding: 20px;
   box-sizing: border-box;
-  overflow: hidden; /* Critical: prevents horizontal scrolling */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -813,6 +857,11 @@ export default {
   border: 1px solid var(--ark-color-blue);
 }
 
+.connection-banner.device-only {
+  background-color: rgba(255, 152, 0, 0.1);
+  border: 1px solid var(--ark-color-orange);
+}
+
 .banner-content {
   display: flex;
   align-items: center;
@@ -831,6 +880,30 @@ export default {
 
 .bootloader .banner-content {
   color: var(--ark-color-blue);
+}
+
+.device-only .banner-content {
+  color: var(--ark-color-orange);
+}
+
+/* Device Info Card */
+.device-info-card {
+  background-color: rgba(255, 152, 0, 0.1);
+  border: 1px solid var(--ark-color-orange);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 20px;
+}
+
+.device-info-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ark-color-orange);
+}
+
+.device-info-content i {
+  font-size: 1.2rem;
 }
 
 /* Status Cards Layout */
@@ -977,6 +1050,16 @@ export default {
   align-items: center;
 }
 
+.no-mavlink-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  color: var(--ark-color-orange);
+  opacity: 0.7;
+}
+
 /* Firmware Section */
 .firmware-current-card {
   display: flex;
@@ -1045,6 +1128,11 @@ export default {
 .status-indicator.bootloader {
   background-color: rgba(52, 152, 219, 0.1);
   color: var(--ark-color-blue);
+}
+
+.status-indicator.device-only {
+  background-color: rgba(255, 152, 0, 0.1);
+  color: var(--ark-color-orange);
 }
 
 /* Firmware Upload */
@@ -1175,6 +1263,26 @@ export default {
   color: var(--ark-color-red);
 }
 
+/* Firmware info messages */
+.firmware-info-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.firmware-info-message.warning {
+  background-color: rgba(244, 67, 54, 0.1);
+  color: var(--ark-color-red);
+}
+
+.firmware-info-message.info {
+  background-color: rgba(52, 152, 219, 0.1);
+  color: var(--ark-color-blue);
+}
+
 .upload-actions {
   display: flex;
   justify-content: flex-end;
@@ -1208,10 +1316,10 @@ export default {
   font-family: monospace;
 }
 
-/* Maintenance Section - Fixed to prevent layout expansion */
+/* Maintenance Section */
 .maintenance-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)); /* Critical for preventing expansion */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   width: 100%;
   max-width: 100%;
@@ -1251,7 +1359,7 @@ export default {
 
 .maintenance-content {
   flex: 1;
-  min-width: 0; /* Critical to allow content to shrink */
+  min-width: 0;
   max-width: 100%;
   display: flex;
   flex-direction: column;
@@ -1470,5 +1578,4 @@ export default {
     align-self: center;
   }
 }
-
 </style>
