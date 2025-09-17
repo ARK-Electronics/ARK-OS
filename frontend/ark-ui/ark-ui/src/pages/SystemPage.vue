@@ -71,22 +71,35 @@
         <SystemCard
           title="Memory"
           icon="fa-memory"
-          :data="memoryData"
+          :data="{}"
         >
-          <template v-if="hasMemoryData" #footer>
-            <div class="memory-bars">
-              <ProgressBar
-                label="RAM"
-                :value="ramPercent"
-                :showPercentage="true"
-              />
-              <ProgressBar
-                label="Disk"
-                :value="diskPercent"
-                :showPercentage="true"
-                :warningThreshold="80"
-                :criticalThreshold="90"
-              />
+          <template #footer>
+            <div class="memory-section">
+              <div class="memory-item">
+                <ProgressBar
+                  label="RAM"
+                  :value="ramPercent"
+                  :showPercentage="true"
+                />
+                <div class="memory-info">
+                  <span>{{ formatMemorySize(ramTotal) }} Total</span>
+                  <span>{{ formatMemorySize(ramAvailable) }} Available</span>
+                </div>
+              </div>
+
+              <div class="memory-item">
+                <ProgressBar
+                  label="Disk"
+                  :value="diskPercent"
+                  :showPercentage="true"
+                  :warningThreshold="80"
+                  :criticalThreshold="90"
+                />
+                <div class="memory-info">
+                  <span>{{ formatDiskSize(diskTotal) }} Total</span>
+                  <span>{{ formatDiskSize(diskAvailable) }} Available</span>
+                </div>
+              </div>
             </div>
           </template>
         </SystemCard>
@@ -267,9 +280,27 @@ export default {
       return this.systemInfo?.resources?.memory?.percent || 0;
     },
 
+    ramTotal() {
+      return this.systemInfo?.resources?.memory?.total || 0;
+    },
+
+    ramAvailable() {
+      return this.systemInfo?.resources?.memory?.available || 0;
+    },
+
     diskPercent() {
       const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
       return disk?.percent || 0;
+    },
+
+    diskTotal() {
+      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
+      return disk?.total || 0;
+    },
+
+    diskAvailable() {
+      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
+      return disk?.available || 0;
     }
   },
 
@@ -359,6 +390,16 @@ export default {
         'thermal_zone2': 'Zone 2'
       };
       return labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    },
+
+    formatMemorySize(sizeInGB) {
+      if (!sizeInGB) return '0 GB';
+      return `${sizeInGB.toFixed(1)} GB`;
+    },
+
+    formatDiskSize(sizeInGB) {
+      if (!sizeInGB) return '0 GB';
+      return `${sizeInGB.toFixed(1)} GB`;
     }
   }
 }
@@ -449,12 +490,29 @@ export default {
   gap: 16px;
 }
 
-.memory-bars {
+.memory-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+}
+
+.memory-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #666;
+  padding: 0 2px;
+}
+
+.memory-info span:first-child {
+  font-weight: 500;
 }
 
 .temp-scroll-container {
