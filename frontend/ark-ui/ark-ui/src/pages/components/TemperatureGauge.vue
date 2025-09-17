@@ -102,7 +102,7 @@ export default {
 .gauge-label {
   font-size: 0.85rem;
   font-weight: 500;
-  color: #666;
+  color: var(--ark-color-grey);
   margin-bottom: 4px;
   text-transform: uppercase;
 }
@@ -120,7 +120,7 @@ export default {
 
 .gauge-background {
   fill: none;
-  stroke: #e0e0e0;
+  stroke: var(--ark-color-light-grey);
   stroke-width: 8;
   stroke-linecap: round;
 }
@@ -133,15 +133,15 @@ export default {
 }
 
 .gauge-value.normal {
-  stroke: #4caf50;
+  stroke: var(--ark-color-green);
 }
 
 .gauge-value.warning {
-  stroke: #ff9800;
+  stroke: var(--ark-color-orange);
 }
 
 .gauge-value.critical {
-  stroke: #f44336;
+  stroke: var(--ark-color-red);
 }
 
 .gauge-reading {
@@ -162,6 +162,6 @@ export default {
 
 .temperature-unit {
   font-size: 0.75rem;
-  color: #666;
+  color: var(--ark-color-grey);
 }
 </style>

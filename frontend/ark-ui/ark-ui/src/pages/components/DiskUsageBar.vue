@@ -52,7 +52,7 @@ export default {
 .disk-usage-bar {
   width: 100%;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--ark-color-light-grey);
 }
 
 .usage-header {
@@ -64,7 +64,7 @@ export default {
 
 .usage-label {
   font-weight: 500;
-  color: #666;
+  color: var(--ark-color-grey);
   font-size: 0.9rem;
 }
 
@@ -74,21 +74,21 @@ export default {
 }
 
 .usage-percentage.normal {
-  color: #4caf50;
+  color: var(--ark-color-green);
 }
 
 .usage-percentage.warning {
-  color: #ff9800;
+  color: var(--ark-color-orange);
 }
 
 .usage-percentage.critical {
-  color: #f44336;
+  color: var(--ark-color-red);
 }
 
 .usage-bar-wrapper {
   width: 100%;
   height: 10px;
-  background-color: #e0e0e0;
+  background-color: var(--ark-color-light-grey);
   border-radius: 5px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -101,21 +101,21 @@ export default {
 }
 
 .usage-bar.normal {
-  background: linear-gradient(90deg, #4caf50 0%, #66bb6a 100%);
+  background: var(--ark-color-green);
 }
 
 .usage-bar.warning {
-  background: linear-gradient(90deg, #ff9800 0%, #ffa726 100%);
+  background: var(--ark-color-orange);
 }
 
 .usage-bar.critical {
-  background: linear-gradient(90deg, #f44336 0%, #ef5350 100%);
+  background: var(--ark-color-red);
 }
 
 .usage-details {
   display: flex;
   justify-content: space-between;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--ark-color-grey);
 }
 </style>

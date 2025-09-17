@@ -248,7 +248,7 @@ export default {
 
 .current-hostname .label {
   font-weight: 500;
-  color: #666;
+  color: var(--ark-color-grey);
 }
 
 .current-hostname .value {
@@ -284,7 +284,7 @@ export default {
 }
 
 .hostname-input.invalid {
-  border-color: #f44336;
+  border-color: var(--ark-color-red);
 }
 
 .change-button {
@@ -317,7 +317,7 @@ export default {
 
 .hint {
   display: block;
-  color: #666;
+  color: var(--ark-color-grey);
   font-size: 0.85rem;
   margin-top: 8px;
 }
@@ -407,7 +407,7 @@ export default {
 
 .warning-icon {
   font-size: 3rem;
-  color: #ff9800;
+  color: var(--ark-color-orange);
   margin-bottom: 16px;
 }
 
@@ -426,7 +426,7 @@ export default {
 }
 
 .warning-text {
-  color: #666;
+  color: var(--ark-color-grey);
   font-size: 0.95rem;
   font-style: italic;
 }

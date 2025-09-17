@@ -62,19 +62,19 @@ export default {
 }
 
 .progress-label {
-  color: #666;
+  color: var(--ark-color-grey);
   font-weight: 500;
 }
 
 .progress-value {
-  color: #333;
+  color: var(--ark-color-black);
   font-weight: 600;
 }
 
 .progress-bar-wrapper {
   width: 100%;
   height: 8px;
-  background-color: #e0e0e0;
+  background-color: var(--ark-color-light-grey);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -86,14 +86,14 @@ export default {
 }
 
 .progress-bar.normal {
-  background: linear-gradient(90deg, #4caf50 0%, #66bb6a 100%);
+  background: var(--ark-color-green);
 }
 
 .progress-bar.warning {
-  background: linear-gradient(90deg, #ff9800 0%, #ffa726 100%);
+  background: var(--ark-color-orange);
 }
 
 .progress-bar.critical {
-  background: linear-gradient(90deg, #f44336 0%, #ef5350 100%);
+  background: var(--ark-color-red);
 }
 </style>
