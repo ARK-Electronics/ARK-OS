@@ -30,6 +30,7 @@ do
     echo "$line" | jq -c 'select(type == "object")' 2>/dev/null || :
 done
 
+# TODO: maybe need a delay here for ardupilot
 python3 ~/.local/bin/reset_fmu_fast.py &>/dev/null
 
 sleep 3

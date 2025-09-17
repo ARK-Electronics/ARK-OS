@@ -44,7 +44,7 @@ export default {
         maxWidth = Math.max(maxWidth, link.offsetWidth);
       });
       // Adjust for padding and any extra space you might want
-      this.sidebarWidth = maxWidth + 40; // Extra 40px for padding
+      this.sidebarWidth = maxWidth + 10; // Extra 40px for padding
     },
     fetchHostname() {
       axios.get('/api/system/info')
@@ -77,10 +77,12 @@ export default {
   --ark-color-green-hover: rgba(0, 187, 49, 0.65);
   --ark-color-green-shadow: rgba(0, 187, 49, 0.1);
   --ark-color-blue: rgba(52, 152, 219, 1);
+  --ark-color-blue-hover: rgba(52, 152, 219, 0.8);
   --ark-color-red: rgba(244, 67, 54, 1);
   --ark-color-red-hover: rgba(244, 67, 54, 0.65);
   --ark-color-orange: rgba(255, 140, 0, 1);
-  --ark-color-light-grey: rgba(248, 249, 250, 1)
+  --ark-color-light-grey: rgba(248, 249, 250, 1);
+  --ark-color-grey: rgba(102, 102, 102, 1);
 }
 
 #app {
@@ -153,6 +155,7 @@ export default {
 .content {
   flex-grow: 1;
   padding-left: 4vh;
+  padding-right: 4vh;
   overflow-y: auto; /* Enable scrolling */
   color: var(--ark-color-black-bold); /* Text color black */
   background-color: var(--ark-color-white); /* Light gray background for the content area, change to white if necessary */
