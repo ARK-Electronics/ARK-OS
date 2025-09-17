@@ -192,7 +192,7 @@ export default {
 
       // Power information (primarily for Jetson)
       data['Power Mode'] = power?.nvpmodel || 'Not available';
-      data['Jetson Clocks'] = power?.jetson_clocks ? 'Enabled' : 'Not available';
+      data['Jetson Clocks'] = power?.jetson_clocks || 'Not available';
       data['Power Draw'] = power?.total ? `${(power.total / 1000).toFixed(2)} W` : 'Not available';
 
       // Primary temperatures

@@ -140,7 +140,7 @@ class JetsonCollector(SystemInfoCollector):
                     },
                     "power": {
                         "nvpmodel": str(jetson.nvpmodel) if jetson.nvpmodel else "Unknown",
-                        "jetson_clocks": bool(jetson.jetson_clocks) if hasattr(jetson, 'jetson_clocks') else False,
+                        "jetson_clocks": "Active" if (hasattr(jetson, 'jetson_clocks') and jetson.jetson_clocks) else "Inactive" if hasattr(jetson, 'jetson_clocks') else None,
                         "total": jetson.power.get("tot", {}).get("power", 0) if hasattr(jetson, 'power') else 0,
                         "temperature": {
                             "cpu": jetson.temperature.get("cpu", {}).get("temp", 0) if hasattr(jetson, 'temperature') else 0,
@@ -296,7 +296,7 @@ def get_system_info():
         },
         "power": {
             "nvpmodel": "Not available",
-            "jetson_clocks": False,
+            "jetson_clocks": "Not available",
             "total": 0,
             "temperature": {}
         },
