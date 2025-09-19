@@ -8,7 +8,6 @@ Type=simple
 ExecStart=%h/.local/bin/start_dds_agent.sh
 Restart=on-failure
 RestartSec=5
-# Add a slight delay to ensure devices are fully initialized
 ExecStartPre=/bin/sleep 2
 
 [Install]
