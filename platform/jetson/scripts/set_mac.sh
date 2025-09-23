@@ -11,15 +11,8 @@ fi
 echo "Board serial number: $serial_number"
 
 # Generate a MAC address from the serial number
-# Use the first 6 bytes of the SHA256 hash of the serial number
-mac=$(echo -n $serial_number | sha256sum | awk '{print $1}' | sed 's/^\(..\)\(..\)\(..\)\(..\)\(..\)\(..\).*/\1:\2:\3:\4:\5:\6/')
-if [ $? -ne 0 ]; then
-    echo "Error: could not generate MAC address"
-    exit 1
-fi
-
-# Print the generated MAC address
-echo "Generated MAC address: $mac"
+# This will be used for the device-specific part (last 3 bytes)
+# The OUI (first 3 bytes) will be preserved from the existing interface
 
 # Find the first available Ethernet interface
 # Look for interfaces that are ethernet type and not loopback
@@ -34,6 +27,31 @@ fi
 
 echo "Using interface: $interface"
 
+# Get the current MAC address of the interface
+current_mac=$(ip link show $interface | grep -o -E '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}')
+if [ -z "$current_mac" ]; then
+    echo "Error: could not get current MAC address for $interface"
+    exit 1
+fi
+
+echo "Current MAC address: $current_mac"
+
+# Extract the first 3 bytes (OUI) from the current MAC address
+oui=$(echo $current_mac | cut -d: -f1-3)
+
+# Generate the last 3 bytes from the serial number hash
+# Use the first 3 bytes of the SHA256 hash of the serial number for the device-specific part
+device_specific=$(echo -n $serial_number | sha256sum | awk '{print $1}' | sed 's/^\(..\)\(..\)\(..\).*/\1:\2:\3/')
+if [ $? -ne 0 ]; then
+    echo "Error: could not generate device-specific MAC bytes"
+    exit 1
+fi
+
+# Combine OUI with device-specific bytes
+new_mac="${oui}:${device_specific}"
+
+echo "New MAC address: $new_mac (preserving OUI: $oui)"
+
 # Check if interface exists
 if ! ip link show $interface > /dev/null 2>&1; then
     echo "Error: interface $interface not found"
@@ -47,8 +65,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Set the MAC address
-sudo ip link set dev $interface address $mac
+# Set the new MAC address
+sudo ip link set dev $interface address $new_mac
 if [ $? -ne 0 ]; then
     echo "Error: could not set MAC address on $interface"
     # Try to bring the interface back up even if MAC setting failed
@@ -63,4 +81,4 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Successfully set MAC address $mac on $interface"
+echo "Successfully set MAC address $new_mac on $interface"
