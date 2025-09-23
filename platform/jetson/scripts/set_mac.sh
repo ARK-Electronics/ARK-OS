@@ -7,6 +7,9 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Print the serial number
+echo "Board serial number: $serial_number"
+
 # Generate a MAC address from the serial number
 # Use the first 6 bytes of the SHA256 hash of the serial number
 mac=$(echo -n $serial_number | sha256sum | awk '{print $1}' | sed 's/^\(..\)\(..\)\(..\)\(..\)\(..\)\(..\).*/\1:\2:\3:\4:\5:\6/')
@@ -14,6 +17,9 @@ if [ $? -ne 0 ]; then
     echo "Error: could not generate MAC address"
     exit 1
 fi
+
+# Print the generated MAC address
+echo "Generated MAC address: $mac"
 
 # Set the MAC address on the enP8p1s0 interface
 interface="enP8p1s0"
