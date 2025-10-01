@@ -1,3 +1,10 @@
 #!/bin/bash
 echo "Installing micro-xrce-dds-agent"
-sudo snap install micro-xrce-dds-agent --edge
+pushd .
+cd Micro-XRCE-DDS-Agent
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+popd
