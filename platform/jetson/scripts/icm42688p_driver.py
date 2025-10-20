@@ -1,6 +1,6 @@
 import spidev
 import time
-import Jetson.GPIO as GPIO
+# import Jetson.GPIO as GPIO
 
 # SPI and GPIO Configuration
 SPI_BUS = 1     # SPI1
@@ -33,8 +33,8 @@ class ICM42688P:
         self.spi.max_speed_hz = 1000000
         self.spi.mode = 0b00
 
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(DRDY_PIN, GPIO.IN)
+        # GPIO.setmode(GPIO.BOARD)
+        # GPIO.setup(DRDY_PIN, GPIO.IN)
 
         self._initialize_device()
 
@@ -86,10 +86,11 @@ class ICM42688P:
 
     def close(self):
         self.spi.close()
-        GPIO.cleanup()
+        # GPIO.cleanup()
 
     def wait_for_data_ready(self):
-        GPIO.wait_for_edge(DRDY_PIN, GPIO.RISING)
+        # GPIO.wait_for_edge(DRDY_PIN, GPIO.RISING)
+        pass
 
 # Example usage
 if __name__ == '__main__':
