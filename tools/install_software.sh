@@ -223,6 +223,14 @@ git submodule foreach git clean -fd
 # TODO: some of these dependencies should be part of
 # the specific service install script. Next pass should be to install
 # each service independently to determine what deps are missing.
+
+########## jetson-specific holds (before apt update) ##########
+if [ "$TARGET" = "jetson" ]; then
+	# Upgrading these packages can break things like Wi-Fi. Don't allow these to be updated.
+	echo "Setting package holds for Jetson system packages"
+	sudo apt-mark hold linux-firmware nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-firmware nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers wireless-regdb
+fi
+
 ########## install dependencies ##########
 echo "Installing dependencies"
 sudo apt-get update
@@ -250,9 +258,6 @@ sudo apt-get install -y \
 
 ########## jetson dependencies ##########
 if [ "$TARGET" = "jetson" ]; then
-
-	# Upgrading these packages can break things like Wi-Fi. Don't allow these to be updated.
-	sudo apt-mark hold linux-firmware nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-firmware nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers wireless-regdb
 
 	if [ "$INSTALL_JETPACK" = "y" ]; then
 		echo "Installing JetPack"
