@@ -14,8 +14,38 @@ if ! detect_platform; then
 fi
 
 # Check if system is holding package management lock
-if fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
-	echo "Another apt process is running. Please try again later."
+check_apt_locks() {
+	local locks=(
+		"/var/lib/dpkg/lock"
+		"/var/lib/dpkg/lock-frontend"
+		"/var/lib/apt/lists/lock"
+		"/var/cache/apt/archives/lock"
+	)
+
+	for lock in "${locks[@]}"; do
+		if sudo fuser "$lock" >/dev/null 2>&1; then
+			local pid=$(sudo fuser "$lock" 2>/dev/null | awk '{print $1}')
+			local process=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+			echo "ERROR: Package manager is locked by process $pid ($process)"
+			echo ""
+			echo "This usually happens when:"
+			echo "  1. System is checking for updates in the background (packagekitd/unattended-upgrades)"
+			echo "  2. Another apt/dpkg process is running"
+			echo ""
+			echo "To resolve this:"
+			echo "  1. Wait a few minutes for automatic updates to complete, then try again"
+			echo "  2. Or manually stop the process:"
+			echo "     sudo systemctl stop packagekit"
+			echo "     sudo killall apt apt-get dpkg packagekitd unattended-upgrade"
+			echo "  3. Then run this script again"
+			echo ""
+			return 1
+		fi
+	done
+	return 0
+}
+
+if ! check_apt_locks; then
 	exit 1
 fi
 
@@ -193,6 +223,14 @@ git submodule foreach git clean -fd
 # TODO: some of these dependencies should be part of
 # the specific service install script. Next pass should be to install
 # each service independently to determine what deps are missing.
+
+########## jetson-specific holds (before apt update) ##########
+if [ "$TARGET" = "jetson" ]; then
+	# Upgrading these packages can break things like Wi-Fi. Don't allow these to be updated.
+	echo "Setting package holds for Jetson system packages"
+	sudo apt-mark hold linux-firmware nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-firmware nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers wireless-regdb
+fi
+
 ########## install dependencies ##########
 echo "Installing dependencies"
 sudo apt-get update
@@ -220,9 +258,6 @@ sudo apt-get install -y \
 
 ########## jetson dependencies ##########
 if [ "$TARGET" = "jetson" ]; then
-
-	# Upgrading these packages can break things like Wi-Fi. Don't allow these to be updated.
-	sudo apt-mark hold linux-firmware nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-firmware nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers wireless-regdb
 
 	if [ "$INSTALL_JETPACK" = "y" ]; then
 		echo "Installing JetPack"

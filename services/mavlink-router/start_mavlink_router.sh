@@ -33,4 +33,4 @@ python3 ~/.local/bin/vbus_enable.py
 sleep 3
 
 # Finally, launch mavlink-routerd
-mavlink-routerd
+~/.local/bin/mavlink-routerd
