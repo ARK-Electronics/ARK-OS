@@ -14,8 +14,38 @@ if ! detect_platform; then
 fi
 
 # Check if system is holding package management lock
-if fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
-	echo "Another apt process is running. Please try again later."
+check_apt_locks() {
+	local locks=(
+		"/var/lib/dpkg/lock"
+		"/var/lib/dpkg/lock-frontend"
+		"/var/lib/apt/lists/lock"
+		"/var/cache/apt/archives/lock"
+	)
+
+	for lock in "${locks[@]}"; do
+		if sudo fuser "$lock" >/dev/null 2>&1; then
+			local pid=$(sudo fuser "$lock" 2>/dev/null | awk '{print $1}')
+			local process=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+			echo "ERROR: Package manager is locked by process $pid ($process)"
+			echo ""
+			echo "This usually happens when:"
+			echo "  1. System is checking for updates in the background (packagekitd/unattended-upgrades)"
+			echo "  2. Another apt/dpkg process is running"
+			echo ""
+			echo "To resolve this:"
+			echo "  1. Wait a few minutes for automatic updates to complete, then try again"
+			echo "  2. Or manually stop the process:"
+			echo "     sudo systemctl stop packagekit"
+			echo "     sudo killall apt apt-get dpkg packagekitd unattended-upgrade"
+			echo "  3. Then run this script again"
+			echo ""
+			return 1
+		fi
+	done
+	return 0
+}
+
+if ! check_apt_locks; then
 	exit 1
 fi
 
