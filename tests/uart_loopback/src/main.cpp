@@ -72,56 +72,32 @@ struct PacketStats {
     std::atomic<uint64_t> crc_errors{0};
     std::atomic<uint64_t> sequence_gaps{0};
     std::atomic<uint64_t> sequence_duplicates{0};
-    std::atomic<uint64_t> framing_errors{0};
-    std::atomic<uint64_t> overrun_errors{0};
-    std::atomic<uint64_t> parity_errors{0};
-    std::atomic<uint64_t> partial_reads{0};
+    std::atomic<uint64_t> parse_errors{0};     // Software packet parsing errors
+    std::atomic<uint64_t> framing_errors{0};   // Hardware framing errors from kernel
+    std::atomic<uint64_t> overrun_errors{0};   // Hardware overrun errors from kernel
+    std::atomic<uint64_t> parity_errors{0};    // Hardware parity errors from kernel
 
     uint16_t last_seq_sent{0};
     uint16_t last_seq_received{0};
     uint16_t first_seq_received{0};
     bool first_packet{true};
     std::mutex seq_mutex;
-    std::vector<uint16_t> missing_sequences;  // Track which sequences were skipped
-
-    void reset() {
-        packets_sent = 0;
-        packets_received = 0;
-        bytes_sent = 0;
-        bytes_received = 0;
-        crc_errors = 0;
-        sequence_gaps = 0;
-        sequence_duplicates = 0;
-        framing_errors = 0;
-        overrun_errors = 0;
-        parity_errors = 0;
-        partial_reads = 0;
-        first_packet = true;
-        last_seq_sent = 0;
-        last_seq_received = 0;
-        first_seq_received = 0;
-        missing_sequences.clear();
-    }
+    std::vector<uint16_t> missing_sequences;
 };
 
 struct KernelSerialStats {
-    uint64_t tx{0};
-    uint64_t rx{0};
     uint64_t frame{0};
     uint64_t overrun{0};
     uint64_t parity{0};
-    uint64_t brk{0};
 };
 
-// Read kernel serial statistics from /proc/tty/driver/serial or sysfs
+// Read kernel serial error statistics from sysfs
 KernelSerialStats read_kernel_stats(const std::string& device) {
     KernelSerialStats stats;
 
-    // Try to find the tty name (e.g., ttyTHS3)
     size_t pos = device.rfind('/');
     std::string tty_name = (pos != std::string::npos) ? device.substr(pos + 1) : device;
 
-    // Try sysfs first (more reliable on Jetson)
     std::string sysfs_path = "/sys/class/tty/" + tty_name + "/icount";
     std::ifstream sysfs(sysfs_path);
     if (sysfs.is_open()) {
@@ -131,12 +107,9 @@ KernelSerialStats read_kernel_stats(const std::string& device) {
             std::string key;
             uint64_t value;
             if (iss >> key >> value) {
-                if (key == "tx:") stats.tx = value;
-                else if (key == "rx:") stats.rx = value;
-                else if (key == "frame:") stats.frame = value;
+                if (key == "frame:") stats.frame = value;
                 else if (key == "overrun:") stats.overrun = value;
                 else if (key == "parity:") stats.parity = value;
-                else if (key == "brk:") stats.brk = value;
             }
         }
     }
@@ -220,7 +193,6 @@ public:
         return read(fd_, buffer, max_len);
     }
 
-    int fd() const { return fd_; }
     const std::string& device() const { return device_; }
 
 private:
@@ -294,7 +266,7 @@ private:
 
 class PacketParser {
 public:
-    PacketParser(PacketStats& stats) : stats_(stats), state_(State::SYNC), buffer_pos_(0) {}
+    PacketParser(PacketStats& stats) : stats_(stats), state_(State::HEADER), buffer_pos_(0), payload_len_(0) {}
 
     void process_bytes(const uint8_t* data, size_t len) {
         for (size_t i = 0; i < len; i++) {
@@ -304,7 +276,6 @@ public:
 
 private:
     enum class State {
-        SYNC,
         HEADER,
         PAYLOAD,
         CRC
@@ -314,25 +285,20 @@ private:
         buffer_[buffer_pos_++] = byte;
 
         switch (state_) {
-            case State::SYNC:
-                // We don't have a sync byte, so we just start collecting header
+            case State::HEADER:
                 if (buffer_pos_ >= PACKET_HEADER_SIZE) {
                     payload_len_ = buffer_[2] | (buffer_[3] << 8);
                     if (payload_len_ > MAX_PAYLOAD_SIZE) {
                         // Invalid length, shift buffer and try to resync
                         memmove(buffer_, buffer_ + 1, buffer_pos_ - 1);
                         buffer_pos_--;
-                        stats_.framing_errors++;
+                        stats_.parse_errors++;
                     } else if (payload_len_ == 0) {
                         state_ = State::CRC;
                     } else {
                         state_ = State::PAYLOAD;
                     }
                 }
-                break;
-
-            case State::HEADER:
-                // Already handled in SYNC
                 break;
 
             case State::PAYLOAD:
@@ -345,7 +311,7 @@ private:
                 if (buffer_pos_ >= PACKET_HEADER_SIZE + payload_len_ + PACKET_CRC_SIZE) {
                     validate_packet();
                     buffer_pos_ = 0;
-                    state_ = State::SYNC;
+                    state_ = State::HEADER;
                 }
                 break;
         }
@@ -448,9 +414,6 @@ void receiver_thread(UartPort& port, PacketStats& stats, std::atomic<bool>& runn
         ssize_t bytes_read = port.read_bytes(read_buffer, sizeof(read_buffer));
         if (bytes_read > 0) {
             parser.process_bytes(read_buffer, bytes_read);
-            if (bytes_read < static_cast<ssize_t>(sizeof(read_buffer))) {
-                stats.partial_reads++;
-            }
         } else if (bytes_read < 0 && errno != EAGAIN) {
             std::cerr << "Read error on " << port.device() << ": " << strerror(errno) << std::endl;
         }
@@ -482,12 +445,12 @@ void stats_monitor_thread(const std::string& dev0, const std::string& dev1,
     }
 }
 
-std::string baud_to_string(speed_t baud) {
+int baud_to_int(speed_t baud) {
     switch (baud) {
-        case B57600: return "57600";
-        case B115200: return "115200";
-        case B921600: return "921600";
-        default: return "unknown";
+        case B57600: return 57600;
+        case B115200: return 115200;
+        case B921600: return 921600;
+        default: return 0;
     }
 }
 
@@ -503,6 +466,7 @@ void print_stats(const std::string& name, const PacketStats& stats, double elaps
     std::cout << "    Rates: TX=" << std::fixed << std::setprecision(1)
               << tx_rate << " B/s, RX=" << rx_rate << " B/s" << std::endl;
     std::cout << "    Errors: CRC=" << stats.crc_errors
+              << ", parse=" << stats.parse_errors
               << ", framing=" << stats.framing_errors
               << ", overrun=" << stats.overrun_errors
               << ", parity=" << stats.parity_errors << std::endl;
@@ -536,9 +500,10 @@ void print_stats(const std::string& name, const PacketStats& stats, double elaps
     }
 }
 
-bool run_test(const std::string& dev0, const std::string& dev1, speed_t baud) {
+bool run_test(const std::string& dev0, const std::string& dev1, speed_t baud, int duration_sec) {
+    int baud_rate = baud_to_int(baud);
     std::cout << "\n========================================" << std::endl;
-    std::cout << "Testing at " << baud_to_string(baud) << " baud" << std::endl;
+    std::cout << "Testing at " << baud_rate << " baud" << std::endl;
     std::cout << "========================================" << std::endl;
 
     UartPort port0(dev0, baud);
@@ -568,17 +533,17 @@ bool run_test(const std::string& dev0, const std::string& dev1, speed_t baud) {
     auto start_time = std::chrono::steady_clock::now();
 
     // Start threads - all 4 run simultaneously for bidirectional traffic
-    std::thread tx0(sender_thread, std::ref(port0), std::ref(stats_0to1), std::stoi(baud_to_string(baud)), std::ref(tx_running));
+    std::thread tx0(sender_thread, std::ref(port0), std::ref(stats_0to1), baud_rate, std::ref(tx_running));
     std::thread rx1(receiver_thread, std::ref(port1), std::ref(stats_0to1), std::ref(rx_running));  // UART1 receives what UART0 sent
-    std::thread tx1(sender_thread, std::ref(port1), std::ref(stats_1to0), std::stoi(baud_to_string(baud)), std::ref(tx_running));
+    std::thread tx1(sender_thread, std::ref(port1), std::ref(stats_1to0), baud_rate, std::ref(tx_running));
     std::thread rx0(receiver_thread, std::ref(port0), std::ref(stats_1to0), std::ref(rx_running));  // UART0 receives what UART1 sent
     std::thread monitor(stats_monitor_thread, dev0, dev1, std::ref(stats_0to1), std::ref(stats_1to0), std::ref(rx_running));
 
-    std::cout << "Running for " << TEST_DURATION_SECONDS << " seconds..." << std::endl;
+    std::cout << "Running for " << duration_sec << " seconds..." << std::endl;
     std::cout << "(Both directions running simultaneously)" << std::endl;
 
     // Progress display
-    for (int i = 0; i < TEST_DURATION_SECONDS && g_running; i++) {
+    for (int i = 0; i < duration_sec && g_running; i++) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         std::cout << "  " << (i + 1) << "s: UART0->UART1 tx=" << stats_0to1.bytes_sent
                   << " rx=" << stats_0to1.bytes_received
@@ -716,7 +681,7 @@ int main(int argc, char* argv[]) {
 
     for (speed_t baud : bauds) {
         if (!g_running) break;
-        if (run_test(dev0, dev1, baud)) {
+        if (run_test(dev0, dev1, baud, duration)) {
             pass_count++;
         }
         // Brief pause between tests
