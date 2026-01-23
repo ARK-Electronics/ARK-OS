@@ -3,6 +3,7 @@
 # Script to demonstrate I2S GPIO functionality on ARK Jetson Carrier
 # Uses I2S0_DOUT as output and I2S0_DIN as input
 # Requires physical connection between pin 40 (DOUT) and pin 38 (DIN)
+# Note: Jetson.GPIO does not support controlling pull-up/down resistors
 
 import Jetson.GPIO as GPIO
 import time

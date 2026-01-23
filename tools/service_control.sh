@@ -44,6 +44,7 @@ function is_platform_supported() {
 
     # Check if current platform is in the array
     if [[ "$platforms" == *"\"$TARGET\""* ]]; then
+        echo "platform: $platform  target: $TARGET"
         return 0
     fi
 
