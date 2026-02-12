@@ -15,10 +15,10 @@ export default {
 
   colors: {
     // Original ARK color palette
-    black: 'rgba(0, 0, 0, 0.65)',
-    blackBold: 'rgba(0, 0, 0, 1)',
-    blackShadow: 'rgba(0, 0, 0, 0.1)',
-    white: 'rgba(219, 73, 73, 1)',
+    text: 'rgba(0, 0, 0, 0.65)',
+    textBold: 'rgba(0, 0, 0, 1)',
+    shadow: 'rgba(0, 0, 0, 0.1)',
+    background: 'rgba(255, 255, 255, 1)',
     
     // ARK Green - Primary brand color
     primary: 'rgba(0, 187, 49, 1)',

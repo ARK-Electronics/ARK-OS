@@ -8,29 +8,31 @@
 
 export default {
   branding: {
-    name: 'Pat',
+    name: 'ARK Electronics',
     logoPath: 'logo.png',
     logoWidth: 120,
     logoHeight: 'auto',
-    faviconPath: 'radio.ico'
+    faviconPath: 'favicon.ico'
   },
 
   colors: {
-    text: 'rgba(167, 145, 145, 0.65)',
+    text: 'rgba(0, 0, 0, 0.65)',
     textBold: 'rgba(0, 0, 0, 1)',
     shadow: 'rgba(0, 0, 0, 0.1)',
-    background: 'rgba(243, 240, 240, 1)',
+    background: 'rgba(255, 255, 255, 1)',
     
-    // Blue as primary color
-    primary: 'rgba(7, 115, 223, 1)',             // Material Blue
-    primaryHover: 'rgba(25, 118, 210, 0.8)',
-    primaryShadow: 'rgba(25, 118, 210, 0.15)',
+    // ARK Green - Primary brand color
+    primary: 'rgba(0, 187, 49, 1)',
+    primaryHover: 'rgba(0, 187, 49, 0.65)',
+    primaryShadow: 'rgba(0, 187, 49, 0.1)',
     
-    secondary: 'rgba(66, 165, 245, 1)',           // Light Blue
-    secondaryHover: 'rgba(66, 165, 245, 0.8)',
+    // Blue - Secondary color
+    secondary: 'rgba(52, 152, 219, 1)',
+    secondaryHover: 'rgba(52, 152, 219, 0.8)',
     
-    success: 'rgba(76, 175, 80, 1)',              // Green
-    warning: 'rgba(255, 152, 0, 1)',              // Orange
+    // Status colors
+    success: 'rgba(0, 187, 49, 1)',
+    warning: 'rgba(255, 140, 0, 1)',
     error: 'rgba(244, 67, 54, 1)',
     errorHover: 'rgba(244, 67, 54, 0.65)',
     
@@ -58,18 +60,7 @@ export default {
 
   externalLinks: {
     showFlightReview: true,
-      customLinks: [
-    {
-      name: 'GitHub',
-      url: 'https://github.com/ARK-Electronics',
-      icon: 'fab fa-github'  // Optional, defaults to external link icon
-    },
-    {
-      name: 'Documentation',
-      url: 'https://docs.arkelectron.com'
-    }
-  ]
-
+    customLinks: []
   },
 
   customCSS: ``
