@@ -329,7 +329,7 @@ h1, h2 {
   border-radius: 50%;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: var(--ark-color-white);
   transition: 0.4s;
 }
 
