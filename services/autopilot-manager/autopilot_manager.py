@@ -1,7 +1,6 @@
 import os
 import json
 import subprocess
-import tempfile
 import glob
 import threading
 import time
@@ -9,7 +8,6 @@ import argparse
 import logging
 from datetime import datetime
 import socket
-import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -41,50 +39,18 @@ class DeviceDetector:
     def check_device_status():
         """Check if ARK device is connected and determine its mode"""
         try:
-            result = subprocess.run(
-                "lsusb",
-                shell=True,
-                capture_output=True,
-                text=True
-            )
-
-            if result.returncode == 0:
-                device_status = {
-                    "device_connected": False,
-                    "in_bootloader": False,
-                    "device_name": None
-                }
-
-                for line in result.stdout.splitlines():
-                    # Check for bootloader mode
-                    if "ARK BL" in line:
-                        logger.info(f"Detected bootloader: {line.strip()}")
-                        device_status["device_connected"] = True
-                        device_status["in_bootloader"] = True
-                        device_status["device_name"] = "ARK Bootloader"
-                        return device_status
-                    # Check for normal ARK device (application firmware)
-                    elif "ARK" in line and "BL" not in line:
-                        logger.info(f"Detected ARK device: {line.strip()}")
-                        device_status["device_connected"] = True
-                        device_status["in_bootloader"] = False
-                        device_status["device_name"] = "ARK Flight Controller"
-                        return device_status
-
-                return device_status
-
-            return {
-                "device_connected": False,
-                "in_bootloader": False,
-                "device_name": None
-            }
+            for product_file in glob.glob('/sys/bus/usb/devices/*/product'):
+                with open(product_file, 'r') as f:
+                    product = f.read().strip()
+                if "ARK BL" in product:
+                    logger.debug(f"Detected bootloader: {product}")
+                    return {"device_connected": True, "in_bootloader": True, "device_name": "ARK Bootloader"}
+                elif "ARK" in product:
+                    logger.debug(f"Detected ARK device: {product}")
+                    return {"device_connected": True, "in_bootloader": False, "device_name": "ARK Flight Controller"}
         except Exception as e:
             logger.error(f"Error checking device status: {e}")
-            return {
-                "device_connected": False,
-                "in_bootloader": False,
-                "device_name": None
-            }
+        return {"device_connected": False, "in_bootloader": False, "device_name": None}
 
 
 class MAVLinkConnection:
@@ -97,6 +63,7 @@ class MAVLinkConnection:
         self.heartbeat_timeout = 3  # seconds
         self.last_heartbeat = None
         self.device_detector = DeviceDetector()
+        self._lock = threading.Lock()
 
         # Store the latest autopilot data
         self.autopilot_data = {
@@ -147,12 +114,25 @@ class MAVLinkConnection:
                 logger.error(f"Error closing MAVLink connection: {e}")
             finally:
                 self.mav_connection = None
-                self.autopilot_data["mavlink_connected"] = False
+                with self._lock:
+                    self.autopilot_data["mavlink_connected"] = False
+
+    def _reset_connection(self):
+        """Close and re-create the MAVLink connection"""
+        with self._lock:
+            self.autopilot_data["mavlink_connected"] = False
+        if self.mav_connection:
+            self.mav_connection.close()
+        self.mav_connection = mavutil.mavlink_connection(
+            self.connection_string,
+            autoreconnect=True,
+            source_system=self.source_system)
 
     def update_heartbeat_time(self):
         """Update the last heartbeat timestamp"""
         self.last_heartbeat = datetime.now()
-        self.autopilot_data["last_heartbeat"] = self.last_heartbeat.isoformat()
+        with self._lock:
+            self.autopilot_data["last_heartbeat"] = self.last_heartbeat.isoformat()
 
     def is_mavlink_connected(self):
         """Check if the MAVLink connection is active based on recent heartbeats"""
@@ -168,7 +148,7 @@ class MAVLinkConnection:
             return False
 
         try:
-            logger.info("Requesting autopilot version")
+            logger.debug("Requesting autopilot version")
             # Use MAVLink command to request version information
             self.mav_connection.mav.command_long_send(
                 self.mav_connection.target_system,
@@ -188,9 +168,9 @@ class MAVLinkConnection:
             return False
 
         try:
-            logger.info(f"Sending system time {int(current_time * 1e6)}")
-            time_unix_usec = int(current_time * 1e6);
-            time_boot_ms = 0; # unused in PX4
+            logger.debug(f"Sending system time {int(current_time * 1e6)}")
+            time_unix_usec = int(current_time * 1e6)
+            time_boot_ms = 0  # unused in PX4
             self.mav_connection.mav.system_time_send(
                 time_unix_usec,
                 time_boot_ms
@@ -203,13 +183,14 @@ class MAVLinkConnection:
     def update_device_status(self):
         """Update device connection status via USB detection"""
         device_status = self.device_detector.check_device_status()
-        self.autopilot_data["device_connected"] = device_status["device_connected"]
-        self.autopilot_data["in_bootloader"] = device_status["in_bootloader"]
-        self.autopilot_data["device_name"] = device_status["device_name"]
+        with self._lock:
+            self.autopilot_data["device_connected"] = device_status["device_connected"]
+            self.autopilot_data["in_bootloader"] = device_status["in_bootloader"]
+            self.autopilot_data["device_name"] = device_status["device_name"]
 
-        # If in bootloader, set appropriate autopilot type
-        if device_status["in_bootloader"]:
-            self.autopilot_data["autopilot_type"] = "Bootloader"
+            # If in bootloader, set appropriate autopilot type
+            if device_status["in_bootloader"]:
+                self.autopilot_data["autopilot_type"] = "Bootloader"
 
     def process_messages(self):
         """Process incoming MAVLink messages in a loop"""
@@ -248,15 +229,18 @@ class MAVLinkConnection:
                     # Process different message types
                     if msg.get_type() == 'HEARTBEAT':
                         self.update_heartbeat_time()
-                        self.autopilot_data["autopilot_type"] = self.get_autopilot_type(msg.autopilot)
-                        self.autopilot_data["mavlink_connected"] = True
+                        with self._lock:
+                            self.autopilot_data["autopilot_type"] = self.get_autopilot_type(msg.autopilot)
+                            self.autopilot_data["mavlink_connected"] = True
 
                         # Reset connection attempts on successful heartbeat
                         connection_attempts = 0
 
                         # Periodically request version information if needed
                         if current_time - last_version_request_time > 5:
-                            if self.autopilot_data["version"] == "Unknown":
+                            with self._lock:
+                                version_unknown = self.autopilot_data["version"] == "Unknown"
+                            if version_unknown:
                                 self.request_autopilot_version()
                                 last_version_request_time = current_time
 
@@ -271,38 +255,41 @@ class MAVLinkConnection:
                         major = (flight_sw_version >> 24) & 0xFF
                         minor = (flight_sw_version >> 16) & 0xFF
                         patch = (flight_sw_version >> 8) & 0xFF
-                        self.autopilot_data["version"] = f"{major}.{minor}.{patch}"
+                        with self._lock:
+                            self.autopilot_data["version"] = f"{major}.{minor}.{patch}"
 
-                        # Convert git hash bytes to hex string
-                        if hasattr(msg, 'flight_custom_version'):
-                            # take first 8 bytes, reverse to MSB-first, take only first 5 bytes (PX4 only uses 5)
-                            hash_bytes = msg.flight_custom_version[:8][::-1][:5]
-                            hex_hash = ''.join(f'{b:02x}' for b in hash_bytes)
-                            self.autopilot_data["git_hash"] = hex_hash
+                            # Convert git hash bytes to hex string
+                            if hasattr(msg, 'flight_custom_version'):
+                                # take first 8 bytes, reverse to MSB-first, take only first 5 bytes (PX4 only uses 5)
+                                hash_bytes = msg.flight_custom_version[:8][::-1][:5]
+                                hex_hash = ''.join(f'{b:02x}' for b in hash_bytes)
+                                self.autopilot_data["git_hash"] = hex_hash
 
                     elif msg.get_type() == 'SYS_STATUS':
                         # Extract battery information
-                        if hasattr(msg, 'voltage_battery'):
-                            # Convert from millivolts to volts
-                            self.autopilot_data["voltage"] = msg.voltage_battery / 1000.0
+                        with self._lock:
+                            if hasattr(msg, 'voltage_battery'):
+                                # Convert from millivolts to volts
+                                self.autopilot_data["voltage"] = msg.voltage_battery / 1000.0
 
-                        if hasattr(msg, 'current_battery'):
-                            # Convert from 10*milliamps to amps
-                            self.autopilot_data["current"] = msg.current_battery / 100.0
+                            if hasattr(msg, 'current_battery'):
+                                # Convert from 10*milliamps to amps
+                                self.autopilot_data["current"] = msg.current_battery / 100.0
 
-                        if hasattr(msg, 'battery_remaining'):
-                            self.autopilot_data["remaining"] = msg.battery_remaining
+                            if hasattr(msg, 'battery_remaining'):
+                                self.autopilot_data["remaining"] = msg.battery_remaining
 
                 # If no message or heartbeat timeout occurred, check connection status
                 elif (self.last_heartbeat is None or
                       (datetime.now() - self.last_heartbeat).total_seconds() > 5):
 
-                    self.autopilot_data["mavlink_connected"] = False
+                    with self._lock:
+                        self.autopilot_data["mavlink_connected"] = False
 
                     # No recent heartbeat, try to send one to elicit a response
                     if waiting_for_heartbeat and connection_attempts < 5:
                         try:
-                            logger.info(f"Sending heartbeat attempt {connection_attempts+1}/5")
+                            logger.debug(f"Sending heartbeat attempt {connection_attempts+1}/5")
                             self.mav_connection.mav.heartbeat_send(
                                 mavlink.MAV_TYPE_GCS,
                                 mavlink.MAV_AUTOPILOT_INVALID,
@@ -314,13 +301,7 @@ class MAVLinkConnection:
                     elif connection_attempts >= 5:
                         try:
                             logger.warning("Connection issues detected, attempting to reset MAVLink connection")
-                            self.autopilot_data["mavlink_connected"] = False
-                            if self.mav_connection:
-                                self.mav_connection.close()
-                            self.mav_connection = mavutil.mavlink_connection(
-                                self.connection_string,
-                                autoreconnect=True,
-                                source_system=self.source_system)
+                            self._reset_connection()
                             waiting_for_heartbeat = True
                             connection_attempts = 0
                         except Exception as reset_error:
@@ -334,16 +315,10 @@ class MAVLinkConnection:
                 pass
             except ConnectionResetError as cre:
                 logger.warning(f"Connection reset: {cre}")
-                self.autopilot_data["mavlink_connected"] = False
                 # Give a short pause before attempting reconnection
                 time.sleep(1)
                 try:
-                    if self.mav_connection:
-                        self.mav_connection.close()
-                    self.mav_connection = mavutil.mavlink_connection(
-                        self.connection_string,
-                        autoreconnect=True,
-                        source_system=self.source_system)
+                    self._reset_connection()
                     waiting_for_heartbeat = True
                     connection_attempts = 0
                 except Exception as reset_error:
@@ -372,40 +347,20 @@ class MAVLinkConnection:
         logger.info("MAVLink message processing thread started")
 
     def get_autopilot_details(self):
-        # Update MAVLink connection status
-        self.autopilot_data["mavlink_connected"] = self.is_mavlink_connected()
-
-        # Make sure device status is current
-        self.update_device_status()
-
-        self.autopilot_data["timestamp"] = datetime.now().isoformat()
-        return self.autopilot_data
+        with self._lock:
+            details = dict(self.autopilot_data)
+        details["timestamp"] = datetime.now().isoformat()
+        return details
 
 
 class AutopilotManager:
     def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
         self.mavlink = MAVLinkConnection(connection_string=connection_string, source_system=source_system)
+        self._flash_lock = threading.Lock()
+        self._flashing = False
         # Start the connection process (non-blocking)
         self.mavlink.connect()
         # The message loop is started automatically in connect()
-
-    def execute_process(self, command, shell=True, timeout=30):
-        """Execute a command and return the result"""
-        try:
-            process = subprocess.run(
-                command,
-                shell=shell,
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
-
-            if process.returncode == 0:
-                return True, process.stdout
-            else:
-                return False, process.stderr
-        except Exception as e:
-            return False, str(e)
 
     def get_autopilot_details(self):
         """Get details about the connected autopilot via MAVLink"""
@@ -428,8 +383,7 @@ class AutopilotManager:
         """Check if a systemd service is active"""
         try:
             result = subprocess.run(
-                f"systemctl --user is-active {service_name}",
-                shell=True,
+                ["systemctl", "--user", "is-active", service_name],
                 capture_output=True,
                 text=True
             )
@@ -441,8 +395,7 @@ class AutopilotManager:
     def stop_mavlink_router(self):
         try:
             logger.debug("Stopping mavlink-router service")
-            result = subprocess.run("systemctl --user stop mavlink-router",
-                                    shell=True,
+            result = subprocess.run(["systemctl", "--user", "stop", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -459,8 +412,7 @@ class AutopilotManager:
     def restart_mavlink_router(self):
         try:
             logger.debug("Restarting mavlink-router service")
-            result = subprocess.run("systemctl --user restart mavlink-router",
-                                    shell=True,
+            result = subprocess.run(["systemctl", "--user", "restart", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -483,8 +435,7 @@ class AutopilotManager:
         script = "reset_fmu_wait_bl.py" if mode == "wait_bl" else "reset_fmu_fast.py"
         try:
             logger.debug(f"Resetting FMU using {script}")
-            result = subprocess.run(f"python3 ~/.local/bin/{script}",
-                                   shell=True,
+            result = subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")],
                                    check=False,
                                    capture_output=True,
                                    text=True)
@@ -501,136 +452,160 @@ class AutopilotManager:
     def flash_firmware(self, firmware_path, socket_id):
         """Flash firmware to the autopilot"""
         socket = socketio.server
+
+        with self._flash_lock:
+            if self._flashing:
+                error_data = {
+                    "status": "failed",
+                    "message": "Firmware flash already in progress",
+                    "percent": 0
+                }
+                socket.emit('progress', error_data, room=socket_id)
+                return False
+            self._flashing = True
+
         logger.info(f"Starting firmware flash process for {firmware_path}")
 
-        # Check if firmware file exists
-        if not os.path.isfile(firmware_path):
-            error_msg = "Firmware file does not exist"
-            logger.error(f"Error: {error_msg}")
-            error_data = {
-                "status": "failed",
-                "message": error_msg,
-                "percent": 0
-            }
-            socket.emit('progress', error_data, room=socket_id)
-            return False
-
-        # Find the ARKV6X device
-        logger.debug("Looking for ARKV6X device")
-        serial_device = self.find_serial_device()
-        if not serial_device:
-            error_msg = "ARKV6X not found"
-            logger.error(f"Error: {error_msg}")
-            error_data = {
-                "status": "failed",
-                "message": error_msg,
-                "percent": 0
-            }
-            socket.emit('progress', error_data, room=socket_id)
-            return False
-        logger.debug(f"Found ARKV6X device at {serial_device}")
-
-        # Disconnect from MAVLink first to avoid conflicts
-        logger.debug("Disconnecting MAVLink connection")
-        self.mavlink.disconnect()
-
-        # Stop mavlink router service if it's running
-        logger.debug("Checking if mavlink-router is active")
-        router_was_active = self.is_service_active("mavlink-router")
-        if router_was_active:
-            logger.debug("mavlink-router is active, stopping it")
-            self.stop_mavlink_router()
-        else:
-            logger.debug("mavlink-router is not active")
-
-        # Reset FMU to enter bootloader mode
-        logger.debug("Resetting FMU to enter bootloader mode")
-        self.reset_fmu(mode="wait_bl")
-
-        # Run px_uploader.py with JSON progress output
-        logger.debug(f"Starting firmware upload using px_uploader.py")
-        command = f"python3 -u ~/.local/bin/px_uploader.py --json-progress --port {serial_device} {firmware_path}"
-
         try:
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
-            logger.debug(f"Started upload process with PID: {process.pid}")
-
-            # Process output line by line to capture JSON progress updates
-            for line in process.stdout:
-                logger.debug(f"Uploader output: {line.strip()}")
-                if line is not None:
-                    try:
-                        # Try to parse as JSON for progress updates
-                        progress_data = json.loads(line.strip())
-                        socket.emit('progress', progress_data, room=socket_id)
-                    except json.JSONDecodeError:
-                        # Not JSON, could be other output
-                        logger.debug(f"Non-JSON output: {line.strip()}")
-
-            # Wait for process to complete
-            return_code = process.wait()
-            logger.debug(f"Upload process completed with return code: {return_code}")
-
-            # Get stderr output if there was an error
-            stderr_output = ""
-            if return_code != 0:
-                stderr_output = process.stderr.read()
-                logger.error(f"Error output from uploader: {stderr_output}")
-
-            # Reset FMU quickly after flashing
-            logger.debug("Performing fast reset of FMU")
-            self.reset_fmu(mode="fast")
-
-            # Wait for the reset to complete
-            logger.debug("Waiting for reset to complete")
-            time.sleep(3)
-
-            # Restart mavlink router service only if it was active before
-            if router_was_active:
-                logger.debug("Restarting mavlink-router service")
-                self.restart_mavlink_router()
-
-                # Wait for mavlink-router to start up
-                logger.debug("Waiting for mavlink-router to initialize")
-                time.sleep(2)
-
-            # Reconnect MAVLink
-            logger.debug("Reconnecting to MAVLink")
-            self.mavlink.connect()
-
-            if return_code == 0:
-                success_msg = "Firmware update completed successfully."
-                logger.info(success_msg)
-                socket.emit('completed', {"message": success_msg}, room=socket_id)
-                return True
-            else:
-                error_msg = f"Firmware update failed with code {return_code}: {stderr_output}"
-                logger.error(error_msg)
-                socket.emit('error', {"message": error_msg}, room=socket_id)
+            # Check if firmware file exists
+            if not os.path.isfile(firmware_path):
+                error_msg = "Firmware file does not exist"
+                logger.error(f"Error: {error_msg}")
+                error_data = {
+                    "status": "failed",
+                    "message": error_msg,
+                    "percent": 0
+                }
+                socket.emit('progress', error_data, room=socket_id)
                 return False
 
-        except Exception as e:
-            error_msg = f"Exception during firmware update: {str(e)}"
-            logger.error(error_msg)
-            socket.emit('error', {"message": error_msg}, room=socket_id)
+            # Find the ARKV6X device
+            logger.debug("Looking for ARKV6X device")
+            serial_device = self.find_serial_device()
+            if not serial_device:
+                error_msg = "ARKV6X not found"
+                logger.error(f"Error: {error_msg}")
+                error_data = {
+                    "status": "failed",
+                    "message": error_msg,
+                    "percent": 0
+                }
+                socket.emit('progress', error_data, room=socket_id)
+                return False
+            logger.debug(f"Found ARKV6X device at {serial_device}")
 
-            # Try to restart mavlink-router if it was active
+            # Disconnect from MAVLink first to avoid conflicts
+            logger.debug("Disconnecting MAVLink connection")
+            self.mavlink.disconnect()
+
+            # Stop mavlink router service if it's running
+            logger.debug("Checking if mavlink-router is active")
+            router_was_active = self.is_service_active("mavlink-router")
             if router_was_active:
-                logger.debug("Attempting to restart mavlink-router after exception")
-                self.restart_mavlink_router()
-                time.sleep(2)
+                logger.debug("mavlink-router is active, stopping it")
+                self.stop_mavlink_router()
+            else:
+                logger.debug("mavlink-router is not active")
+
+            # Reset FMU to enter bootloader mode
+            logger.debug("Resetting FMU to enter bootloader mode")
+            self.reset_fmu(mode="wait_bl")
+
+            # Run px_uploader.py with JSON progress output
+            logger.debug(f"Starting firmware upload using px_uploader.py")
+            command = [
+                "python3", "-u",
+                os.path.expanduser("~/.local/bin/px_uploader.py"),
+                "--json-progress", "--port", serial_device, firmware_path
+            ]
+
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1
+                )
+
+                logger.debug(f"Started upload process with PID: {process.pid}")
+
+                # Process output line by line to capture JSON progress updates
+                for line in process.stdout:
+                    logger.debug(f"Uploader output: {line.strip()}")
+                    if line is not None:
+                        try:
+                            # Try to parse as JSON for progress updates
+                            progress_data = json.loads(line.strip())
+                            socket.emit('progress', progress_data, room=socket_id)
+                        except json.JSONDecodeError:
+                            # Not JSON, could be other output
+                            logger.debug(f"Non-JSON output: {line.strip()}")
+
+                # Wait for process to complete
+                return_code = process.wait()
+                logger.debug(f"Upload process completed with return code: {return_code}")
+
+                # Get stderr output if there was an error
+                stderr_output = ""
+                if return_code != 0:
+                    stderr_output = process.stderr.read()
+                    logger.error(f"Error output from uploader: {stderr_output}")
+
+                # Reset FMU quickly after flashing
+                logger.debug("Performing fast reset of FMU")
+                self.reset_fmu(mode="fast")
+
+                # Wait for the reset to complete
+                logger.debug("Waiting for reset to complete")
+                time.sleep(3)
+
+                # Restart mavlink router service only if it was active before
+                if router_was_active:
+                    logger.debug("Restarting mavlink-router service")
+                    self.restart_mavlink_router()
+
+                    # Wait for mavlink-router to start up
+                    logger.debug("Waiting for mavlink-router to initialize")
+                    time.sleep(2)
+
+                # Reconnect MAVLink
+                logger.debug("Reconnecting to MAVLink")
                 self.mavlink.connect()
 
-            return False
+                if return_code == 0:
+                    success_msg = "Firmware update completed successfully."
+                    logger.info(success_msg)
+                    socket.emit('completed', {"message": success_msg}, room=socket_id)
+                    return True
+                else:
+                    error_msg = f"Firmware update failed with code {return_code}: {stderr_output}"
+                    logger.error(error_msg)
+                    socket.emit('error', {"message": error_msg}, room=socket_id)
+                    return False
+
+            except Exception as e:
+                error_msg = f"Exception during firmware update: {str(e)}"
+                logger.error(error_msg)
+                socket.emit('error', {"message": error_msg}, room=socket_id)
+
+                # Try to restart mavlink-router if it was active
+                if router_was_active:
+                    logger.debug("Attempting to restart mavlink-router after exception")
+                    self.restart_mavlink_router()
+                    time.sleep(2)
+                    self.mavlink.connect()
+
+                return False
+        finally:
+            with self._flash_lock:
+                self._flashing = False
+            # Clean up temp firmware file
+            try:
+                if os.path.isfile(firmware_path):
+                    os.unlink(firmware_path)
+            except OSError:
+                pass
 
 
 # Store autopilot_manager as Flask app context
@@ -680,10 +655,6 @@ def upload_firmware():
     logger.info(f"Firmware file saved to {temp_path}")
 
     # Start the flashing process in a background thread
-    @socketio.on_error_default
-    def default_error_handler(e):
-        logger.error(f"SocketIO error: {str(e)}")
-
     socketio.start_background_task(
         app.autopilot_manager.flash_firmware,
         temp_path,
