@@ -33,4 +33,16 @@ export PIXEAGLE_NONINTERACTIVE="1"
 bash scripts/init.sh
 popd &>/dev/null
 
+# Migrate from standalone service to ARK-OS managed service.
+# If PixEagle was previously installed standalone, it may have a system-level
+# service at /etc/systemd/system/pixeagle.service. This conflicts with the
+# user-level service that ARK-OS manages. Disable the old one.
+if systemctl is-enabled pixeagle.service &>/dev/null 2>&1; then
+    echo "Migrating: disabling standalone system-level pixeagle.service..."
+    echo "  (ARK-OS manages PixEagle as a user-level service instead)"
+    sudo systemctl stop pixeagle.service 2>/dev/null || true
+    sudo systemctl disable pixeagle.service 2>/dev/null || true
+    echo "  Standalone service disabled. ARK-OS will manage PixEagle."
+fi
+
 echo "PixEagle installation complete"
