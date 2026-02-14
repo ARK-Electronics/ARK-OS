@@ -31,6 +31,37 @@ server {
     }
 
 
+    # PixEagle Dashboard (React SPA behind subpath proxy)
+    location /pixeagle {
+        rewrite ^/pixeagle$ /pixeagle/ redirect;
+        rewrite ^/pixeagle/(.*)$ /$1 break;
+        proxy_pass http://localhost:3040;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+
+        # Disable upstream compression so sub_filter can rewrite HTML
+        proxy_set_header Accept-Encoding "";
+
+        # Rewrite absolute asset paths in HTML responses
+        sub_filter 'href="/' 'href="/pixeagle/';
+        sub_filter 'src="/' 'src="/pixeagle/';
+        sub_filter 'action="/' 'action="/pixeagle/';
+        sub_filter_once off;
+    }
+
+    # PixEagle API
+    location /pixeagle-api/ {
+        proxy_pass http://localhost:5077/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
     location /flight-review {
         rewrite ^/flight-review$ /flight-review/browse redirect;
         rewrite ^/flight-review/(.*)$ /$1 break;

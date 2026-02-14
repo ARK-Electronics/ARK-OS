@@ -1,0 +1,11 @@
+{
+  "displayName": "PixEagle",
+  "description": "AI-powered vision tracking and object following for PX4 drones.",
+  "platform": ["jetson", "pi"],
+  "configFile": "",
+  "visible": true,
+  "requires_sudo": false,
+  "env_var": "INSTALL_PIXEAGLE",
+  "install_script": "install_pixeagle.sh",
+  "install_files": []
+}

@@ -186,6 +186,8 @@ else
 	if [ "$TARGET" = "jetson" ]; then
 		ask_yes_no "Install JetPack?" INSTALL_JETPACK
 	fi
+
+	ask_yes_no "Install PixEagle (AI vision tracking)?" INSTALL_PIXEAGLE
 fi
 
 echo ""
@@ -205,6 +207,7 @@ fi
 
 [ "$INSTALL_POLARIS" = "y" ] && echo "  ✓ polaris-client-mavlink"
 [ "$INSTALL_POLARIS" = "y" ] && [ -n "$POLARIS_API_KEY" ] && echo "    - API Key configured"
+[ "$INSTALL_PIXEAGLE" = "y" ] && echo "  ✓ pixeagle (AI vision tracking)"
 
 echo ""
 echo "Plus standard components:"

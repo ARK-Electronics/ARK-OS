@@ -1,0 +1,21 @@
+[Unit]
+Description=PixEagle Vision Tracking
+Wants=network.target
+After=syslog.target network.target mavlink-router.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/PixEagle
+ExecStart=%h/PixEagle/scripts/service/run.sh
+ExecStop=%h/PixEagle/scripts/stop.sh
+Environment="HOME=%h"
+Environment="USER=%u"
+Environment="PIXEAGLE_SERVICE_MODE=1"
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStartSec=120
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target
