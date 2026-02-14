@@ -77,6 +77,9 @@ This service provides a REST API for connection management via the ARK UI.
 **service-manager.service** <br>
 This service provides a REST API for systemd user service management via the ARK UI.
 
+**pixeagle.service** (optional) <br>
+AI-powered vision tracking and object following for PX4 drones. When enabled, the PixEagle dashboard is accessible at `http://<hostname>.local/pixeagle/` and the API at `/pixeagle-api/`. See [PixEagle](https://github.com/alireza787b/PixEagle) for documentation.
+
 ### Jetson only
 
 **rid-transmitter.service** <br>
