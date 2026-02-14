@@ -31,7 +31,7 @@ server {
     }
 
 
-    # PixEagle Dashboard (React SPA behind subpath proxy)
+    # PixEagle Dashboard
     location /pixeagle {
         rewrite ^/pixeagle$ /pixeagle/ redirect;
         rewrite ^/pixeagle/(.*)$ /$1 break;
@@ -41,15 +41,6 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_cache_bypass $http_upgrade;
-
-        # Disable upstream compression so sub_filter can rewrite HTML
-        proxy_set_header Accept-Encoding "";
-
-        # Rewrite absolute asset paths in HTML responses
-        sub_filter 'href="/' 'href="/pixeagle/';
-        sub_filter 'src="/' 'src="/pixeagle/';
-        sub_filter 'action="/' 'action="/pixeagle/';
-        sub_filter_once off;
     }
 
     # PixEagle API

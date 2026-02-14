@@ -25,6 +25,9 @@ else
     fi
 fi
 
+# Configure dashboard for nginx proxy before init (so build uses correct paths)
+echo "PUBLIC_URL=/pixeagle" > "$PIXEAGLE_DIR/dashboard/.env.production.local"
+
 # Run PixEagle initialization (non-interactive, full profile)
 pushd . &>/dev/null
 cd "$PIXEAGLE_DIR"
