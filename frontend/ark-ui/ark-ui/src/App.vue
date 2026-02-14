@@ -6,14 +6,24 @@
       <router-link class="link" :class="{ active: isActive('/autopilot-page') }" to="/autopilot-page">Autopilot</router-link>
       <router-link class="link" :class="{ active: isActive('/connections-page') }" to="/connections-page">Connections</router-link>
       <router-link class="link" :class="{ active: isActive('/services-page') }" to="/services-page">Services</router-link>
-      <a
-        class="link external-link"
-        :href="`http://${hostname}.local/flight-review`"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <i class="fas fa-external-link-alt"></i> Flight Review
-      </a>
+      <div class="external-links">
+        <a
+          class="link external-link"
+          :href="`http://${hostname}.local/flight-review`"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <i class="fas fa-external-link-alt"></i> Flight Review
+        </a>
+        <a
+          class="link external-link"
+          :href="`http://${hostname}.local/pixeagle/`"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <i class="fas fa-crosshairs"></i> PixEagle
+        </a>
+      </div>
     </div>
     <div class="content" :style="{ marginLeft: sidebarWidth + 'px' }">
       <router-view/>
@@ -134,13 +144,20 @@ export default {
   transform: translateX(5px); /* Keep the same transform to avoid jumps */
 }
 
+/* Group external links at the bottom of the sidebar */
+.external-links {
+  margin-top: auto;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+}
+
 /* Style for the external link */
 .external-link {
-  margin-top: auto; /* Push it to the bottom of the sidebar */
-  margin-bottom: 20px; /* Add some space at the bottom */
   display: flex;
   align-items: center;
-  color: var(--ark-color-black-bold); /* Different color for external link */
+  color: var(--ark-color-black-bold);
 }
 
 .external-link:hover {
