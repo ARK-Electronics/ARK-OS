@@ -9,9 +9,6 @@ Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ExecStart=%h/.local/bin/logloader
 Restart=always
 RestartSec=5
-# Log download drives MAVSDK to call refresh_timeout_handler ~3750x/sec
-# causing ~95% CPU. Lower scheduling priority so flight-critical services
-# (mavlink-router, autopilot-manager) are not starved during downloads.
 Nice=10
 CPUWeight=50
 
