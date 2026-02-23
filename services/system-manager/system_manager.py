@@ -117,7 +117,7 @@ class JetsonCollector(SystemInfoCollector):
 
             with jtop() as jetson:
                 if not jetson.ok():
-                    return None
+                    raise RuntimeError("Jtop is not OK")
 
                 # Collect all temperature data
                 temperatures = {}
@@ -162,12 +162,15 @@ class JetsonCollector(SystemInfoCollector):
                     }
                 }
 
-                return data
+                return_data = data
         except (ImportError, ModuleNotFoundError):
-            return None
+            return_data = None
         except Exception as e:
             print(f"Error collecting Jetson data: {e}")
-            return None
+            return_data = None
+        finally:
+            jetson.close()
+            return return_data
 
 
 class RaspberryPiCollector(SystemInfoCollector):
