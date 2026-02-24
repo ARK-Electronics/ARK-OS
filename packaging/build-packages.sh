@@ -15,6 +15,13 @@ echo ""
 
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 
+# ─── Generate packaging files from packages.yaml ───
+
+generate() {
+    echo "Generating packaging files..."
+    python3 "$SCRIPT_DIR/generate.py" --output-dir "$SCRIPT_DIR/generated"
+}
+
 # ─── Build C++ submodule services ───
 
 build_cpp_service() {
@@ -44,54 +51,6 @@ build_cpp_service() {
     echo "$name built successfully"
 }
 
-build_logloader() {
-    echo "Building logloader..."
-    pushd "$PROJECT_ROOT/services/logloader/logloader" > /dev/null
-    cmake -B "$BUILD_DIR/logloader" -H.
-    cmake --build "$BUILD_DIR/logloader" -j"$(nproc)"
-    popd > /dev/null
-}
-
-build_mavlink_router() {
-    echo "Building mavlink-router..."
-    pushd "$PROJECT_ROOT/services/mavlink-router/mavlink-router" > /dev/null
-    meson setup "$BUILD_DIR/mavlink-router" --prefix=/opt/ark -Dsystemdsystemunitdir=
-    ninja -C "$BUILD_DIR/mavlink-router"
-    popd > /dev/null
-}
-
-build_dds_agent() {
-    echo "Building dds-agent..."
-    pushd "$PROJECT_ROOT/services/dds-agent/Micro-XRCE-DDS-Agent" > /dev/null
-    cmake -B "$BUILD_DIR/dds-agent" -H.
-    cmake --build "$BUILD_DIR/dds-agent" -j"$(nproc)"
-    popd > /dev/null
-}
-
-build_polaris() {
-    echo "Building polaris..."
-    pushd "$PROJECT_ROOT/services/polaris/polaris-client-mavlink" > /dev/null
-    cmake -B "$BUILD_DIR/polaris" -H.
-    cmake --build "$BUILD_DIR/polaris" -j"$(nproc)"
-    popd > /dev/null
-}
-
-build_rid_transmitter() {
-    echo "Building rid-transmitter..."
-    pushd "$PROJECT_ROOT/services/rid-transmitter/RemoteIDTransmitter" > /dev/null
-    cmake -B "$BUILD_DIR/rid-transmitter" -H.
-    cmake --build "$BUILD_DIR/rid-transmitter" -j"$(nproc)"
-    popd > /dev/null
-}
-
-build_rtsp_server() {
-    echo "Building rtsp-server..."
-    pushd "$PROJECT_ROOT/services/rtsp-server/rtsp-server" > /dev/null
-    cmake -B "$BUILD_DIR/rtsp-server" -H.
-    cmake --build "$BUILD_DIR/rtsp-server" -j"$(nproc)"
-    popd > /dev/null
-}
-
 build_frontend() {
     echo "Building frontend..."
     pushd "$PROJECT_ROOT/frontend/ark-ui/ark-ui" > /dev/null
@@ -110,7 +69,7 @@ package_service() {
     pkg_name=$(basename "$yaml_file" .yaml)
 
     echo "Packaging $pkg_name..."
-    pushd "$SCRIPT_DIR" > /dev/null
+    pushd "$SCRIPT_DIR/generated" > /dev/null
     VERSION="$VERSION" ARCH="$ARCH" nfpm package \
         --config "$yaml_file" \
         --packager deb \
@@ -124,12 +83,12 @@ package_service() {
 case "${1:-all}" in
     build-cpp)
         echo "--- Building C++ services ---"
-        build_logloader
-        build_mavlink_router
-        build_dds_agent
-        build_polaris
-        build_rid_transmitter
-        build_rtsp_server
+        build_cpp_service logloader "$PROJECT_ROOT/services/logloader/logloader" logloader
+        build_cpp_service mavlink-router "$PROJECT_ROOT/services/mavlink-router/mavlink-router" mavlink-router
+        build_cpp_service dds-agent "$PROJECT_ROOT/services/dds-agent/Micro-XRCE-DDS-Agent" dds-agent
+        build_cpp_service polaris "$PROJECT_ROOT/services/polaris/polaris-client-mavlink" polaris
+        build_cpp_service rid-transmitter "$PROJECT_ROOT/services/rid-transmitter/RemoteIDTransmitter" rid-transmitter
+        build_cpp_service rtsp-server "$PROJECT_ROOT/services/rtsp-server/rtsp-server" rtsp-server
         ;;
     build-frontend)
         echo "--- Building frontend ---"
@@ -137,33 +96,37 @@ case "${1:-all}" in
         ;;
     package)
         echo "--- Packaging all services ---"
-        for yaml in "$SCRIPT_DIR"/ark-*.yaml; do
+        generate
+        for yaml in "$SCRIPT_DIR/generated"/ark-*.yaml; do
             package_service "$yaml"
         done
         ;;
     package-python)
         echo "--- Packaging Python services (no build needed) ---"
+        generate
         for svc in autopilot-manager connection-manager service-manager system-manager; do
-            package_service "$SCRIPT_DIR/ark-${svc}.yaml"
+            package_service "$SCRIPT_DIR/generated/ark-${svc}.yaml"
         done
         ;;
     package-bash)
         echo "--- Packaging Bash services (no build needed) ---"
+        generate
         for svc in hotspot-updater jetson-can; do
-            package_service "$SCRIPT_DIR/ark-${svc}.yaml"
+            package_service "$SCRIPT_DIR/generated/ark-${svc}.yaml"
         done
         ;;
     all)
         echo "--- Full build + package ---"
-        build_logloader
-        build_mavlink_router
-        build_dds_agent
-        build_polaris
-        build_rid_transmitter
-        build_rtsp_server
+        build_cpp_service logloader "$PROJECT_ROOT/services/logloader/logloader" logloader
+        build_cpp_service mavlink-router "$PROJECT_ROOT/services/mavlink-router/mavlink-router" mavlink-router
+        build_cpp_service dds-agent "$PROJECT_ROOT/services/dds-agent/Micro-XRCE-DDS-Agent" dds-agent
+        build_cpp_service polaris "$PROJECT_ROOT/services/polaris/polaris-client-mavlink" polaris
+        build_cpp_service rid-transmitter "$PROJECT_ROOT/services/rid-transmitter/RemoteIDTransmitter" rid-transmitter
+        build_cpp_service rtsp-server "$PROJECT_ROOT/services/rtsp-server/rtsp-server" rtsp-server
         build_frontend
 
-        for yaml in "$SCRIPT_DIR"/ark-*.yaml; do
+        generate
+        for yaml in "$SCRIPT_DIR/generated"/ark-*.yaml; do
             package_service "$yaml"
         done
 

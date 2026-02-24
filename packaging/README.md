@@ -21,6 +21,51 @@ sudo dpkg -r ark-autopilot-manager
 sudo dpkg -i ark-companion_1.0.0_arm64.deb
 ```
 
+## How It Works
+
+All packaging is driven by a single config file and a generator:
+
+```
+packaging/
+├── packages.yaml        # Single source of truth — all packages declared here
+├── generate.py          # Reads packages.yaml + service manifests → generates all configs
+├── build-packages.sh    # Calls generate.py, then builds and packages with nfpm
+├── Dockerfile.build     # CI build environment (cross-compilation)
+├── README.md
+└── generated/           # gitignored — produced by generate.py
+    ├── ark-*.yaml       # nfpm package configs
+    ├── scripts/         # postinst/prerm shell scripts
+    └── service-files/   # systemd unit files
+```
+
+### Adding a New Service
+
+Add ~5 lines to `packages.yaml`:
+
+```yaml
+services:
+  my-new-service:
+    type: python           # or cpp, bash, custom
+    description: "My new service"
+    script: my_new_service.py
+    depends: [some-package]
+```
+
+Then run `python3 generate.py` — it produces the nfpm config, systemd unit, and install/remove scripts automatically.
+
+### Type Defaults
+
+Each service type has sensible defaults (see `generate.py` TYPE_DEFAULTS):
+
+| | `python` | `cpp` | `bash` |
+|---|---|---|---|
+| depends | `python3, python3-flask` + extras | extras only | extras only |
+| exec_start | `python3 /opt/ark/bin/{script}` | `/opt/ark/bin/{binary}` | `/opt/ark/bin/{script}` |
+| environment | `PYTHONUNBUFFERED=1` | — | — |
+| restart | `on-failure` | `on-failure` | `on-failure` |
+
+Services only specify what differs from the defaults.
+
 ## Packages
 
 | Package | Type | Contents |
@@ -83,10 +128,15 @@ This is the primary use case for packaging — testing a single service change f
 ### Python/Bash services (no compilation needed)
 
 ```bash
-# Install nfpm: https://nfpm.goreleaser.com/install/
-# Then:
 cd packaging
-VERSION=1.0.0 ARCH=arm64 nfpm package --config ark-autopilot-manager.yaml --packager deb --target ../dist/
+python3 generate.py
+VERSION=1.0.0 ARCH=arm64 nfpm package --config generated/ark-autopilot-manager.yaml --packager deb --target ../dist/
+```
+
+Or use the build script:
+
+```bash
+./packaging/build-packages.sh package-python
 ```
 
 ### C++ services (need ARM64 compilation)
@@ -107,7 +157,8 @@ cd frontend/ark-ui/ark-ui
 npm ci && npm run build
 mkdir -p build/ark-ui && cp -r dist build/ark-ui/
 cd ../../../packaging
-VERSION=1.0.0 ARCH=arm64 nfpm package --config ark-ui.yaml --packager deb --target ../dist/
+python3 generate.py
+VERSION=1.0.0 ARCH=arm64 nfpm package --config generated/ark-ui.yaml --packager deb --target ../dist/
 ```
 
 ## How This Relates to the Legacy install.sh

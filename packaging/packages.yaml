@@ -1,0 +1,219 @@
+# ─── ARK-OS Package Registry ───
+# Single source of truth for all .deb packages.
+# Run `python3 generate.py` to produce nfpm configs, systemd units, and scripts.
+
+defaults:
+  maintainer: "ARK Electronics <support@arkelectron.com>"
+  vendor: "ARK Electronics"
+  homepage: "https://github.com/ARK-Electronics/ARK-OS"
+  license: "MIT"
+
+# ─── Services ──────────────────────────────────────────────────────────────────
+# Each service type has sensible defaults (see generate.py TYPE_DEFAULTS).
+# Only specify what differs from the defaults.
+
+services:
+
+  # ── Python services ──
+
+  autopilot-manager:
+    type: python
+    description: "Autopilot management service for ARK companion computers"
+    script: autopilot_manager.py
+    depends: [python3-pymavlink]
+    systemd:
+      after: [default.target, network-online.target, syslog.target]
+      wants: [default.target, network-online.target]
+
+  connection-manager:
+    type: python
+    description: "Network connection management service for ARK companion computers"
+    script: connection_manager.py
+    depends: [network-manager]
+    systemd:
+      description: "ARK Connection Manager"
+      after: [network-online.target, syslog.target, NetworkManager.service, ModemManager.service]
+      wants: [network.target, network-online.target, syslog.target, NetworkManager.service, ModemManager.service]
+
+  service-manager:
+    type: python
+    description: "Systemd service manager for ARK companion computers"
+    script: service_manager.py
+
+  system-manager:
+    type: python
+    description: "Linux system management service for ARK companion computers"
+    script: system_manager.py
+    depends: [python3-psutil]
+
+  # ── C++ services ──
+
+  logloader:
+    type: cpp
+    description: "Automatic ULog download and upload service for ARK companion computers"
+    build_dir: services/logloader/logloader
+    depends: [libssl3, libsqlite3-0]
+    systemd:
+      after: [syslog.target, network.target, mavlink-router.service]
+      wants: [network.target]
+      environment:
+        SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      restart: always
+      nice: 10
+      cpu_weight: 50
+
+  mavlink-router:
+    type: cpp
+    description: "MAVLink message router for ARK companion computers"
+    binary: mavlink-routerd
+    build_dir: services/mavlink-router/mavlink-router
+    build_system: meson
+    extra_contents:
+      - src: services/mavlink-router/start_mavlink_router.sh
+        dst: /opt/ark/bin/start_mavlink_router.sh
+      - src: services/mavlink-router/main.conf
+        dst: /opt/ark/share/mavlink-router/main.conf
+        type: config
+    systemd:
+      type: exec
+      exec_start: /opt/ark/bin/start_mavlink_router.sh
+      after: [network-online.target, syslog.target]
+      wants: [network.target]
+
+  polaris:
+    type: cpp
+    description: "Polaris RTK corrections client for MAVLink"
+    binary: polaris-client-mavlink
+    build_dir: services/polaris/polaris-client-mavlink
+    depends: [libssl3, libgflags2.2, libgoogle-glog0v6, libboost-system1.74.0]
+    systemd:
+      description: "ARK Polaris RTK Corrections"
+      after: [syslog.target, network.target, mavlink-router.service]
+      wants: [network.target]
+      restart: always
+
+  rid-transmitter:
+    type: cpp
+    description: "RemoteID Bluetooth transmitter for ARK companion computers"
+    build_dir: services/rid-transmitter/RemoteIDTransmitter
+    depends: [libbluetooth3]
+    systemd:
+      description: "ARK RemoteID Bluetooth Transmitter"
+      condition_path_is_directory: /sys/class/bluetooth
+      after: [syslog.target, network-online.target]
+      wants: [network-online.target]
+      restart: false
+
+  rtsp-server:
+    type: cpp
+    description: "RTSP server for connected cameras on ARK companion computers"
+    build_dir: services/rtsp-server/rtsp-server
+    depends:
+      - libgstreamer1.0-0
+      - libgstreamer-plugins-base1.0-0
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-rtsp
+    systemd:
+      after: [syslog.target, network.target, mavlink-router.service]
+      wants: [network.target]
+      restart: always
+
+  dds-agent:
+    type: cpp
+    description: "Micro XRCE-DDS Agent for PX4-ROS2 bridge on ARK companion computers"
+    binary: MicroXRCEAgent
+    build_dir: services/dds-agent/Micro-XRCE-DDS-Agent
+    extra_contents:
+      - src: services/dds-agent/start_dds_agent.sh
+        dst: /opt/ark/bin/start_dds_agent.sh
+    systemd:
+      description: "ARK Micro-XRCE-DDS-Agent"
+      exec_start: /opt/ark/bin/start_dds_agent.sh
+      after: [dev-ttyTHS1.device, dev-ttyAMA4.device, syslog.target, network-online.target]
+      wants: [network.target]
+      exec_start_pre: /bin/sleep 2
+
+  flight-review:
+    type: custom
+    description: "PX4 Flight Review server for ARK companion computers"
+    depends: [python3, python3-pip, libsqlite3-0, libfftw3-3]
+    contents:
+      - src: services/flight-review/flight_review/app/
+        dst: /opt/ark/share/flight-review/app/
+      - src: services/flight-review/start_flight_review.sh
+        dst: /opt/ark/bin/start_flight_review.sh
+        mode: "0755"
+    systemd:
+      description: "ARK PX4 Flight Review"
+      exec_start: /opt/ark/bin/start_flight_review.sh
+      after: [syslog.target, network.target, nginx.service]
+      wants: [network.target]
+      restart: always
+
+  # ── Bash services ──
+
+  hotspot-updater:
+    type: bash
+    description: "Hotspot name updater for ARK companion computers"
+    script: update_hotspot_default.sh
+    depends: [network-manager]
+    systemd:
+      description: "ARK Hotspot Name Updater"
+      after: [network-online.target, syslog.target, NetworkManager.service]
+      wants: [network.target, network-online.target, syslog.target, NetworkManager.service]
+      kill_mode: process
+
+  jetson-can:
+    type: bash
+    description: "Jetson CAN interface enabler for ARK companion computers"
+    script: start_can_interface.sh
+    extra_contents:
+      - src: services/jetson-can/stop_can_interface.sh
+        dst: /opt/ark/bin/stop_can_interface.sh
+    systemd:
+      description: "ARK Jetson CAN Interface"
+      after: [syslog.target, network-online.target]
+      wants: [network.target]
+      kill_mode: process
+
+# ─── Custom packages (non-service) ────────────────────────────────────────────
+
+custom_packages:
+
+  ark-ui:
+    description: "ARK UI web application with nginx reverse proxy"
+    depends: [nginx]
+    contents:
+      - src: build/ark-ui/dist/
+        dst: /var/www/ark-ui/html/
+      - src: frontend/ark-ui.nginx
+        dst: /etc/nginx/sites-available/ark-ui
+        type: config
+      - src: frontend/ark-proxy.conf
+        dst: /etc/nginx/snippets/ark-proxy.conf
+        type: config
+      - src: frontend/ark-ws.conf
+        dst: /etc/nginx/snippets/ark-ws.conf
+        type: config
+    postinst: |
+      #!/bin/bash
+      # Enable nginx site and reload
+      ln -sf /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui
+      rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+      nginx -t && systemctl reload nginx
+    prerm: |
+      #!/bin/bash
+      rm -f /etc/nginx/sites-enabled/ark-ui 2>/dev/null
+      nginx -t && systemctl reload nginx 2>/dev/null || true
+
+  ark-companion:
+    description: "ARK companion computer meta-package \u2014 installs all ARK-OS services"
+    depends:
+      - ark-autopilot-manager
+      - ark-connection-manager
+      - ark-service-manager
+      - ark-system-manager
+      - ark-mavlink-router
+      - ark-logloader
+      - ark-ui
+      - ark-hotspot-updater

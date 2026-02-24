@@ -5,3 +5,4 @@ user.env
 CLAUDE.md
 build/
 dist/
+packaging/generated/
