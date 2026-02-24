@@ -21,6 +21,9 @@ def setup_logging():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler()]
     )
+    # Suppress werkzeug request logging (spams on every polled endpoint)
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
     return logging.getLogger('autopilot-manager')
 
 # Initialize logger
