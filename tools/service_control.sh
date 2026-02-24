@@ -44,7 +44,6 @@ function is_platform_supported() {
 
     # Check if current platform is in the array
     if [[ "$platforms" == *"\"$TARGET\""* ]]; then
-        echo "platform: $platform  target: $TARGET"
         return 0
     fi
 
@@ -60,13 +59,11 @@ function is_service_enabled() {
 
     # If no environment variable specified, service is always enabled
     if [ -z "$env_var" ]; then
-        echo "No env var specified, enabling service"
         return 0
     fi
 
     # Check the value of the environment variable
     if [ "${!env_var}" = "y" ]; then
-        echo "Env var enabled"
         return 0
     fi
 
@@ -108,14 +105,14 @@ function install_service_files() {
 }
 
 function uninstall_service() {
-    sudo systemctl stop $1.service &>/dev/null
-    sudo systemctl disable $1.service &>/dev/null
-    systemctl --user stop $1.service &>/dev/null
-    systemctl --user disable $1.service &>/dev/null
-    sudo rm /etc/systemd/system/$1.service &>/dev/null
-    sudo rm /lib/systemd/system/$1.service &>/dev/null
-    sudo rm $XDG_CONFIG_HOME/systemd/user/$1.service &>/dev/null
-    sudo rm -rf "$XDG_DATA_HOME/$1"
+    sudo systemctl stop "$1.service" &>/dev/null
+    sudo systemctl disable "$1.service" &>/dev/null
+    systemctl --user stop "$1.service" &>/dev/null
+    systemctl --user disable "$1.service" &>/dev/null
+    sudo rm "/etc/systemd/system/$1.service" &>/dev/null
+    sudo rm "/lib/systemd/system/$1.service" &>/dev/null
+    rm "$XDG_CONFIG_HOME/systemd/user/$1.service" &>/dev/null
+    rm -rf "$XDG_DATA_HOME/$1"
     sudo systemctl daemon-reload
     systemctl --user daemon-reload
 }
