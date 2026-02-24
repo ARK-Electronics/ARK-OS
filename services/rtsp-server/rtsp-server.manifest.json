@@ -7,6 +7,6 @@
   "visible": true,
   "requires_sudo": false,
   "env_var": "INSTALL_RTSP_SERVER",
-  "install_script": "install_rtsp_server.sh",
+  "install_script": "",
   "install_files": []
 }

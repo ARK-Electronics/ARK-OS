@@ -135,8 +135,53 @@ case "${1:-all}" in
         echo "Packages in: $OUTPUT_DIR/"
         ls -lh "$OUTPUT_DIR/"*.deb 2>/dev/null || echo "(no packages found)"
         ;;
+    build-service)
+        # Build a single service by name (reads type from packages.yaml)
+        SERVICE_NAME="${2:?Usage: $0 build-service <name>}"
+        SERVICE_TYPE=$(python3 -c "
+import yaml
+with open('$SCRIPT_DIR/packages.yaml') as f:
+    cfg = yaml.safe_load(f)
+svc = cfg.get('services', {}).get('$SERVICE_NAME', {})
+print(svc.get('type', 'unknown'))
+")
+        case "$SERVICE_TYPE" in
+            cpp)
+                BUILD_SRC=$(python3 -c "
+import yaml
+with open('$SCRIPT_DIR/packages.yaml') as f:
+    cfg = yaml.safe_load(f)
+svc = cfg['services']['$SERVICE_NAME']
+print(svc.get('build_dir', ''))
+")
+                if [ -z "$BUILD_SRC" ]; then
+                    echo "Error: No build_dir for $SERVICE_NAME"
+                    exit 1
+                fi
+                build_cpp_service "$SERVICE_NAME" "$PROJECT_ROOT/$BUILD_SRC" "$SERVICE_NAME"
+                ;;
+            python|bash|custom)
+                echo "$SERVICE_NAME is type '$SERVICE_TYPE' — no build step needed."
+                ;;
+            *)
+                echo "Error: Unknown service '$SERVICE_NAME'"
+                exit 1
+                ;;
+        esac
+        ;;
+    package-service)
+        # Package a single service by name
+        SERVICE_NAME="${2:?Usage: $0 package-service <name>}"
+        generate
+        YAML_FILE="$SCRIPT_DIR/generated/ark-${SERVICE_NAME}.yaml"
+        if [ ! -f "$YAML_FILE" ]; then
+            echo "Error: No generated config for $SERVICE_NAME (expected $YAML_FILE)"
+            exit 1
+        fi
+        package_service "$YAML_FILE"
+        ;;
     *)
-        echo "Usage: $0 [build-cpp|build-frontend|package|package-python|package-bash|all]"
+        echo "Usage: $0 [build-cpp|build-frontend|package|package-python|package-bash|build-service|package-service|all]"
         exit 1
         ;;
 esac

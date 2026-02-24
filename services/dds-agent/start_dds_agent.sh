@@ -33,15 +33,15 @@ echo "Detected platform: $TARGET"
 case "$TARGET" in
     jetson)
         echo "Starting DDS agent for Jetson platform"
-        exec MicroXRCEAgent serial -b 3000000 -D /dev/ttyTHS1
+        exec /opt/ark/bin/MicroXRCEAgent serial -b 3000000 -D /dev/ttyTHS1
         ;;
     pi)
         echo "Starting DDS agent for Raspberry Pi platform"
-        exec MicroXRCEAgent serial -b 3000000 -D /dev/ttyAMA4
+        exec /opt/ark/bin/MicroXRCEAgent serial -b 3000000 -D /dev/ttyAMA4
         ;;
     ubuntu)
         echo "Starting DDS agent for Ubuntu desktop"
-        exec MicroXRCEAgent udp4 -p 8888
+        exec /opt/ark/bin/MicroXRCEAgent udp4 -p 8888
         ;;
     *)
         echo "Unknown platform"

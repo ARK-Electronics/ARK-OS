@@ -7,6 +7,6 @@
   "visible": true,
   "requires_sudo": false,
   "env_var": "INSTALL_RID_TRANSMITTER",
-  "install_script": "install_rid_transmitter.sh",
+  "install_script": "",
   "install_files": []
 }

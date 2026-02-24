@@ -8,5 +8,5 @@
   "requires_sudo": true,
   "env_var": "",
   "install_script": "",
-  "install_files": ["update_hotspot_default.sh"]
+  "install_files": []
 }

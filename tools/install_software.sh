@@ -7,11 +7,8 @@ DEFAULT_XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
-if ! detect_platform; then
-	echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
-	echo "Running this script on a host computer may cause unintended system modifications."
-	exit 1
-fi
+detect_platform
+echo "Detected platform: $TARGET"
 
 # Check if system is holding package management lock
 check_apt_locks() {
@@ -282,6 +279,10 @@ elif [ "$TARGET" = "pi" ]; then
 	sudo nmcli radio wifi on
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi
 	PI_PYTHON_INSTALL_ARG="--break-system-packages"
+
+########## ubuntu (dev machine) — skip hardware-specific packages ##########
+elif [ "$TARGET" = "ubuntu" ]; then
+	echo "Ubuntu dev machine detected — skipping hardware-specific packages"
 fi
 
 # Common python dependencies
@@ -302,7 +303,6 @@ sudo usermod -a -G dialout $USER
 sudo groupadd -f -r gpio
 sudo usermod -a -G gpio $USER
 sudo usermod -a -G i2c $USER
-mkdir -p $XDG_CONFIG_HOME/systemd/user/
 
 if [ "$TARGET" = "jetson" ]; then
 	sudo systemctl stop nvgetty
@@ -329,10 +329,12 @@ sudo systemctl restart systemd-journald
 journalctl --disk-usage
 
 ########## scripts ##########
-echo "Installing scripts"
-mkdir -p ~/.local/bin
-cp $TARGET_DIR/scripts/* ~/.local/bin
-cp $COMMON_DIR/scripts/* ~/.local/bin
+if [ "$TARGET" != "ubuntu" ]; then
+	echo "Installing platform scripts"
+	mkdir -p ~/.local/bin
+	cp $TARGET_DIR/scripts/* ~/.local/bin
+	cp $COMMON_DIR/scripts/* ~/.local/bin
+fi
 
 ########## sudoers permissions ##########
 echo "Adding sudoers"
@@ -360,11 +362,11 @@ done
 ########## create hotspot connection ##########
 ~/.local/bin/create_hotspot_default.sh
 
-########## Always install MAVSDK ##########
-./tools/install_mavsdk.sh
-
-########## mavsdk-examples ##########
-./tools/install_mavsdk_examples.sh
+########## MAVSDK (skip on ubuntu dev machines) ##########
+if [ "$TARGET" != "ubuntu" ]; then
+	./tools/install_mavsdk.sh
+	./tools/install_mavsdk_examples.sh
+fi
 
 ########## install services ##########
 echo "Installing services..."

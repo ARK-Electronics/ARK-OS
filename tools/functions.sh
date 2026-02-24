@@ -29,12 +29,13 @@ function detect_platform() {
 	fi
 
 	if [ -f /proc/device-tree/model ] && grep -q "NVIDIA" /proc/device-tree/model; then
-
 		export TARGET=jetson
 		return 0
 	fi
 
-	return 1
+	# Default to ubuntu for development machines
+	export TARGET=ubuntu
+	return 0
 }
 
 detect_platform

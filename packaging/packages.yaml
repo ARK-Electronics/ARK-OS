@@ -74,6 +74,10 @@ services:
       - src: services/mavlink-router/main.conf
         dst: /opt/ark/share/mavlink-router/main.conf
         type: config
+      - src: platform/common/scripts/vbus_enable.py
+        dst: /opt/ark/bin/vbus_enable.py
+      - src: platform/common/scripts/vbus_disable.py
+        dst: /opt/ark/bin/vbus_disable.py
     systemd:
       type: exec
       exec_start: /opt/ark/bin/start_mavlink_router.sh

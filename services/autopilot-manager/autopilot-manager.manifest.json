@@ -8,5 +8,5 @@
   "requires_sudo": false,
   "env_var": "",
   "install_script": "",
-  "install_files": ["autopilot_manager.py"]
+  "install_files": []
 }
