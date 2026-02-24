@@ -6,6 +6,6 @@
   "visible": false,
   "requires_sudo": false,
   "env_var": "",
-  "install_script": "install_logloader.sh",
+  "install_script": "",
   "install_files": ["autopilot_manager.py"]
 }
