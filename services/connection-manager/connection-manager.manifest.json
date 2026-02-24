@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "displayName": "Connections Manager",
   "description": "Microservice backend for managing connections",
   "platform": ["all"],

@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "displayName": "Logloader",
   "description": "Automatically downloads log files from the vehicle SD card and optionally uploads to both a local and remote server.",
   "platform": ["jetson", "pi"],

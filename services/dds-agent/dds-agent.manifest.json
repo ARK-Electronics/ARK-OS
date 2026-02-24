@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "displayName": "DDS Agent",
   "description": "DDS Bridge between PX4 and ROS2 over High Speed UART.",
   "platform": ["jetson", "pi"],

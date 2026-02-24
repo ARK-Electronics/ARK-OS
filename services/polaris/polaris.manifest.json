@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "displayName": "Polaris Mavlink",
   "description": "Client for the Polaris RTK Corrections Network to provide corrections over Mavlink.",
   "platform": ["jetson", "pi"],
