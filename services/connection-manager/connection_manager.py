@@ -13,21 +13,15 @@ It's designed to work with NetworkManager and ModemManager.
 import eventlet
 eventlet.monkey_patch()
 
-import os
-import sys
-import json
 import time
 import logging
 import threading
 import subprocess
 import re
-import collections
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, disconnect
-import psutil
+from flask_socketio import SocketIO
 import argparse
-from pathlib import Path
 
 def setup_logging():
     """Setup simple logging that will be captured by journald via stdout"""
@@ -199,7 +193,7 @@ class ConnectionManager:
             return {'success': False, 'error': 'Mode is required'}
 
         # Check if connection with this name already exists
-        command = f"nmcli -t -f NAME con show"
+        command = "nmcli -t -f NAME con show"
         result = CommandExecutor.safe_run_command(command)
 
         if re.search(rf"^{re.escape(ssid)}$", result, re.MULTILINE):
@@ -209,7 +203,7 @@ class ConnectionManager:
         command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect {autoconnect} ssid \"{ssid}\""
 
         if mode == 'ap':
-            command += f" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
+            command += " 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
 
         result = CommandExecutor.safe_run_command(command)
 
@@ -219,7 +213,7 @@ class ConnectionManager:
         # Add password to connection
         command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
         if mode == 'ap':
-            command += f" 802-11-wireless-security.pmf disable connection.autoconnect-priority -1"
+            command += " 802-11-wireless-security.pmf disable connection.autoconnect-priority -1"
 
         result = CommandExecutor.safe_run_command(command)
         if result is None:
@@ -246,7 +240,7 @@ class ConnectionManager:
             return {'success': False, 'error': 'IP address required for static IP'}
 
         # Check if connection with this name already exists
-        command = f"nmcli -t -f NAME con show"
+        command = "nmcli -t -f NAME con show"
         result = CommandExecutor.safe_run_command(command)
 
         if re.search(rf"^{re.escape(name)}$", result, re.MULTILINE):
@@ -255,14 +249,14 @@ class ConnectionManager:
         # Create base ethernet connection
         cmd = f"nmcli connection add type ethernet con-name \"{name}\" ifname '*' autoconnect {autoconnect}"
         result = CommandExecutor.safe_run_command(cmd)
-        
+
         if result is None:
             return {'success': False, 'error': 'Failed to create ethernet connection'}
-        
+
         if ipMethod == 'manual' and ipAddress:
             command = f"nmcli connection modify \"{name}\" ipv4.method manual ipv4.addresses {ipAddress}"
             CommandExecutor.safe_run_command(command)
-        
+
         return {'success': True, 'name': name}
 
     @staticmethod
@@ -276,7 +270,7 @@ class ConnectionManager:
             return {'success': False, 'error': 'Name is required'}
 
         # Check if any LTE connection already exists. We can only allow 1.
-        command = f"nmcli -t -f TYPE con show"
+        command = "nmcli -t -f TYPE con show"
         result = CommandExecutor.safe_run_command(command)
 
         if result is None:
@@ -316,8 +310,6 @@ class ConnectionManager:
         ssid = data.get('ssid')
         password = data.get('password')
         autoconnect = data.get('autoconnect', 'yes')
-        mode = data.get('mode', 'infrastructure')
-
         command = f"nmcli connection modify \"{name}\""
 
         if ssid:
@@ -504,7 +496,7 @@ class LteManager:
 
         try:
             # Get modem index
-            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
+            modem_index = CommandExecutor.safe_run_command(r"mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
             if not modem_index:
                 logger.warning("No modem found")
                 return status
@@ -934,7 +926,7 @@ class NetworkReporting:
             if not State.interface_stats:
                 logger.debug("No interface stats available, collecting now")
                 NetworkStatsProcessor.update_interface_stats()
-                
+
                 if not State.interface_stats:
                     logger.debug("No active network interfaces found")
                     return []
@@ -963,15 +955,15 @@ class NetworkReporting:
                     'rxPackets': stats.get('rx_packets', 0),
                     'txPackets': stats.get('tx_packets', 0)
                 }
-                
+
                 if stats.get('type') == 'wifi':
                     interface_summary['signal'] = stats.get('signal_strength', 0)
-                
+
                 summary.append(interface_summary)
 
             # Sort by total bytes (most traffic first)
             summary.sort(key=lambda x: -x.get('totalBytes', 0))
-            
+
             logger.debug(f"Generated summary for {len(summary)} active interfaces")
             return summary
 
@@ -1016,7 +1008,7 @@ class StatsThread:
             while State.stats_thread_active and len(State.active_stats_clients) > 0:
                 try:
                     # Collect interface stats at the configured interval
-                    stats = NetworkStatsProcessor.update_interface_stats()
+                    NetworkStatsProcessor.update_interface_stats()
 
                     # Send updates to clients at the report interval
                     StatsThread._send_stats_to_clients()
@@ -1046,12 +1038,12 @@ class StatsThread:
             try:
                 # Generate the summary to send to clients
                 summary = NetworkReporting.get_interface_usage_summary()
-                
+
                 # Make sure we have data to send
                 if not summary:
                     logger.warning("No network interfaces found to report stats")
                     return
-                    
+
                 # Send update to all connected clients
                 if State.active_stats_clients:
                     socketio.emit('network_stats_update', summary)
@@ -1128,7 +1120,7 @@ class SocketEventHandler:
                 # Stop thread if no clients remain
                 if remaining == 0 and State.stats_thread_active:
                     StatsThread.stop_collection_thread()
-                    
+
         except Exception as e:
             logger.error(f"Error handling client disconnect: {e}")
 
@@ -1216,15 +1208,15 @@ class ApplicationRunner:
             default='/this/is/an/example',
             help='Example arg'
         )
-        args = parser.parse_args()
+        parser.parse_args()
 
         ApplicationRunner.start_server()
-    
+
     @staticmethod
     def start_server():
         host = '127.0.0.1'
         port = 3001
-        debug = False;
+        debug = False
 
         logger.info(f"Starting SocketIO server on {host}:{port}")
         try:

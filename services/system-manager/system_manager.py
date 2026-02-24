@@ -502,7 +502,7 @@ if __name__ == '__main__':
     host = '127.0.0.1'
     port = 3004
     print(f"Starting System Manager on {host}:{port}")
-    print(f"Device type detection in progress...")
+    print("Device type detection in progress...")
 
     # Quick device detection for startup message
     if JetsonCollector.is_jetson():
