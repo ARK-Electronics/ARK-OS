@@ -16,6 +16,12 @@ DEFAULT_XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
+# Wrapper for apt-get that waits for dpkg/apt locks (up to 120s)
+# Use this instead of "sudo apt-get" to avoid lock contention failures
+function apt_get_install() {
+	sudo apt-get -o DPkg::Lock::Timeout=120 "$@"
+}
+
 function detect_platform() {
 	if [ -f /proc/device-tree/model ] && grep -q "Raspberry Pi" /proc/device-tree/model; then
 		export TARGET=pi

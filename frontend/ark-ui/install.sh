@@ -1,13 +1,15 @@
 #!/bin/bash
 
 SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." &> /dev/null && pwd )"
+source "$PROJECT_ROOT/tools/functions.sh"
 
 pushd .
 
 cd "$SCRIPT_DIR"
 
-sudo apt-get update
-sudo apt-get install -y curl jq nginx
+apt_get_install update
+apt_get_install install -y curl jq nginx
 
 # Install NVM (Node Version Manager)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash

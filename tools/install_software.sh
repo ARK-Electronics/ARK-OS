@@ -46,7 +46,7 @@ check_apt_locks() {
 }
 
 if ! check_apt_locks; then
-	exit 1
+	echo "Continuing anyway -- apt commands will wait for locks to be released."
 fi
 
 # Load helper functions
@@ -233,8 +233,8 @@ fi
 
 ########## install dependencies ##########
 echo "Installing dependencies"
-sudo apt-get update
-sudo apt-get install -y \
+apt_get_install update
+apt_get_install install -y \
 		apt-utils \
 		gcc-arm-none-eabi \
 		python3-pip \
@@ -261,12 +261,12 @@ if [ "$TARGET" = "jetson" ]; then
 
 	if [ "$INSTALL_JETPACK" = "y" ]; then
 		echo "Installing JetPack"
-		sudo apt-get install -y nvidia-jetpack
+		apt_get_install install -y nvidia-jetpack
 		echo "JetPack installation finished"
 	fi
 
 	# Required for FW updating ARK LTE
-	sudo apt-get install libqmi-utils -y
+	apt_get_install install libqmi-utils -y
 
 	sudo pip3 install \
 		'Jetson.GPIO>=2.1.9' \
@@ -277,7 +277,7 @@ if [ "$TARGET" = "jetson" ]; then
 
 ########## pi dependencies ##########
 elif [ "$TARGET" = "pi" ]; then
-	sudo apt-get install python3-RPi.GPIO
+	apt_get_install install python3-RPi.GPIO
  	# Enable Wi-Fi radio
 	sudo nmcli radio wifi on
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi

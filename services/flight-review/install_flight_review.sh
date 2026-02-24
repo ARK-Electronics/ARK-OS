@@ -14,12 +14,12 @@ cd flight_review
 
 # Install dependencies
 if [ "$TARGET" = "jetson" ]; then
-	sudo apt-get install -y sqlite3 fftw3 libfftw3-dev
+	apt_get_install install -y sqlite3 fftw3 libfftw3-dev
 	sudo pip install -r app/requirements.txt
 	sudo python3 -m pip install --upgrade pandas scipy matplotlib
 
 elif [ "$TARGET" = "pi" ]; then
-	sudo apt-get install -y sqlite3 fftw3 libfftw3-dev
+	apt_get_install install -y sqlite3 fftw3 libfftw3-dev
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi
 	sudo pip install --break-system-packages -r app/requirements.txt
 	sudo pip install --break-system-packages --upgrade pandas scipy matplotlib

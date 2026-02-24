@@ -6,7 +6,7 @@ source "$PROJECT_ROOT/tools/functions.sh"
 
 echo "Installing rtsp-server"
 
-sudo apt-get install -y  \
+apt_get_install install -y  \
 	libgstreamer1.0-dev \
 	libgstreamer-plugins-base1.0-dev \
 	libgstreamer-plugins-bad1.0-dev \
@@ -18,7 +18,7 @@ sudo apt-get install -y  \
 	gstreamer1.0-rtsp
 
 if [ "$TARGET" = "pi" ]; then
-	sudo apt-get install -y gstreamer1.0-libcamera
+	apt_get_install install -y gstreamer1.0-libcamera
 
 else
 	# Ubuntu 22.04, see antimof/UxPlay#121
