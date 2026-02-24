@@ -160,3 +160,17 @@ journalctl --user -u logloader -f
 - Python: 3.9+, linted with ruff
 - Frontend: Vue.js SPA, built with npm, served by nginx
 - CI: GitHub Actions (`.github/workflows/build.yml`) — lint, build, package, release
+
+## Session Workflow
+
+When starting a new Claude session on this project:
+1. Read this file for project context
+2. Read `claude_plan/CLAUDE.md` for the current improvement roadmap
+3. Check `claude_plan/completed/` for recently finished work
+
+Before ending a session that made changes:
+1. Follow the **End-of-Session Checklist** in `claude_plan/CLAUDE.md`
+2. Ensure this file, `ARCHITECTURE.md`, and `claude_plan/CLAUDE.md` are all up to date
+3. Record completion notes with session IDs so future sessions can retrieve full context
+
+Session transcripts are stored at `~/.claude/projects/-home-jake-code-ark-ARK-OS/<uuid>.jsonl`
