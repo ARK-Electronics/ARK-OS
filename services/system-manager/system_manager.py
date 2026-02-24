@@ -5,6 +5,9 @@ import psutil
 import subprocess
 import re
 import socket
+import threading
+import atexit
+import time
 
 app = Flask(__name__)
 
@@ -96,6 +99,67 @@ class SystemInfoCollector:
         return temp_info
 
 
+class JtopManager:
+    _RECONNECT_COOLDOWN = 10  # seconds
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._jetson = None
+        self._available = None  # None=unknown, True/False=determined
+        self._last_attempt = 0
+
+    def _start_instance(self):
+        try:
+            from jtop import jtop
+            instance = jtop()
+            instance.start()
+            self._jetson = instance
+            self._available = True
+            return True
+        except (ImportError, ModuleNotFoundError):
+            self._available = False
+            return False
+        except Exception as e:
+            print(f"Failed to start jtop: {e}")
+            return False
+
+    def get_instance(self):
+        if self._available is False:
+            return None
+        with self._lock:
+            if self._available is False:
+                return None
+            if self._jetson is not None:
+                if self._jetson.is_alive():
+                    return self._jetson
+                print("jtop instance died, attempting reconnect...")
+                try:
+                    self._jetson.close()
+                except Exception:
+                    pass
+                self._jetson = None
+            now = time.monotonic()
+            if now - self._last_attempt < self._RECONNECT_COOLDOWN:
+                return None
+            self._last_attempt = now
+            if self._start_instance():
+                return self._jetson
+            return None
+
+    def shutdown(self):
+        with self._lock:
+            if self._jetson is not None:
+                try:
+                    self._jetson.close()
+                except Exception:
+                    pass
+                self._jetson = None
+
+
+_jtop_manager = JtopManager()
+atexit.register(_jtop_manager.shutdown)
+
+
 class JetsonCollector(SystemInfoCollector):
     """Collector for NVIDIA Jetson devices"""
 
@@ -113,58 +177,57 @@ class JetsonCollector(SystemInfoCollector):
     def get_jetson_info():
         """Get Jetson-specific information using jtop"""
         try:
-            from jtop import jtop
+            jetson = _jtop_manager.get_instance()
+            if jetson is None:
+                return None
 
-            with jtop() as jetson:
-                if not jetson.ok():
-                    return None
+            if not jetson.ok(spin=True):
+                return None
 
-                # Collect all temperature data
-                temperatures = {}
-                if hasattr(jetson, 'temperature') and jetson.temperature:
-                    for sensor_name, sensor_data in jetson.temperature.items():
-                        # Only include online sensors with valid temperatures
-                        if isinstance(sensor_data, dict):
-                            temp = sensor_data.get('temp', 0)
-                            online = sensor_data.get('online', False)
-                            # Include if online and temperature is valid (not -256)
-                            if online and temp > -100:
-                                temperatures[sensor_name] = temp
-                        elif isinstance(sensor_data, (int, float)):
-                            # Handle case where it might just be a number
-                            if sensor_data > -100:
-                                temperatures[sensor_name] = sensor_data
+            # Collect all temperature data
+            temperatures = {}
+            if hasattr(jetson, 'temperature') and jetson.temperature:
+                for sensor_name, sensor_data in jetson.temperature.items():
+                    # Only include online sensors with valid temperatures
+                    if isinstance(sensor_data, dict):
+                        temp = sensor_data.get('temp', 0)
+                        online = sensor_data.get('online', False)
+                        # Include if online and temperature is valid (not -256)
+                        if online and temp > -100:
+                            temperatures[sensor_name] = temp
+                    elif isinstance(sensor_data, (int, float)):
+                        # Handle case where it might just be a number
+                        if sensor_data > -100:
+                            temperatures[sensor_name] = sensor_data
 
-                # Collect Jetson-specific data
-                data = {
-                    "hardware": {
-                        "type": "jetson",
-                        "model": jetson.board.get("hardware", {}).get("Model", "Unknown"),
-                        "module": jetson.board.get("hardware", {}).get("Module", "Unknown"),
-                        "serial_number": jetson.board.get("hardware", {}).get("Serial Number", "Unknown"),
-                        "l4t": jetson.board.get("hardware", {}).get("L4T", "Unknown"),
-                        "jetpack": jetson.board.get("hardware", {}).get("Jetpack", "Unknown")
-                    },
-                    "libraries": {
-                        "cuda": jetson.board.get("libraries", {}).get("CUDA", "Not available"),
-                        "opencv": jetson.board.get("libraries", {}).get("OpenCV", "Not available"),
-                        "opencv_cuda": jetson.board.get("libraries", {}).get("OpenCV-Cuda", False),
-                        "cudnn": jetson.board.get("libraries", {}).get("cuDNN", "Not available"),
-                        "tensorrt": jetson.board.get("libraries", {}).get("TensorRT", "Not available"),
-                        "vpi": jetson.board.get("libraries", {}).get("VPI", "Not available"),
-                        "vulkan": jetson.board.get("libraries", {}).get("Vulkan", "Not available")
-                    },
-                    "power": {
-                        "nvpmodel": str(jetson.nvpmodel) if jetson.nvpmodel else "Unknown",
-                        "jetson_clocks": "Active" if (hasattr(jetson, 'jetson_clocks') and jetson.jetson_clocks) else "Inactive" if hasattr(jetson, 'jetson_clocks') else None,
-                        "total": jetson.power.get("tot", {}).get("power", 0) if hasattr(jetson, 'power') else 0,
-                        "temperature": temperatures  # Use all collected temperatures
-                    }
+            # Collect Jetson-specific data
+            data = {
+                "hardware": {
+                    "type": "jetson",
+                    "model": jetson.board.get("hardware", {}).get("Model", "Unknown"),
+                    "module": jetson.board.get("hardware", {}).get("Module", "Unknown"),
+                    "serial_number": jetson.board.get("hardware", {}).get("Serial Number", "Unknown"),
+                    "l4t": jetson.board.get("hardware", {}).get("L4T", "Unknown"),
+                    "jetpack": jetson.board.get("hardware", {}).get("Jetpack", "Unknown")
+                },
+                "libraries": {
+                    "cuda": jetson.board.get("libraries", {}).get("CUDA", "Not available"),
+                    "opencv": jetson.board.get("libraries", {}).get("OpenCV", "Not available"),
+                    "opencv_cuda": jetson.board.get("libraries", {}).get("OpenCV-Cuda", False),
+                    "cudnn": jetson.board.get("libraries", {}).get("cuDNN", "Not available"),
+                    "tensorrt": jetson.board.get("libraries", {}).get("TensorRT", "Not available"),
+                    "vpi": jetson.board.get("libraries", {}).get("VPI", "Not available"),
+                    "vulkan": jetson.board.get("libraries", {}).get("Vulkan", "Not available")
+                },
+                "power": {
+                    "nvpmodel": str(jetson.nvpmodel) if jetson.nvpmodel else "Unknown",
+                    "jetson_clocks": "Active" if (hasattr(jetson, 'jetson_clocks') and jetson.jetson_clocks) else "Inactive" if hasattr(jetson, 'jetson_clocks') else None,
+                    "total": jetson.power.get("tot", {}).get("power", 0) if hasattr(jetson, 'power') else 0,
+                    "temperature": temperatures  # Use all collected temperatures
                 }
+            }
 
-                return data
-        except (ImportError, ModuleNotFoundError):
-            return None
+            return data
         except Exception as e:
             print(f"Error collecting Jetson data: {e}")
             return None
