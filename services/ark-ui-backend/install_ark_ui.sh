@@ -12,6 +12,12 @@ sudo rm /etc/nginx/sites-enabled/ark-ui &>/dev/null
 sudo rm /etc/nginx/sites-available/ark-ui &>/dev/null
 sudo rm -rf /var/www/ark-ui &>/dev/null
 
+# Clean up old Express backend service (no longer needed)
+systemctl --user stop ark-ui-backend.service &>/dev/null
+systemctl --user disable ark-ui-backend.service &>/dev/null
+rm -f "$HOME/.config/systemd/user/ark-ui-backend.service" &>/dev/null
+rm -f "$HOME/.local/bin/start_ark_ui_backend.sh" &>/dev/null
+
 pushd .
 cd $PROJECT_ROOT/frontend/ark-ui
 ./install.sh
@@ -19,14 +25,17 @@ popd
 
 DEPLOY_PATH="/var/www/ark-ui"
 
+# Install nginx proxy snippets
+sudo mkdir -p /etc/nginx/snippets
+sudo cp $PROJECT_ROOT/frontend/ark-proxy.conf /etc/nginx/snippets/ark-proxy.conf
+sudo cp $PROJECT_ROOT/frontend/ark-ws.conf /etc/nginx/snippets/ark-ws.conf
+
 # Copy nginx config
 sudo cp $PROJECT_ROOT/frontend/ark-ui.nginx /etc/nginx/sites-available/ark-ui
 
-# Copy frontend and backend files to deployment path
+# Copy frontend files to deployment path (no backend needed)
 sudo mkdir -p $DEPLOY_PATH/html
-sudo mkdir -p $DEPLOY_PATH/api
 sudo cp -r $PROJECT_ROOT/frontend/ark-ui/ark-ui/dist/* $DEPLOY_PATH/html/
-sudo cp -r $PROJECT_ROOT/frontend/ark-ui/backend/* $DEPLOY_PATH/api/
 
 # Set permissions: www-data owns the path and has read/write permissions
 sudo chown -R www-data:www-data $DEPLOY_PATH

@@ -1,11 +1,12 @@
 {
-  "displayName": "ARK UI Backend",
-  "description": "Backend for ARK UI Web App.",
+  "version": "1.0.0",
+  "displayName": "ARK UI",
+  "description": "ARK UI Web App with nginx reverse proxy.",
   "platform": ["jetson", "pi"],
   "configFile": "",
   "visible": false,
   "requires_sudo": false,
   "env_var": "",
   "install_script": "install_ark_ui.sh",
-  "install_files": ["start_ark_ui_backend.sh"]
+  "install_files": []
 }
