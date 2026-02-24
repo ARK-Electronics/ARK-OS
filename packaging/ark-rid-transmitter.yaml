@@ -1,0 +1,26 @@
+name: ark-rid-transmitter
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: "ARK Electronics <support@arkelectron.com>"
+description: "RemoteID Bluetooth transmitter for ARK companion computers"
+vendor: "ARK Electronics"
+homepage: "https://github.com/ARK-Electronics/ARK-OS"
+license: "MIT"
+
+depends:
+  - libbluetooth3
+
+contents:
+  - src: ../build/rid-transmitter/rid-transmitter
+    dst: /opt/ark/bin/rid-transmitter
+    file_info:
+      mode: 0755
+
+  - src: ./service-files/rid-transmitter.service
+    dst: /etc/systemd/user/rid-transmitter.service
+    type: config
+
+scripts:
+  postinstall: ./scripts/postinst-rid-transmitter.sh
+  preremove: ./scripts/prerm-rid-transmitter.sh

@@ -1,0 +1,14 @@
+[Unit]
+Description=ARK Autopilot Manager
+Wants=default.target network-online.target
+After=default.target network-online.target syslog.target
+
+[Service]
+Type=simple
+ExecStart=python3 /opt/ark/bin/autopilot_manager.py
+Restart=on-failure
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target

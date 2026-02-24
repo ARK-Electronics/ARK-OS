@@ -1,0 +1,13 @@
+[Unit]
+Description=ARK Polaris RTK Corrections
+Wants=network.target
+After=syslog.target network.target mavlink-router.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ark/bin/polaris-client-mavlink
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

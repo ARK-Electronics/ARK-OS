@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+extend-exclude = [
+    "services/flight-review",
+    "**/third_party",
+    "**/libraries",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E402", "E722"]

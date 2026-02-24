@@ -1,0 +1,13 @@
+[Unit]
+Description=ARK RTSP Server
+Wants=network.target
+After=syslog.target network.target mavlink-router.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ark/bin/rtsp-server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

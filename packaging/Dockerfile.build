@@ -1,0 +1,48 @@
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Base build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    ninja-build \
+    meson \
+    pkg-config \
+    git \
+    curl \
+    python3 \
+    python3-pip \
+    # Logloader / Polaris / RID dependencies
+    libssl-dev \
+    libsqlite3-dev \
+    libgflags-dev \
+    libgoogle-glog-dev \
+    libboost-all-dev \
+    libbluetooth-dev \
+    # RTSP server dependencies
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-bad1.0-dev \
+    libgstrtspserver-1.0-dev \
+    # nfpm for packaging
+    && rm -rf /var/lib/apt/lists/*
+
+# Build MAVSDK as a static library (pinned version — bump as needed)
+ARG MAVSDK_VERSION=v3.15.0
+RUN git clone --recurse-submodules --depth=1 -b ${MAVSDK_VERSION} \
+      https://github.com/mavlink/MAVSDK.git /tmp/mavsdk && \
+    cmake -B /tmp/mavsdk/build -S /tmp/mavsdk \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      && \
+    cmake --build /tmp/mavsdk/build -j$(nproc) && \
+    cmake --install /tmp/mavsdk/build && \
+    ldconfig && \
+    rm -rf /tmp/mavsdk
+
+# Install nfpm
+RUN curl -sfL https://install.goreleaser.com/github.com/goreleaser/nfpm.sh | sh -s -- -b /usr/local/bin
+
+WORKDIR /build

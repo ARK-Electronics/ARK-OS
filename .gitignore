@@ -3,3 +3,5 @@ polaris.key
 output.txt
 user.env
 CLAUDE.md
+build/
+dist/

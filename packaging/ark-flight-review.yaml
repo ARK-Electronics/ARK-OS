@@ -1,0 +1,32 @@
+name: ark-flight-review
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: "ARK Electronics <support@arkelectron.com>"
+description: "PX4 Flight Review server for ARK companion computers"
+vendor: "ARK Electronics"
+homepage: "https://github.com/ARK-Electronics/ARK-OS"
+license: "MIT"
+
+depends:
+  - python3
+  - python3-pip
+  - libsqlite3-0
+  - libfftw3-3
+
+contents:
+  - src: ../services/flight-review/flight_review/app/
+    dst: /opt/ark/share/flight-review/app/
+
+  - src: ../services/flight-review/start_flight_review.sh
+    dst: /opt/ark/bin/start_flight_review.sh
+    file_info:
+      mode: 0755
+
+  - src: ./service-files/flight-review.service
+    dst: /etc/systemd/user/flight-review.service
+    type: config
+
+scripts:
+  postinstall: ./scripts/postinst-flight-review.sh
+  preremove: ./scripts/prerm-flight-review.sh

@@ -1,0 +1,32 @@
+name: ark-mavlink-router
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: "ARK Electronics <support@arkelectron.com>"
+description: "MAVLink message router for ARK companion computers"
+vendor: "ARK Electronics"
+homepage: "https://github.com/ARK-Electronics/ARK-OS"
+license: "MIT"
+
+contents:
+  - src: ../build/mavlink-router/mavlink-routerd
+    dst: /opt/ark/bin/mavlink-routerd
+    file_info:
+      mode: 0755
+
+  - src: ../services/mavlink-router/start_mavlink_router.sh
+    dst: /opt/ark/bin/start_mavlink_router.sh
+    file_info:
+      mode: 0755
+
+  - src: ../services/mavlink-router/main.conf
+    dst: /opt/ark/share/mavlink-router/main.conf
+    type: config
+
+  - src: ./service-files/mavlink-router.service
+    dst: /etc/systemd/user/mavlink-router.service
+    type: config
+
+scripts:
+  postinstall: ./scripts/postinst-mavlink-router.sh
+  preremove: ./scripts/prerm-mavlink-router.sh

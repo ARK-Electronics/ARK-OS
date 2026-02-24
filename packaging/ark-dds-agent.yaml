@@ -1,0 +1,28 @@
+name: ark-dds-agent
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: "ARK Electronics <support@arkelectron.com>"
+description: "Micro XRCE-DDS Agent for PX4-ROS2 bridge on ARK companion computers"
+vendor: "ARK Electronics"
+homepage: "https://github.com/ARK-Electronics/ARK-OS"
+license: "MIT"
+
+contents:
+  - src: ../build/dds-agent/MicroXRCEAgent
+    dst: /opt/ark/bin/MicroXRCEAgent
+    file_info:
+      mode: 0755
+
+  - src: ../services/dds-agent/start_dds_agent.sh
+    dst: /opt/ark/bin/start_dds_agent.sh
+    file_info:
+      mode: 0755
+
+  - src: ./service-files/dds-agent.service
+    dst: /etc/systemd/user/dds-agent.service
+    type: config
+
+scripts:
+  postinstall: ./scripts/postinst-dds-agent.sh
+  preremove: ./scripts/prerm-dds-agent.sh

@@ -1,0 +1,14 @@
+[Unit]
+Description=ARK Micro-XRCE-DDS-Agent
+Wants=network.target
+After=dev-ttyTHS1.device dev-ttyAMA4.device syslog.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/ark/bin/start_dds_agent.sh
+Restart=on-failure
+RestartSec=5
+ExecStartPre=/bin/sleep 2
+
+[Install]
+WantedBy=default.target

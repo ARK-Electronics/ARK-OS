@@ -1,0 +1,28 @@
+name: ark-connection-manager
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: "ARK Electronics <support@arkelectron.com>"
+description: "Network connection management service for ARK companion computers"
+vendor: "ARK Electronics"
+homepage: "https://github.com/ARK-Electronics/ARK-OS"
+license: "MIT"
+
+depends:
+  - python3
+  - python3-flask
+  - network-manager
+
+contents:
+  - src: ../services/connection-manager/connection_manager.py
+    dst: /opt/ark/bin/connection_manager.py
+    file_info:
+      mode: 0755
+
+  - src: ./service-files/connection-manager.service
+    dst: /etc/systemd/user/connection-manager.service
+    type: config
+
+scripts:
+  postinstall: ./scripts/postinst-connection-manager.sh
+  preremove: ./scripts/prerm-connection-manager.sh

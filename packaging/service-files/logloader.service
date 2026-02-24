@@ -1,0 +1,16 @@
+[Unit]
+Description=ARK Logloader
+Wants=network.target
+After=syslog.target network.target mavlink-router.service
+
+[Service]
+Type=simple
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ExecStart=/opt/ark/bin/logloader
+Restart=always
+RestartSec=5
+Nice=10
+CPUWeight=50
+
+[Install]
+WantedBy=default.target

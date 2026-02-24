@@ -1,0 +1,14 @@
+[Unit]
+Description=ARK Jetson CAN Interface
+Wants=network.target
+After=syslog.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/ark/bin/start_can_interface.sh
+Restart=on-failure
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
