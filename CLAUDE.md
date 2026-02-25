@@ -24,6 +24,10 @@ and a web-based management UI.
   units, and install/remove scripts.
 - **`<service>.manifest.json`** in each service directory defines UI metadata (display name,
   platform support, config file, visibility).
+- **`default_enabled`** in `packages.yaml` controls whether a service is auto-started on deb
+  install. Core services default to `true`; optional services (logloader, flight-review,
+  polaris, rid-transmitter, rtsp-server, dds-agent, jetson-can) are `false` — installed but
+  dormant until the user enables them via the web UI.
 
 ### Install Paths (deb packages)
 
@@ -60,8 +64,7 @@ ARK-OS/
 ├── libs/                   # External libraries (mavsdk-examples)
 ├── tests/                  # Test files
 ├── ARCHITECTURE.md         # Full architecture documentation
-├── VERSION                 # Current version (used by CI)
-└── default.env             # Default env vars for legacy install
+└── VERSION                 # Current version (used by CI)
 ```
 
 ## Services
@@ -112,6 +115,8 @@ cd ARK-OS
 ### 2. Deb Download (PR testing)
 
 Download `.deb` artifacts from a GitHub Actions CI run to test a PR.
+Platform meta-packages: `ark-companion-jetson`, `ark-companion-pi`, `ark-companion-ubuntu`
+(all depend on `ark-companion-base` which pulls in all services).
 
 ```bash
 # Download debs from the GitHub Actions artifacts for the PR

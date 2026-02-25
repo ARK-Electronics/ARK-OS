@@ -5,3 +5,5 @@ user.env
 build/
 dist/
 packaging/generated/
+__pycache__/
+*.pyc

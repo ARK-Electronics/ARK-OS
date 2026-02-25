@@ -22,22 +22,42 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+# Input validation
+_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_SERVICE_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$')
+_VALID_SYSTEMCTL_OPS = frozenset({"start", "stop", "restart", "enable", "disable"})
+_VALID_STATUS_TYPES = frozenset({"active", "enabled"})
+
+
+def validate_service_name(name):
+    if not name or not _SERVICE_NAME_RE.match(name):
+        raise ValueError(f"Invalid service name: {name}")
+    return name
+
+
+def validate_positive_int(value, max_val=10000):
+    n = int(value)
+    if n < 1 or n > max_val:
+        raise ValueError(f"Value out of range: {n}")
+    return n
+
+
 class ServiceManager:
 
     @staticmethod
     def run_systemctl(operation, service_name):
-        command = f"systemctl --user {operation} {service_name}"
+        if operation not in _VALID_SYSTEMCTL_OPS:
+            return False, f"Invalid operation: {operation}"
+        service_name = validate_service_name(service_name)
         try:
             process = subprocess.run(
-                command,
-                shell=True,
+                ["systemctl", "--user", operation, service_name],
                 capture_output=True,
                 text=True,
                 timeout=10
             )
 
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            output = ansi_escape.sub('', process.stdout + process.stderr).strip()
+            output = _ANSI_RE.sub('', process.stdout + process.stderr).strip()
 
             if process.returncode == 0:
                 return True, ""
@@ -49,17 +69,17 @@ class ServiceManager:
 
     @staticmethod
     def get_service_status(service_name, status_type="active"):
-        command = f"systemctl --user is-{status_type} {service_name}"
+        if status_type not in _VALID_STATUS_TYPES:
+            return "unknown"
+        service_name = validate_service_name(service_name)
         try:
             process = subprocess.run(
-                command,
-                shell=True,
+                ["systemctl", "--user", f"is-{status_type}", service_name],
                 capture_output=True,
                 text=True
             )
 
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            return ansi_escape.sub('', process.stdout).strip() or process.stderr.strip()
+            return _ANSI_RE.sub('', process.stdout).strip() or process.stderr.strip()
         except:
             return "unknown"
 
@@ -210,19 +230,20 @@ class ServiceManager:
             return {"status": "fail", "message": "No service name provided"}
 
         try:
-            command = f"journalctl --user -u {service_name} -n {num_lines} --no-pager -o cat"
+            service_name = validate_service_name(service_name)
+            num_lines = validate_positive_int(num_lines, max_val=10000)
             process = subprocess.run(
-                command,
-                shell=True,
+                ["journalctl", "--user", "-u", service_name, "-n", str(num_lines), "--no-pager", "-o", "cat"],
                 capture_output=True,
                 text=True,
                 timeout=10
             )
 
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            logs = ansi_escape.sub('', process.stdout).strip()
+            logs = _ANSI_RE.sub('', process.stdout).strip()
 
             return {"status": "success", "service": service_name, "logs": logs}
+        except ValueError as e:
+            return {"status": "fail", "service": service_name, "message": str(e)}
         except Exception as e:
             return {"status": "fail", "service": service_name, "message": str(e)}
 
@@ -250,6 +271,15 @@ class ServiceManager:
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
 
+        try:
+            service_name = validate_service_name(service_name)
+        except ValueError as e:
+            return {"status": "fail", "data": str(e)}
+
+        # Validate config content size
+        if len(config_data) > 65536:
+            return {"status": "fail", "data": f"Config too large: {len(config_data)} bytes (max 65536)"}
+
         config_file = ServiceManager.get_service_config_file(service_name)
         config_file_name = os.path.basename(config_file)
 
@@ -261,6 +291,11 @@ class ServiceManager:
         user_config_dir = os.path.expanduser(f"~/.config/ark/{service_name}")
         user_config_file = os.path.join(user_config_dir, config_file_name)
 
+        # Prevent path traversal
+        allowed_base = os.path.realpath(os.path.expanduser("~/.config/ark"))
+        if not os.path.realpath(user_config_file).startswith(allowed_base + os.sep):
+            return {"status": "fail", "data": "Invalid config path"}
+
         try:
             os.makedirs(user_config_dir, exist_ok=True)
             with open(user_config_file, 'w') as f:
@@ -270,6 +305,18 @@ class ServiceManager:
             return {"status": "fail", "data": f"Error saving config file: {str(e)}"}
 
 # API endpoints
+def _get_validated_service_name():
+    """Extract and validate service name from request args. Returns (name, error_response)."""
+    service_name = request.args.get('serviceName')
+    if not service_name:
+        return None, (jsonify({"status": "fail", "message": "No service name provided"}), 400)
+    try:
+        validate_service_name(service_name)
+    except ValueError:
+        return None, (jsonify({"status": "fail", "message": f"Invalid service name: {service_name}"}), 400)
+    return service_name, None
+
+
 @app.route('/statuses', methods=['GET'])
 def get_service_statuses():
     print("GET /statuses called")
@@ -277,56 +324,72 @@ def get_service_statuses():
 
 @app.route('/start', methods=['POST'])
 def start_service():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"POST /start called for {service_name}")
     result = ServiceManager.start_service(service_name)
     return jsonify(result)
 
 @app.route('/stop', methods=['POST'])
 def stop_service():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"POST /stop called for {service_name}")
     result = ServiceManager.stop_service(service_name)
     return jsonify(result)
 
 @app.route('/restart', methods=['POST'])
 def restart_service():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"POST /restart called for {service_name}")
     result = ServiceManager.restart_service(service_name)
     return jsonify(result)
 
 @app.route('/enable', methods=['POST'])
 def enable_service():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"POST /enable called for {service_name}")
     result = ServiceManager.enable_service(service_name)
     return jsonify(result)
 
 @app.route('/disable', methods=['POST'])
 def disable_service():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"POST /disable called for {service_name}")
     result = ServiceManager.disable_service(service_name)
     return jsonify(result)
 
 @app.route('/logs', methods=['GET'])
 def get_service_logs():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"GET /logs called for {service_name}")
     result = ServiceManager.get_logs(service_name)
     return jsonify(result)
 
 @app.route('/config', methods=['GET'])
 def get_service_config():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     print(f"GET /config called for {service_name}")
     result = ServiceManager.get_config(service_name)
     return jsonify(result)
 
 @app.route('/config', methods=['POST'])
 def save_service_config():
-    service_name = request.args.get('serviceName')
+    service_name, err = _get_validated_service_name()
+    if err:
+        return err
     config_data = request.json.get('config')
     print(f"POST /config called for {service_name}")
 

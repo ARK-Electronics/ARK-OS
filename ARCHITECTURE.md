@@ -113,16 +113,13 @@ The manifest tells service-manager how to discover and present the service:
   "platform": ["jetson", "pi", "ubuntu"],
   "configFile": "config.toml",
   "visible": true,
-  "requires_sudo": false,
-  "env_var": "INSTALL_SERVICE_NAME",
-  "install_script": "",
-  "install_files": []
+  "requires_sudo": false
 }
 ```
 
 - **platform** — Which targets this service supports. Values: `"jetson"`, `"pi"`,
   `"ubuntu"`, or `"all"` (shorthand for all platforms)
-- **visible** — Whether the service appears in the ARK UI
+- **visible** — Whether the service appears in the ARK UI for user enable/disable
 - **requires_sudo** — Whether the systemd unit runs as a system service (vs user service)
 - **configFile** — If set, the UI exposes a config editor for this service
 
@@ -130,7 +127,8 @@ The manifest tells service-manager how to discover and present the service:
 
 - User services: `/etc/systemd/user/<service>.service`
 - System services (requires_sudo): `/etc/systemd/system/<service>.service`
-- All services auto-start on boot via `WantedBy=default.target`
+- Core services auto-enable+start on deb install; optional services (`default_enabled: false`
+  in `packages.yaml`) are installed dormant — the user enables them via the web UI
 - service-manager controls lifecycle via `systemctl --user` commands
 
 ## Frontend
@@ -176,10 +174,19 @@ Use `service_control.sh` to build, package, and install services locally:
 
 This requires `nfpm` to be installed locally.
 
+### Platform Meta-packages
+
+| Package | Description |
+|---------|-------------|
+| `ark-companion-base` | Core services for all platforms + optional services (installed disabled) |
+| `ark-companion-jetson` | Base + Jetson-specific services (rid-transmitter, jetson-can) |
+| `ark-companion-pi` | Base (Raspberry Pi) |
+| `ark-companion-ubuntu` | Base (Ubuntu desktop dev) |
+
 ### Package Lifecycle
 
 ```bash
-sudo dpkg -i ark-<service>_1.0.0_arm64.deb   # Install (postinst enables + starts)
+sudo dpkg -i ark-<service>_1.0.0_arm64.deb   # Install (core: enable+start; optional: dormant)
 sudo dpkg -i ark-<service>_1.1.0_arm64.deb   # Update (same command)
 sudo dpkg -r ark-<service>                     # Remove (prerm stops + disables)
 ```

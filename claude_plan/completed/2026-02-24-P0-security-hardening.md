@@ -151,13 +151,13 @@ Review `system_manager.py` and `autopilot_manager.py` for similar patterns:
 
 ## Acceptance Criteria
 
-- [ ] Zero instances of `shell=True` in Python services
-- [ ] All service names validated with `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`
-- [ ] All hostnames validated per RFC 1123
-- [ ] Config file writes enforce size limits and path traversal prevention
-- [ ] `grep -r 'shell=True' services/` returns zero hits
-- [ ] All existing API endpoints still work correctly after changes
-- [ ] Invalid inputs return 400 status with descriptive error messages
+- [x] Zero instances of `shell=True` in Python services
+- [x] All service names validated with `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`
+- [x] All hostnames validated per RFC 1123
+- [x] Config file writes enforce size limits and path traversal prevention
+- [x] `grep -r 'shell=True' services/` returns zero hits (only upstream mavlink-router submodule)
+- [ ] All existing API endpoints still work correctly after changes (needs runtime testing)
+- [x] Invalid inputs return 400 status with descriptive error messages
 
 ## Dependencies
 
@@ -169,3 +169,21 @@ so tests can validate the security fixes.
 Small-medium. ~4 files to modify, mostly mechanical replacement of subprocess calls.
 The connection_manager.py refactor is the most involved since it has a generic command
 executor that needs to be split into specific methods. Estimate 1-2 focused sessions.
+
+## Completion Notes
+
+- **Date**: 2026-02-24
+- **Session ID**: b906d938-9539-443c-b27c-bff4b9713b85
+- **Transcript**: ~/.claude/projects/-home-jake-code-ark-ARK-OS/b906d938-9539-443c-b27c-bff4b9713b85.jsonl
+- **Summary**: Eliminated all `shell=True` subprocess calls in ARK-OS Python services.
+  Added input validation (service names, connection names, SSIDs, hostnames, IP addresses,
+  APNs, interface names) at API boundaries. Added config file size limits and path traversal
+  prevention. Converted ~40 string-form shell commands in connection_manager.py to list-form.
+  Replaced piped shell commands with Python-native parsing. Audited system_manager.py and
+  autopilot_manager.py (both already clean).
+- **Deviations**: Kept `CommandExecutor` class structure in connection_manager.py rather than
+  splitting into per-operation methods — the list-form approach is equally safe and minimizes
+  code churn. Did not add TOML syntax validation to config writes (configs may not always be
+  TOML format per manifest configFile).
+- **Follow-up**: Runtime testing needed on target devices to confirm all API endpoints work
+  correctly with the list-form subprocess calls.
