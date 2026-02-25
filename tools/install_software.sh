@@ -7,11 +7,8 @@ DEFAULT_XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$DEFAULT_XDG_CONF_HOME}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$DEFAULT_XDG_DATA_HOME}"
 
-if ! detect_platform; then
-	echo "ERROR: This script should be run on the target device (Jetson or Raspberry Pi)."
-	echo "Running this script on a host computer may cause unintended system modifications."
-	exit 1
-fi
+detect_platform
+echo "Detected platform: $TARGET"
 
 # Check if system is holding package management lock
 check_apt_locks() {
@@ -49,33 +46,10 @@ if ! check_apt_locks; then
 	echo "Continuing anyway -- apt commands will wait for locks to be released."
 fi
 
-# Load helper functions
-source $(dirname $BASH_SOURCE)/functions.sh
-
 function sudo_refresh_loop() {
 	while true; do
 		sudo -v
 		sleep 5
-	done
-}
-
-function ask_yes_no() {
-	local prompt="$1"
-	local var_name="$2"
-	local default="$3"
-	local default_display="${!var_name^^}"  # Convert to uppercase for display purposes
-
-	while true; do
-		echo "$prompt (y/n) [default: $default_display]"
-		read -r REPLY
-		if [ -z "$REPLY" ]; then
-			REPLY="${!var_name}"
-		fi
-		case "$REPLY" in
-			y|Y) eval "export $var_name='y'"; break ;;
-			n|N) eval "export $var_name='n'"; break ;;
-			*) echo "Invalid input. Please enter y or n." ;;
-		esac
 	done
 }
 
@@ -112,117 +86,13 @@ sudo -v
 sudo_refresh_loop &
 SUDO_PID=$!
 
-# Source the main configuration file
-if [ -f "default.env" ]; then
-	source "default.env"
-else
-	echo "Configuration file default.env not found!"
-	exit 1
-fi
-
 export TARGET_DIR="$PWD/platform/$TARGET"
 export COMMON_DIR="$PWD/platform/common"
-
-if [ -f "user.env" ]; then
-	echo "Found user.env, skipping interactive prompt"
-	source "user.env"
-else
-	ask_yes_no "Install micro-xrce-dds-agent?" INSTALL_DDS_AGENT
-	ask_yes_no "Install logloader?" INSTALL_LOGLOADER
-
-	if [ "$INSTALL_LOGLOADER" = "y" ]; then
-		ask_yes_no "Upload automatically to PX4 Flight Review?" UPLOAD_TO_FLIGHT_REVIEW
-		if [ "$UPLOAD_TO_FLIGHT_REVIEW" = "y" ]; then
-			echo "Please enter your email: "
-			read -r USER_EMAIL
-			ask_yes_no "Do you want your logs to be public?" PUBLIC_LOGS
-		fi
-	fi
-
-	ask_yes_no "Install rtsp-server?" INSTALL_RTSP_SERVER
-
-	if [ "$TARGET" = "jetson" ]; then
-		ask_yes_no "Install rid-transmitter?" INSTALL_RID_TRANSMITTER
-		if [ "$INSTALL_RID_TRANSMITTER" = "y" ]; then
-			while true; do
-				echo "Enter Manufacturer Code (4 characters, digits and uppercase letters only, no O or I) [default: $MANUFACTURER_CODE]: "
-				read -r input
-				if [ -z "$input" ]; then
-					# Use the preset value if the input is empty
-					input=$MANUFACTURER_CODE
-				fi
-				if [[ $input =~ ^[A-HJ-NP-Z0-9]{4}$ ]]; then
-					MANUFACTURER_CODE=$input
-					break
-				else
-					echo "Invalid Manufacturer Code. Please try again."
-				fi
-			done
-
-			while true; do
-				echo "Enter Serial Number (1-15 characters, digits and uppercase letters only, no O or I) [default: $SERIAL_NUMBER]: "
-				read -r input
-				if [ -z "$input" ]; then
-					# Use the preset value if the input is empty
-					input=$SERIAL_NUMBER
-				fi
-				if [[ $input =~ ^[A-HJ-NP-Z0-9]{1,15}$ ]]; then
-					SERIAL_NUMBER=$input
-					break
-				else
-					echo "Invalid Serial Number. Please try again."
-				fi
-			done
-		fi
-	fi
-
-	ask_yes_no "Install polaris-client-mavlink?" INSTALL_POLARIS
-
-	if [ "$INSTALL_POLARIS" = "y" ]; then
-		echo "Enter API key: [default: none]"
-		read -r POLARIS_API_KEY
-	fi
-
-	if [ "$TARGET" = "jetson" ]; then
-		ask_yes_no "Install JetPack?" INSTALL_JETPACK
-	fi
-fi
-
-echo ""
-echo "=== Installation Summary ==="
-echo "The following components will be installed:"
-echo ""
-
-[ "$INSTALL_DDS_AGENT" = "y" ] && echo "  ✓ micro-xrce-dds-agent"
-[ "$INSTALL_LOGLOADER" = "y" ] && echo "  ✓ logloader"
-[ "$INSTALL_LOGLOADER" = "y" ] && [ "$UPLOAD_TO_FLIGHT_REVIEW" = "y" ] && echo "    - Auto-upload to PX4 Flight Review: Yes (Email: $USER_EMAIL, Public: $PUBLIC_LOGS)"
-[ "$INSTALL_RTSP_SERVER" = "y" ] && echo "  ✓ rtsp-server"
-
-if [ "$TARGET" = "jetson" ]; then
-    [ "$INSTALL_RID_TRANSMITTER" = "y" ] && echo "  ✓ rid-transmitter (Manufacturer: $MANUFACTURER_CODE, Serial: $SERIAL_NUMBER)"
-    [ "$INSTALL_JETPACK" = "y" ] && echo "  ✓ JetPack"
-fi
-
-[ "$INSTALL_POLARIS" = "y" ] && echo "  ✓ polaris-client-mavlink"
-[ "$INSTALL_POLARIS" = "y" ] && [ -n "$POLARIS_API_KEY" ] && echo "    - API Key configured"
-
-echo ""
-echo "Plus standard components:"
-echo "  ✓ MAVSDK"
-echo "  ✓ MAVSDK Examples"
-echo "  ✓ System dependencies and configuration"
-echo ""
-echo "============================"
-echo ""
 
 ########## validate submodules ##########
 git submodule update --init --recursive
 git submodule foreach git reset --hard
 git submodule foreach git clean -fd
-
-# TODO: some of these dependencies should be part of
-# the specific service install script. Next pass should be to install
-# each service independently to determine what deps are missing.
 
 ########## jetson-specific holds (before apt update) ##########
 if [ "$TARGET" = "jetson" ]; then
@@ -259,12 +129,6 @@ apt_get_install install -y \
 ########## jetson dependencies ##########
 if [ "$TARGET" = "jetson" ]; then
 
-	if [ "$INSTALL_JETPACK" = "y" ]; then
-		echo "Installing JetPack"
-		apt_get_install install -y nvidia-jetpack
-		echo "JetPack installation finished"
-	fi
-
 	# Required for FW updating ARK LTE
 	apt_get_install install libqmi-utils -y
 
@@ -282,6 +146,10 @@ elif [ "$TARGET" = "pi" ]; then
 	sudo nmcli radio wifi on
 	# https://www.raspberrypi.com/documentation/computers/os.html#python-on-raspberry-pi
 	PI_PYTHON_INSTALL_ARG="--break-system-packages"
+
+########## ubuntu (dev machine) — skip hardware-specific packages ##########
+elif [ "$TARGET" = "ubuntu" ]; then
+	echo "Ubuntu dev machine detected — skipping hardware-specific packages"
 fi
 
 # Common python dependencies
@@ -302,7 +170,6 @@ sudo usermod -a -G dialout $USER
 sudo groupadd -f -r gpio
 sudo usermod -a -G gpio $USER
 sudo usermod -a -G i2c $USER
-mkdir -p $XDG_CONFIG_HOME/systemd/user/
 
 if [ "$TARGET" = "jetson" ]; then
 	sudo systemctl stop nvgetty
@@ -329,10 +196,12 @@ sudo systemctl restart systemd-journald
 journalctl --disk-usage
 
 ########## scripts ##########
-echo "Installing scripts"
-mkdir -p ~/.local/bin
-cp $TARGET_DIR/scripts/* ~/.local/bin
-cp $COMMON_DIR/scripts/* ~/.local/bin
+if [ "$TARGET" != "ubuntu" ]; then
+	echo "Installing platform scripts"
+	mkdir -p ~/.local/bin
+	cp $TARGET_DIR/scripts/* ~/.local/bin
+	cp $COMMON_DIR/scripts/* ~/.local/bin
+fi
 
 ########## sudoers permissions ##########
 echo "Adding sudoers"
@@ -360,11 +229,11 @@ done
 ########## create hotspot connection ##########
 ~/.local/bin/create_hotspot_default.sh
 
-########## Always install MAVSDK ##########
-./tools/install_mavsdk.sh
-
-########## mavsdk-examples ##########
-./tools/install_mavsdk_examples.sh
+########## MAVSDK (skip on ubuntu dev machines) ##########
+if [ "$TARGET" != "ubuntu" ]; then
+	./tools/install_mavsdk.sh
+	./tools/install_mavsdk_examples.sh
+fi
 
 ########## install services ##########
 echo "Installing services..."

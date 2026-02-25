@@ -1,0 +1,93 @@
+name: Publish APT Repository
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish to APT repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install reprepro
+        run: sudo apt-get update && sudo apt-get install -y reprepro
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          # Trust the imported key ultimately
+          GPG_KEYID=$(gpg --list-secret-keys --keyid-format long | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "${GPG_KEYID}:6:" | gpg --import-ownertrust
+
+      - name: Check out gh-pages branch
+        id: checkout
+        run: |
+          git init repo
+          cd repo
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
+          if git ls-remote --exit-code origin gh-pages; then
+            git fetch origin gh-pages
+            git checkout gh-pages
+            echo "existed=true" >> "$GITHUB_OUTPUT"
+          else
+            git checkout --orphan gh-pages
+            git commit --allow-empty -m "Initialize gh-pages"
+            echo "existed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out packaging config from main
+        uses: actions/checkout@v4
+        with:
+          path: main-src
+          sparse-checkout: packaging/apt
+
+      - name: Initialize reprepro config
+        working-directory: repo
+        run: |
+          # Only copy config if conf/ doesn't exist yet (first run)
+          if [ ! -d conf ]; then
+            mkdir -p conf
+            cp ../main-src/packaging/apt/distributions conf/
+            cp ../main-src/packaging/apt/options conf/
+          fi
+
+      - name: Download release .deb assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p debs
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.deb" \
+            --dir debs
+
+      - name: Add packages to repository
+        working-directory: repo
+        env:
+          GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          for deb in ../debs/*.deb; do
+            echo "Adding $(basename "$deb")..."
+            reprepro includedeb stable "$deb"
+          done
+
+      - name: Export GPG public key
+        working-directory: repo
+        run: |
+          gpg --export --armor > ark-archive-keyring.asc
+          gpg --export > ark-archive-keyring.gpg
+
+      - name: Commit and push to gh-pages
+        working-directory: repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update APT repository for ${{ github.event.release.tag_name }}" || echo "No changes to commit"
+          git push origin gh-pages

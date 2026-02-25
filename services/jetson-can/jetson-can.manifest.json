@@ -1,11 +1,9 @@
 {
+  "version": "1.0.0",
   "displayName": "Jetson CAN",
   "description": "Enables Jetson CAN interface",
   "platform": ["jetson"],
   "configFile": "",
-  "visible": false,
-  "requires_sudo": true,
-  "env_var": "",
-  "install_script": "",
-  "install_files": ["start_can_interface.sh", "stop_can_interface.sh"]
+  "visible": true,
+  "requires_sudo": true
 }

@@ -33,12 +33,8 @@ nvm alias default 20
 # Install global Vue CLI
 npm install -g @vue/cli @vue/cli-service@latest
 
-# Install backend dependencies
-cd backend
-npm install
-
 # Install frontend dependencies and build project
-cd ../ark-ui
+cd ark-ui
 npm install
 npm run build
 

@@ -6,6 +6,7 @@ import threading
 import time
 import argparse
 import logging
+import select
 from datetime import datetime
 import socket
 from flask import Flask, jsonify, request
@@ -208,8 +209,10 @@ class MAVLinkConnection:
             try:
                 current_time = time.time()
 
-                # Periodically check device status (every 2 seconds)
-                if current_time - last_device_check_time > 2:
+                # Check device status via USB — skip when MAVLink is connected
+                # since heartbeats already confirm the device is present
+                mavlink_connected = self.is_mavlink_connected()
+                if not mavlink_connected and current_time - last_device_check_time > 5:
                     self.update_device_status()
                     last_device_check_time = current_time
 
@@ -217,9 +220,23 @@ class MAVLinkConnection:
                     time.sleep(1)
                     continue
 
-                # Use blocking mode with a timeout - this is more efficient than sleep
-                # as it will wake up immediately when a message arrives
-                msg = self.mav_connection.recv_match(blocking=True, timeout=0.5)
+                # Use select() on the underlying socket for efficient waiting.
+                # This wakes instantly on data and sleeps cleanly when idle.
+                try:
+                    sock = self.mav_connection.port.fileno() if hasattr(self.mav_connection.port, 'fileno') else None
+                    if sock is not None:
+                        ready, _, _ = select.select([self.mav_connection.port], [], [], 2.0)
+                        if not ready:
+                            # Timeout — no data available, loop back for housekeeping
+                            msg = None
+                        else:
+                            msg = self.mav_connection.recv_match(blocking=False)
+                    else:
+                        # Fallback for connections without a selectable socket
+                        msg = self.mav_connection.recv_match(blocking=True, timeout=2.0)
+                except (AttributeError, OSError):
+                    # Fallback if socket access fails
+                    msg = self.mav_connection.recv_match(blocking=True, timeout=2.0)
 
                 if msg:
                     # Ignore messages that do not originate from the autopilot
@@ -438,7 +455,7 @@ class AutopilotManager:
         script = "reset_fmu_wait_bl.py" if mode == "wait_bl" else "reset_fmu_fast.py"
         try:
             logger.debug(f"Resetting FMU using {script}")
-            result = subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")],
+            result = subprocess.run(["python3", f"/opt/ark/bin/{script}"],
                                    check=False,
                                    capture_output=True,
                                    text=True)
@@ -515,10 +532,10 @@ class AutopilotManager:
             self.reset_fmu(mode="wait_bl")
 
             # Run px_uploader.py with JSON progress output
-            logger.debug(f"Starting firmware upload using px_uploader.py")
+            logger.debug("Starting firmware upload using px_uploader.py")
             command = [
                 "python3", "-u",
-                os.path.expanduser("~/.local/bin/px_uploader.py"),
+                "/opt/ark/bin/px_uploader.py",
                 "--json-progress", "--port", serial_device, firmware_path
             ]
 

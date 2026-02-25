@@ -3,34 +3,63 @@ server {
     server_name localhost;
     client_max_body_size 500M;
 
-    # Static files
+    # CORS headers (replaces Express cors middleware)
+    add_header Access-Control-Allow-Origin * always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
+    if ($request_method = OPTIONS) { return 204; }
+
+    # Access logging (replaces Express morgan middleware)
+    access_log /var/log/nginx/ark-ui-access.log;
+
+    # Static SPA
     location / {
         root /var/www/ark-ui/html;
         index index.html;
         try_files $uri $uri/ /index.html;
     }
 
-    # API Gateway - all API traffic goes to Express server
-    location /api/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+    # --- Direct service proxies (no Express middleman) ---
+
+    location /api/network/ {
+        proxy_pass http://localhost:3001;
+        include /etc/nginx/snippets/ark-proxy.conf;
     }
 
-    # Unified WebSocket handling for all Socket.IO connections
-    location /socket.io/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+    location /socket.io/network-stats/ {
+        proxy_pass http://localhost:3001;
+        include /etc/nginx/snippets/ark-ws.conf;
     }
 
+    location /api/service/ {
+        proxy_pass http://localhost:3002;
+        include /etc/nginx/snippets/ark-proxy.conf;
+    }
 
+    location /api/autopilot/ {
+        proxy_pass http://localhost:3003;
+        include /etc/nginx/snippets/ark-proxy.conf;
+    }
+
+    location /socket.io/autopilot-firmware-upload/ {
+        proxy_pass http://localhost:3003;
+        include /etc/nginx/snippets/ark-ws.conf;
+    }
+
+    location /api/system/ {
+        proxy_pass http://localhost:3004;
+        include /etc/nginx/snippets/ark-proxy.conf;
+    }
+
+    # JSON error responses (replaces Express error handler)
+    error_page 502 /502.json;
+    location = /502.json {
+        internal;
+        default_type application/json;
+        return 502 '{"error": "Service unavailable"}';
+    }
+
+    # Flight review
     location /flight-review {
         rewrite ^/flight-review$ /flight-review/browse redirect;
         rewrite ^/flight-review/(.*)$ /$1 break;
@@ -47,6 +76,5 @@ server {
         sub_filter '"/js/' '"/flight-review/js/';
         sub_filter '"/css/' '"/flight-review/css/';
         sub_filter_once off;
-
     }
 }

@@ -1,11 +1,9 @@
 {
+  "version": "1.0.0",
   "displayName": "Hotspot Updater",
   "description": "Updates the hotspot default name",
   "platform": ["all"],
   "configFile": "",
   "visible": false,
-  "requires_sudo": true,
-  "env_var": "",
-  "install_script": "",
-  "install_files": ["update_hotspot_default.sh"]
+  "requires_sudo": true
 }

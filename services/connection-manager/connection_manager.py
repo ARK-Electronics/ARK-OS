@@ -13,21 +13,15 @@ It's designed to work with NetworkManager and ModemManager.
 import eventlet
 eventlet.monkey_patch()
 
-import os
-import sys
-import json
 import time
 import logging
 import threading
 import subprocess
 import re
-import collections
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, disconnect
-import psutil
+from flask_socketio import SocketIO
 import argparse
-from pathlib import Path
 
 def setup_logging():
     """Setup simple logging that will be captured by journald via stdout"""
@@ -59,19 +53,64 @@ class State:
     stats_thread_active = False
     stats_thread = None
 
+_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+# NM connection names: printable chars, no shell metacharacters
+_CONNECTION_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,127}$')
+_HOSTNAME_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')
+_SSID_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,31}$')
+_IP_ADDR_RE = re.compile(r'^(\d{1,3}\.){3}\d{1,3}(/\d{1,2})?$')
+_APN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
+_IFACE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,15}$')
+
+
 def strip_ansi_colors(text):
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
+    return _ANSI_RE.sub('', text)
+
+
+def validate_connection_name(name):
+    if not name or not _CONNECTION_NAME_RE.match(name):
+        raise ValueError(f"Invalid connection name: {name}")
+    return name
+
+
+def validate_ssid(ssid):
+    if not ssid or not _SSID_RE.match(ssid):
+        raise ValueError(f"Invalid SSID: {ssid}")
+    return ssid
+
+
+def validate_ip_address(addr):
+    if not addr or not _IP_ADDR_RE.match(addr):
+        raise ValueError(f"Invalid IP address: {addr}")
+    return addr
+
+
+def validate_apn(apn):
+    if not apn or not _APN_RE.match(apn):
+        raise ValueError(f"Invalid APN: {apn}")
+    return apn
+
+
+def validate_interface(iface):
+    if not iface or not _IFACE_RE.match(iface):
+        raise ValueError(f"Invalid interface: {iface}")
+    return iface
+
+
+def validate_autoconnect(value):
+    if value not in ("yes", "no"):
+        raise ValueError(f"Invalid autoconnect value: {value}")
+    return value
+
 
 class CommandExecutor:
     @staticmethod
     def run_command(command, timeout=30):
-        """Run a shell command and return its output"""
+        """Run a command (list form) and return its output"""
         try:
             logger.debug(f"Running command: {command}")
             result = subprocess.run(
                 command,
-                shell=True,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -102,7 +141,8 @@ class NetworkConnectionManager:
     def get_network_connections():
         connections = []
 
-        output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,DEVICE,AUTOCONNECT,ACTIVE connection show")
+        output = CommandExecutor.safe_run_command(
+            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE,AUTOCONNECT,ACTIVE", "connection", "show"])
         if not output:
             return connections
 
@@ -135,25 +175,33 @@ class NetworkConnectionManager:
 
                 # Get interface specific properties
                 if type == 'wifi':
-                    connection['mode'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode con show \"{name}\"")
-                    connection['ssid'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid con show \"{name}\"")
-                    connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g IP4.ADDRESS con show \"{name}\"")
+                    connection['mode'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "802-11-wireless.mode", "con", "show", name])
+                    connection['ssid'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "802-11-wireless.ssid", "con", "show", name])
+                    connection['ipAddress'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "IP4.ADDRESS", "con", "show", name])
                 elif type == 'ethernet':
-                    connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.addresses con show  \"{name}\"")
-                    connection['ipMethod'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.method con show  \"{name}\"")
+                    connection['ipAddress'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "ipv4.addresses", "con", "show", name])
+                    connection['ipMethod'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "ipv4.method", "con", "show", name])
                 if type == 'lte':
-                    connection['apn'] = CommandExecutor.safe_run_command(f"nmcli -g gsm.apn con show \"{name}\"")
+                    connection['apn'] = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "gsm.apn", "con", "show", name])
 
                 connections.append(connection)
 
         # Get all Wifi signal strengths
         wifi_signals = {}
-        output = CommandExecutor.safe_run_command("nmcli -t -f SSID,SIGNAL device wifi")
-        for line in output.strip().split('\n'):
-            parts = line.split(':')
-            if len(parts) >= 2:
-                ssid, signal = parts[:2]
-                wifi_signals[ssid] = signal
+        output = CommandExecutor.safe_run_command(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL", "device", "wifi"])
+        if output:
+            for line in output.strip().split('\n'):
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    ssid, signal = parts[:2]
+                    wifi_signals[ssid] = signal
 
         # Add signal strength to all matching wifi connections
         for connection in connections:
@@ -192,42 +240,50 @@ class ConnectionManager:
         if not ssid:
             return {'success': False, 'error': 'SSID is required'}
 
-        if len(password) < 8 or len(password) > 63:
+        try:
+            validate_ssid(ssid)
+            validate_autoconnect(autoconnect)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
+        if not password or len(password) < 8 or len(password) > 63:
             return {'success': False, 'error': 'Invalid password'}
 
-        if not mode:
-            return {'success': False, 'error': 'Mode is required'}
+        if mode not in ('ap', 'infrastructure'):
+            return {'success': False, 'error': 'Mode must be ap or infrastructure'}
 
         # Check if connection with this name already exists
-        command = f"nmcli -t -f NAME con show"
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(
+            ["nmcli", "-t", "-f", "NAME", "con", "show"])
 
-        if re.search(rf"^{re.escape(ssid)}$", result, re.MULTILINE):
+        if result and re.search(rf"^{re.escape(ssid)}$", result, re.MULTILINE):
             return {'success': False, 'error': 'Connection already exists'}
 
         # Create the connection
-        command = f"nmcli con add type wifi ifname '*' con-name \"{ssid}\" autoconnect {autoconnect} ssid \"{ssid}\""
+        cmd = ["nmcli", "con", "add", "type", "wifi", "ifname", "*",
+               "con-name", ssid, "autoconnect", autoconnect, "ssid", ssid]
 
         if mode == 'ap':
-            command += f" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared"
+            cmd += ["802-11-wireless.mode", "ap", "802-11-wireless.band", "bg", "ipv4.method", "shared"]
 
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(cmd)
 
         if result is None:
-            return {f"success': False, 'error': 'Failed to create {mode} connection"}
+            return {'success': False, 'error': f'Failed to create {mode} connection'}
 
         # Add password to connection
-        command = f"nmcli con modify \"{ssid}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
+        cmd = ["nmcli", "con", "modify", ssid,
+               "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
         if mode == 'ap':
-            command += f" 802-11-wireless-security.pmf disable connection.autoconnect-priority -1"
+            cmd += ["802-11-wireless-security.pmf", "disable", "connection.autoconnect-priority", "-1"]
 
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(cmd)
         if result is None:
             return {'success': False, 'error': 'Failed to set password'}
 
         # Query SSID to confirm creation
-        command = f"nmcli -g 802-11-wireless.ssid con show \"{ssid}\""
-        ssid = CommandExecutor.safe_run_command(command)
+        ssid = CommandExecutor.safe_run_command(
+            ["nmcli", "-g", "802-11-wireless.ssid", "con", "show", ssid])
 
         return {'success': True, 'ssid': ssid, 'mode': mode}
 
@@ -242,27 +298,43 @@ class ConnectionManager:
         if not name:
             return {'success': False, 'error': 'Name is required'}
 
-        if ipMethod == 'manual' and not ipAddress:
-            return {'success': False, 'error': 'IP address required for static IP'}
+        try:
+            validate_connection_name(name)
+            validate_autoconnect(autoconnect)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
+        if ipMethod not in ('auto', 'manual'):
+            return {'success': False, 'error': 'Invalid IP method'}
+
+        if ipMethod == 'manual':
+            if not ipAddress:
+                return {'success': False, 'error': 'IP address required for static IP'}
+            try:
+                validate_ip_address(ipAddress)
+            except ValueError as e:
+                return {'success': False, 'error': str(e)}
 
         # Check if connection with this name already exists
-        command = f"nmcli -t -f NAME con show"
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(
+            ["nmcli", "-t", "-f", "NAME", "con", "show"])
 
-        if re.search(rf"^{re.escape(name)}$", result, re.MULTILINE):
+        if result and re.search(rf"^{re.escape(name)}$", result, re.MULTILINE):
             return {'success': False, 'error': 'Connection already exists'}
 
         # Create base ethernet connection
-        cmd = f"nmcli connection add type ethernet con-name \"{name}\" ifname '*' autoconnect {autoconnect}"
-        result = CommandExecutor.safe_run_command(cmd)
-        
+        result = CommandExecutor.safe_run_command(
+            ["nmcli", "connection", "add", "type", "ethernet",
+             "con-name", name, "ifname", "*", "autoconnect", autoconnect])
+
         if result is None:
             return {'success': False, 'error': 'Failed to create ethernet connection'}
-        
+
         if ipMethod == 'manual' and ipAddress:
-            command = f"nmcli connection modify \"{name}\" ipv4.method manual ipv4.addresses {ipAddress}"
-            CommandExecutor.safe_run_command(command)
-        
+            CommandExecutor.safe_run_command(
+                ["nmcli", "connection", "modify", name,
+                 "ipv4.method", "manual", "ipv4.addresses", ipAddress])
+
         return {'success': True, 'name': name}
 
     @staticmethod
@@ -275,9 +347,17 @@ class ConnectionManager:
         if not name:
             return {'success': False, 'error': 'Name is required'}
 
+        try:
+            validate_connection_name(name)
+            validate_autoconnect(autoconnect)
+            if apn:
+                validate_apn(apn)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
         # Check if any LTE connection already exists. We can only allow 1.
-        command = f"nmcli -t -f TYPE con show"
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(
+            ["nmcli", "-t", "-f", "TYPE", "con", "show"])
 
         if result is None:
             return {'success': False, 'error': 'Failed to query connections'}
@@ -286,13 +366,12 @@ class ConnectionManager:
             return {'success': False, 'error': 'An LTE connection already exists'}
 
         # Create LTE connection
-        cmd = f"nmcli connection add type gsm con-name \"{name}\" gsm.apn \"{apn}\" autoconnect {autoconnect}"
+        cmd = ["nmcli", "connection", "add", "type", "gsm",
+               "con-name", name, "gsm.apn", apn, "autoconnect", autoconnect]
         result = CommandExecutor.safe_run_command(cmd)
 
         if result is None:
             return {'success': False, 'error': 'Failed to create LTE connection'}
-
-        # TODO: do we need to modify any settings?
 
         return {'success': True, 'name': name}
 
@@ -316,18 +395,27 @@ class ConnectionManager:
         ssid = data.get('ssid')
         password = data.get('password')
         autoconnect = data.get('autoconnect', 'yes')
-        mode = data.get('mode', 'infrastructure')
 
-        command = f"nmcli connection modify \"{name}\""
+        try:
+            validate_connection_name(name)
+            validate_autoconnect(autoconnect)
+            if ssid:
+                validate_ssid(ssid)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
+        cmd = ["nmcli", "connection", "modify", name]
 
         if ssid:
-            command += f" 802-11-wireless.ssid \"{ssid}\""
+            cmd += ["802-11-wireless.ssid", ssid]
         if autoconnect:
-            command +=f" autoconnect {autoconnect}"
+            cmd += ["autoconnect", autoconnect]
         if password:
-            command += f" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{password}\""
+            if len(password) < 8 or len(password) > 63:
+                return {'success': False, 'error': 'Invalid password'}
+            cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
 
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(cmd)
         return {'success': result is not None}
 
     @staticmethod
@@ -336,18 +424,31 @@ class ConnectionManager:
         autoconnect = data.get('autoconnect', 'yes')
         ipAddress = data.get('ipAddress')
 
-        command = f"nmcli connection modify \"{name}\""
+        try:
+            validate_connection_name(name)
+            validate_autoconnect(autoconnect)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
+        if ipMethod not in ('auto', 'manual'):
+            return {'success': False, 'error': 'Invalid IP method'}
+
+        cmd = ["nmcli", "connection", "modify", name]
 
         if autoconnect:
-            command +=f" autoconnect {autoconnect}"
+            cmd += ["autoconnect", autoconnect]
         if ipMethod == 'auto':
-            command += " ipv4.method auto"
+            cmd += ["ipv4.method", "auto"]
         elif ipMethod == 'manual' and ipAddress:
-            command += f" ipv4.method manual ipv4.addresses {ipAddress}"
+            try:
+                validate_ip_address(ipAddress)
+            except ValueError as e:
+                return {'success': False, 'error': str(e)}
+            cmd += ["ipv4.method", "manual", "ipv4.addresses", ipAddress]
         else:
             return {'success': False, 'error': 'Missing ipAddress'}
 
-        result = CommandExecutor.safe_run_command(command)
+        result = CommandExecutor.safe_run_command(cmd)
         return {'success': result is not None}
 
     @staticmethod
@@ -356,12 +457,20 @@ class ConnectionManager:
         apn = data.get('apn')
         autoconnect = data.get('autoconnect', 'yes')
 
-        cmd = f"nmcli connection modify \"{name}\""
+        try:
+            validate_connection_name(name)
+            validate_autoconnect(autoconnect)
+            if apn:
+                validate_apn(apn)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
+        cmd = ["nmcli", "connection", "modify", name]
 
         if apn:
-            cmd += f" gsm.apn \"{apn}\""
+            cmd += ["gsm.apn", apn]
         if autoconnect:
-            cmd += f" autoconnect {autoconnect}"
+            cmd += ["autoconnect", autoconnect]
 
         logger.info(f"Updating LTE connection {name}")
         logger.info(f"apn {apn}")
@@ -377,13 +486,14 @@ class WiFiNetworkManager:
     def scan_wifi_networks():
         networks = []
 
-        CommandExecutor.safe_run_command("nmcli device wifi rescan")
+        CommandExecutor.safe_run_command(["nmcli", "device", "wifi", "rescan"])
 
         # Wait for scan to complete
         time.sleep(2)
 
         # Get scan results
-        output = CommandExecutor.safe_run_command("nmcli -f SSID,SIGNAL,SECURITY,CHAN device wifi list")
+        output = CommandExecutor.safe_run_command(
+            ["nmcli", "-f", "SSID,SIGNAL,SECURITY,CHAN", "device", "wifi", "list"])
         if not output:
             return networks
 
@@ -420,7 +530,7 @@ class HostnameManager:
     @staticmethod
     def get_hostname():
         """Get the system hostname"""
-        return CommandExecutor.safe_run_command("hostname")
+        return CommandExecutor.safe_run_command(["hostname"])
 
     @staticmethod
     def set_hostname(new_hostname):
@@ -429,11 +539,12 @@ class HostnameManager:
             return False, "No hostname provided"
 
         # Validate hostname format
-        if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$', new_hostname):
+        if not _HOSTNAME_RE.match(new_hostname):
             return False, "Invalid hostname format"
 
         # Change hostname using hostnamectl
-        result = CommandExecutor.safe_run_command(f"sudo hostnamectl set-hostname {new_hostname}")
+        result = CommandExecutor.safe_run_command(
+            ["sudo", "hostnamectl", "set-hostname", new_hostname])
         if result is None:
             return False, "Failed to set hostname"
 
@@ -451,7 +562,7 @@ class LteManager:
         Returns a dictionary with all modem status information
         """
 
-        if not CommandExecutor.safe_run_command("systemctl is-active ModemManager"):
+        if not CommandExecutor.safe_run_command(["systemctl", "is-active", "ModemManager"]):
             return {"status": "not_found", "message": "ModemManager is not running"}
 
         # Initialize comprehensive status structure with all possible fields
@@ -504,13 +615,18 @@ class LteManager:
 
         try:
             # Get modem index
-            modem_index = CommandExecutor.safe_run_command("mmcli -L | grep -oP '(?<=/Modem/)\d+' || echo ''")
+            modem_list = CommandExecutor.safe_run_command(["mmcli", "-L"])
+            modem_index = None
+            if modem_list:
+                match = re.search(r'/Modem/(\d+)', modem_list)
+                if match:
+                    modem_index = match.group(1)
             if not modem_index:
                 logger.warning("No modem found")
                 return status
 
             # Get modem information
-            modem_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index}")
+            modem_info = CommandExecutor.safe_run_command(["mmcli", "-m", modem_index])
             if not modem_info:
                 logger.warning(f"Failed to get information for modem {modem_index}")
                 return status
@@ -581,7 +697,7 @@ class LteManager:
 
             # If we have a SIM path, get SIM info
             if sim_path:
-                sim_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --sim {sim_path}")
+                sim_info = CommandExecutor.safe_run_command(["mmcli", "-m", modem_index, "--sim", sim_path])
                 if sim_info:
                     for line in sim_info.split('\n'):
                         line = line.strip()
@@ -596,7 +712,7 @@ class LteManager:
 
             # If we have a bearer path, get bearer info for interface and IP details
             if bearer_path:
-                bearer_info = CommandExecutor.safe_run_command(f"mmcli -m {modem_index} --bearer={bearer_path}")
+                bearer_info = CommandExecutor.safe_run_command(["mmcli", "-m", modem_index, f"--bearer={bearer_path}"])
                 if bearer_info:
                     for line in bearer_info.split('\n'):
                         line = line.strip()
@@ -622,12 +738,18 @@ class LteManager:
 
                     # Check interface status if we have one
                     if status["interface"]:
-                        interface_status = CommandExecutor.safe_run_command(f"ip link show {status['interface']} | grep 'state'")
-                        if interface_status:
-                            if "UP" in interface_status:
-                                status["interfaceState"] = "up"
-                            else:
-                                status["interfaceState"] = "down"
+                        try:
+                            validate_interface(status["interface"])
+                        except ValueError:
+                            pass
+                        else:
+                            link_output = CommandExecutor.safe_run_command(
+                                ["ip", "link", "show", status["interface"]])
+                            if link_output:
+                                if "state UP" in link_output:
+                                    status["interfaceState"] = "up"
+                                else:
+                                    status["interfaceState"] = "down"
 
             # Suggest APN depending on SIM operator
             if status["simOperatorName"]:
@@ -658,7 +780,8 @@ class NetworkStatsCollector:
         stats = {}
         try:
             # Get all activated NetworkManager connections
-            nm_output = CommandExecutor.safe_run_command("nmcli -t -f NAME,TYPE,STATE connection show")
+            nm_output = CommandExecutor.safe_run_command(
+                ["nmcli", "-t", "-f", "NAME,TYPE,STATE", "connection", "show"])
             if not nm_output:
                 logger.warning("Failed to get NetworkManager connections")
                 return stats
@@ -684,7 +807,8 @@ class NetworkStatsCollector:
                             interface_type = 'other'
 
                         # Get the actual IP interface for this connection
-                        ip_iface = CommandExecutor.safe_run_command(f"nmcli -g GENERAL.IP-IFACE connection show \"{name}\"")
+                        ip_iface = CommandExecutor.safe_run_command(
+                            ["nmcli", "-g", "GENERAL.IP-IFACE", "connection", "show", name])
 
                         if ip_iface and ip_iface.strip():
                             device = ip_iface.strip()
@@ -703,7 +827,7 @@ class NetworkStatsCollector:
             # Process each active connection to collect statistics
             for device, info in active_connections.items():
                 # Get detailed stats using 'ip -s link show' command
-                stats_output = CommandExecutor.safe_run_command(f"ip -s link show {device}")
+                stats_output = CommandExecutor.safe_run_command(["ip", "-s", "link", "show", device])
                 if not stats_output:
                     logger.warning(f"Failed to get stats for device {device}")
                     continue
@@ -715,9 +839,12 @@ class NetworkStatsCollector:
                     continue
 
                 # Get IP address
-                ip_output = CommandExecutor.safe_run_command(
-                    f"ip addr show {device} | grep -w inet | head -1 | awk '{{print $2}}' | cut -d/ -f1"
-                )
+                ip_raw = CommandExecutor.safe_run_command(["ip", "addr", "show", device])
+                ip_output = None
+                if ip_raw:
+                    ip_match = re.search(r'\binet\s+(\d+\.\d+\.\d+\.\d+)', ip_raw)
+                    if ip_match:
+                        ip_output = ip_match.group(1)
 
                 # Create the stats entry with simplified data
                 device_stats = {
@@ -742,25 +869,27 @@ class NetworkStatsCollector:
                 # Add connection-type specific information
                 if info['type'] == 'wifi':
                     # Get signal strength for WiFi
-                    signal_output = CommandExecutor.safe_run_command(
-                        f"nmcli -f SIGNAL device wifi list ifname {device} | grep -v SIGNAL | head -1 | awk '{{print $1}}'"
-                    )
-                    if signal_output and signal_output.isdigit():
-                        device_stats['signal_strength'] = int(signal_output)
+                    signal_raw = CommandExecutor.safe_run_command(
+                        ["nmcli", "-t", "-f", "SIGNAL", "device", "wifi", "list", "ifname", device])
+                    if signal_raw:
+                        # -t mode outputs one signal value per line
+                        first_line = signal_raw.strip().split('\n')[0].strip()
+                        if first_line.isdigit():
+                            device_stats['signal_strength'] = int(first_line)
 
                     # Get SSID for WiFi
-                    ssid_output = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid connection show '{info['name']}'")
+                    ssid_output = CommandExecutor.safe_run_command(
+                        ["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", info['name']])
                     if ssid_output:
                         device_stats['ssid'] = ssid_output
 
                 elif info['type'] == 'lte':
                     # For LTE connections, try to get signal strength from ModemManager
-                    # This is optional and only works if ModemManager is available
-                    signal_output = CommandExecutor.safe_run_command(
-                        "mmcli -m 0 | grep 'signal quality' | awk -F': ' '{print $2}' | awk '{print $1}' | tr -d '%'"
-                    )
-                    if signal_output and signal_output.isdigit():
-                        device_stats['signal_strength'] = int(signal_output)
+                    lte_raw = CommandExecutor.safe_run_command(["mmcli", "-m", "0"])
+                    if lte_raw:
+                        sig_match = re.search(r'signal quality:\s*(\d+)%', lte_raw)
+                        if sig_match:
+                            device_stats['signal_strength'] = int(sig_match.group(1))
 
                 stats[device] = device_stats
                 logger.debug(f"Collected stats for {device} ({info['name']}): RX={device_stats['rx_bytes']}, TX={device_stats['tx_bytes']}")
@@ -934,7 +1063,7 @@ class NetworkReporting:
             if not State.interface_stats:
                 logger.debug("No interface stats available, collecting now")
                 NetworkStatsProcessor.update_interface_stats()
-                
+
                 if not State.interface_stats:
                     logger.debug("No active network interfaces found")
                     return []
@@ -963,15 +1092,15 @@ class NetworkReporting:
                     'rxPackets': stats.get('rx_packets', 0),
                     'txPackets': stats.get('tx_packets', 0)
                 }
-                
+
                 if stats.get('type') == 'wifi':
                     interface_summary['signal'] = stats.get('signal_strength', 0)
-                
+
                 summary.append(interface_summary)
 
             # Sort by total bytes (most traffic first)
             summary.sort(key=lambda x: -x.get('totalBytes', 0))
-            
+
             logger.debug(f"Generated summary for {len(summary)} active interfaces")
             return summary
 
@@ -1016,7 +1145,7 @@ class StatsThread:
             while State.stats_thread_active and len(State.active_stats_clients) > 0:
                 try:
                     # Collect interface stats at the configured interval
-                    stats = NetworkStatsProcessor.update_interface_stats()
+                    NetworkStatsProcessor.update_interface_stats()
 
                     # Send updates to clients at the report interval
                     StatsThread._send_stats_to_clients()
@@ -1046,12 +1175,12 @@ class StatsThread:
             try:
                 # Generate the summary to send to clients
                 summary = NetworkReporting.get_interface_usage_summary()
-                
+
                 # Make sure we have data to send
                 if not summary:
                     logger.warning("No network interfaces found to report stats")
                     return
-                    
+
                 # Send update to all connected clients
                 if State.active_stats_clients:
                     socketio.emit('network_stats_update', summary)
@@ -1128,7 +1257,7 @@ class SocketEventHandler:
                 # Stop thread if no clients remain
                 if remaining == 0 and State.stats_thread_active:
                     StatsThread.stop_collection_thread()
-                    
+
         except Exception as e:
             logger.error(f"Error handling client disconnect: {e}")
 
@@ -1158,24 +1287,40 @@ def api_create_connection():
 @app.route('/connections/<name>', methods=['DELETE'])
 def api_delete_connection(name):
     logger.info(f"DELETE /connections/{name} called")
-    result = CommandExecutor.safe_run_command(f"nmcli connection delete \"{name}\"")
+    try:
+        validate_connection_name(name)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid connection name'}), 400
+    result = CommandExecutor.safe_run_command(["nmcli", "connection", "delete", name])
     return jsonify({'success': result is not None})
 
 @app.route('/connections/<name>', methods=['PUT'])
 def api_update_connection(name):
     logger.info(f"PUT /connections/{name} called")
+    try:
+        validate_connection_name(name)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid connection name'}), 400
     return jsonify(ConnectionManager.update_connection(name, request.json))
 
 @app.route('/connections/<name>/connect', methods=['POST'])
 def api_connect_to_network(name):
     logger.info(f"POST /connections/{name}/connect called")
-    result = CommandExecutor.safe_run_command(f"nmcli con up \"{name}\"")
+    try:
+        validate_connection_name(name)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid connection name'}), 400
+    result = CommandExecutor.safe_run_command(["nmcli", "con", "up", name])
     return jsonify({'success': result is not None})
 
 @app.route('/connections/<name>/disconnect', methods=['POST'])
 def api_disconnect_from_network(name):
     logger.info(f"POST /connections/{name}/disconnect called")
-    result = CommandExecutor.safe_run_command(f"nmcli con down \"{name}\"")
+    try:
+        validate_connection_name(name)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid connection name'}), 400
+    result = CommandExecutor.safe_run_command(["nmcli", "con", "down", name])
     return jsonify({'success': result is not None})
 
 @app.route('/wifi/scan', methods=['GET'])
@@ -1216,15 +1361,15 @@ class ApplicationRunner:
             default='/this/is/an/example',
             help='Example arg'
         )
-        args = parser.parse_args()
+        parser.parse_args()
 
         ApplicationRunner.start_server()
-    
+
     @staticmethod
     def start_server():
         host = '127.0.0.1'
         port = 3001
-        debug = False;
+        debug = False
 
         logger.info(f"Starting SocketIO server on {host}:{port}")
         try:

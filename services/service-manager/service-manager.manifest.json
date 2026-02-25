@@ -1,11 +1,9 @@
 {
+  "version": "1.0.0",
   "displayName": "Service Manager",
   "description": "Microservice backend for managing systemd service",
   "platform": ["all"],
   "configFile": "config.toml",
   "visible": false,
-  "requires_sudo": false,
-  "env_var": "",
-  "install_script": "",
-  "install_files": ["service_manager.py"]
+  "requires_sudo": false
 }

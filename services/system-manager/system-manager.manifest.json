@@ -1,11 +1,9 @@
 {
+  "version": "1.0.0",
   "displayName": "System Manager",
   "description": "Microservice backend for managing the linux system",
   "platform": ["all"],
   "configFile": "",
   "visible": false,
-  "requires_sudo": false,
-  "env_var": "",
-  "install_script": "",
-  "install_files": ["system_manager.py"]
+  "requires_sudo": false
 }
