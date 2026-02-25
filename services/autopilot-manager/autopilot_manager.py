@@ -455,7 +455,7 @@ class AutopilotManager:
         script = "reset_fmu_wait_bl.py" if mode == "wait_bl" else "reset_fmu_fast.py"
         try:
             logger.debug(f"Resetting FMU using {script}")
-            result = subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")],
+            result = subprocess.run(["python3", f"/opt/ark/bin/{script}"],
                                    check=False,
                                    capture_output=True,
                                    text=True)
@@ -535,7 +535,7 @@ class AutopilotManager:
             logger.debug("Starting firmware upload using px_uploader.py")
             command = [
                 "python3", "-u",
-                os.path.expanduser("~/.local/bin/px_uploader.py"),
+                "/opt/ark/bin/px_uploader.py",
                 "--json-progress", "--port", serial_device, firmware_path
             ]
 

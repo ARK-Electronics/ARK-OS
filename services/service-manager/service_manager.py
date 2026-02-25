@@ -65,12 +65,11 @@ class ServiceManager:
 
     @staticmethod
     def get_service_config_file(service_name):
-        base_dir = os.path.expanduser("~/.local/share")
-        service_dir = os.path.join(base_dir, service_name)
+        share_dir = f"/opt/ark/share/{service_name}"
 
         config_file_name = "config.toml"
 
-        manifest_file = os.path.join(service_dir, f"{service_name}.manifest.json")
+        manifest_file = os.path.join(share_dir, f"{service_name}.manifest.json")
         if os.path.isfile(manifest_file):
             try:
                 with open(manifest_file, 'r') as f:
@@ -81,12 +80,16 @@ class ServiceManager:
             except Exception as e:
                 print(f"Error reading manifest file for {service_name}: {e}")
 
-        return os.path.join(service_dir, config_file_name)
+        # Check user config override first, then fall back to installed default
+        user_config = os.path.expanduser(f"~/.config/ark/{service_name}/{config_file_name}")
+        if os.path.isfile(user_config):
+            return user_config
+
+        return os.path.join(share_dir, config_file_name)
 
     @staticmethod
     def is_service_visible(service_name):
-        base_dir = os.path.expanduser("~/.local/share")
-        manifest_file = os.path.join(base_dir, service_name, f"{service_name}.manifest.json")
+        manifest_file = f"/opt/ark/share/{service_name}/{service_name}.manifest.json"
 
         if os.path.isfile(manifest_file):
             try:
@@ -102,7 +105,7 @@ class ServiceManager:
     def get_service_statuses():
         services = []
 
-        service_dir = os.path.expanduser("~/.config/systemd/user")
+        service_dir = "/etc/systemd/user"
 
         if not os.path.isdir(service_dir):
             return {"services": []}
@@ -248,14 +251,19 @@ class ServiceManager:
             return {"status": "fail", "data": "No service name provided"}
 
         config_file = ServiceManager.get_service_config_file(service_name)
+        config_file_name = os.path.basename(config_file)
 
         if not os.path.isfile(config_file):
-            config_file_name = os.path.basename(config_file)
             service_dir = os.path.dirname(config_file)
             return {"status": "fail", "data": f"{config_file_name} not found in {service_dir}"}
 
+        # Always save to user-writable location (~/.config/ark/<service>/)
+        user_config_dir = os.path.expanduser(f"~/.config/ark/{service_name}")
+        user_config_file = os.path.join(user_config_dir, config_file_name)
+
         try:
-            with open(config_file, 'w') as f:
+            os.makedirs(user_config_dir, exist_ok=True)
+            with open(user_config_file, 'w') as f:
                 f.write(config_data)
                 return {"status": "success", "data": "Configuration saved successfully"}
         except Exception as e:

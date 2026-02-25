@@ -54,30 +54,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install nfpm
+      - name: Install tools
         run: |
           curl -sfL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_linux_amd64.tar.gz \
             | tar xzf - -C /usr/local/bin nfpm
+          pip install pyyaml
+
+      - name: Generate packaging files
+        run: python3 packaging/generate.py
 
       - name: Build Python .deb packages
-        working-directory: packaging
+        working-directory: packaging/generated
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          mkdir -p ../dist
+          mkdir -p ../../dist
           for svc in autopilot-manager connection-manager service-manager system-manager; do
             echo "Packaging ark-${svc}..."
-            nfpm package --config "ark-${svc}.yaml" --packager deb --target ../dist/
+            nfpm package --config "ark-${svc}.yaml" --packager deb --target ../../dist/
           done
 
       - name: Build Bash .deb packages
-        working-directory: packaging
+        working-directory: packaging/generated
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           for svc in hotspot-updater jetson-can; do
             echo "Packaging ark-${svc}..."
-            nfpm package --config "ark-${svc}.yaml" --packager deb --target ../dist/
+            nfpm package --config "ark-${svc}.yaml" --packager deb --target ../../dist/
           done
 
       - name: Upload Python/Bash package artifacts
@@ -138,10 +142,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install nfpm
+      - name: Install tools
         run: |
           curl -sfL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_linux_amd64.tar.gz \
             | tar xzf - -C /usr/local/bin nfpm
+          pip install pyyaml
 
       - name: Build frontend
         working-directory: frontend/ark-ui/ark-ui
@@ -151,13 +156,16 @@ jobs:
           mkdir -p ../../../build/ark-ui
           cp -r dist ../../../build/ark-ui/
 
+      - name: Generate packaging files
+        run: python3 packaging/generate.py
+
       - name: Package frontend
-        working-directory: packaging
+        working-directory: packaging/generated
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          mkdir -p ../dist
-          nfpm package --config ark-ui.yaml --packager deb --target ../dist/
+          mkdir -p ../../dist
+          nfpm package --config ark-ui.yaml --packager deb --target ../../dist/
 
       - name: Upload frontend package artifact
         uses: actions/upload-artifact@v4
@@ -181,16 +189,21 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Build meta-package
+      - name: Build meta-packages
         run: |
           curl -sfL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_linux_amd64.tar.gz \
             | tar xzf - -C /usr/local/bin nfpm
+          pip install pyyaml
+          python3 packaging/generate.py
 
-          cd packaging
-          VERSION="${{ needs.version.outputs.version }}" ARCH=arm64 nfpm package \
-            --config ark-companion.yaml \
-            --packager deb \
-            --target ../dist/
+          cd packaging/generated
+          for pkg in ark-companion-base ark-companion-jetson ark-companion-pi ark-companion-ubuntu; do
+            echo "Packaging ${pkg}..."
+            VERSION="${{ needs.version.outputs.version }}" ARCH=arm64 nfpm package \
+              --config "${pkg}.yaml" \
+              --packager deb \
+              --target ../../dist/
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

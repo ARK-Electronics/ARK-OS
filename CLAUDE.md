@@ -36,13 +36,14 @@ and a web-based management UI.
 | Frontend | `/var/www/ark-ui/html/` |
 | Nginx config | `/etc/nginx/sites-available/ark-ui` |
 
-### Migration Status
+### Config Path Strategy
 
-The project recently migrated from `~/.local/bin/` + `~/.local/share/` (XDG) to
-`/opt/ark/bin/` + `/opt/ark/share/`. **Packaging and systemd units are correct**, but
-some service source code still hardcodes old `~/.local/` paths. See
-[`claude_plan/P0-path-migration-cleanup.md`](claude_plan/P0-path-migration-cleanup.md)
-for the complete fix list.
+Services use a two-tier config lookup:
+1. **User config** at `~/.config/ark/<service>/config.toml` — writable, persists across upgrades
+2. **Default config** at `/opt/ark/share/<service>/config.toml` — installed by deb, read-only
+
+Services that write runtime state (e.g. logloader's SQLite DB) use
+`~/.local/share/ark/<service>/` as a writable data directory.
 
 ## Repository Layout
 

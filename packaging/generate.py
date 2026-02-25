@@ -141,19 +141,27 @@ def generate_systemd_unit(name, cfg, manifest):
 
 # ─── Script generation ─────────────────────────────────────────────────────────
 
-def generate_postinst_user(name):
+def generate_postinst_user(name, default_enabled=True):
+    enable_lines = ""
+    if default_enabled:
+        enable_lines = f"""    sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user enable "{name}.service"
+    sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user restart "{name}.service"
+"""
+        enable_lines_no_sudo = f"""    systemctl --user enable "{name}.service"
+    systemctl --user restart "{name}.service"
+"""
+    else:
+        enable_lines = ""
+        enable_lines_no_sudo = ""
+
     return f"""#!/bin/bash
 loginctl enable-linger "${{SUDO_USER:-$USER}}" 2>/dev/null || true
 if [ -n "$SUDO_USER" ]; then
     RUNTIME_DIR="/run/user/$(id -u "$SUDO_USER")"
     sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user daemon-reload
-    sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user enable "{name}.service"
-    sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="$RUNTIME_DIR" systemctl --user restart "{name}.service"
-else
+{enable_lines}else
     systemctl --user daemon-reload
-    systemctl --user enable "{name}.service"
-    systemctl --user restart "{name}.service"
-fi
+{enable_lines_no_sudo}fi
 """
 
 
@@ -170,11 +178,16 @@ fi
 """
 
 
-def generate_postinst_system(name):
-    return f"""#!/bin/bash
+def generate_postinst_system(name, default_enabled=True):
+    if default_enabled:
+        return f"""#!/bin/bash
 systemctl daemon-reload
 systemctl enable "{name}.service"
 systemctl restart "{name}.service"
+"""
+    else:
+        return f"""#!/bin/bash
+systemctl daemon-reload
 """
 
 
@@ -239,22 +252,29 @@ def generate_nfpm_yaml(name, cfg, defaults_cfg, manifest):
         for item in cfg.get("contents", []):
             mode = item.get("mode")
             content_blocks.append(
-                _content_block(f"../{item['src']}", item["dst"],
+                _content_block(f"../../{item['src']}", item["dst"],
                                mode=mode, entry_type=item.get("type")))
     else:
         fn_src = type_defaults["contents_src"]
         fn_dst = type_defaults["contents_dst"]
         content_blocks.append(
-            _content_block(f"../{fn_src(name, cfg)}", fn_dst(name, cfg), mode="0755"))
+            _content_block(f"../../{fn_src(name, cfg)}", fn_dst(name, cfg), mode="0755"))
 
     for item in cfg.get("extra_contents", []):
         if item.get("type"):
             content_blocks.append(
-                _content_block(f"../{item['src']}", item["dst"],
+                _content_block(f"../../{item['src']}", item["dst"],
                                entry_type=item["type"]))
         else:
             content_blocks.append(
-                _content_block(f"../{item['src']}", item["dst"], mode="0755"))
+                _content_block(f"../../{item['src']}", item["dst"], mode="0755"))
+
+    # Auto-include manifest.json if it exists
+    manifest_src = PROJECT_ROOT / "services" / name / f"{name}.manifest.json"
+    if manifest_src.exists():
+        content_blocks.append(
+            _content_block(f"../../services/{name}/{name}.manifest.json",
+                           f"/opt/ark/share/{name}/{name}.manifest.json"))
 
     # Systemd unit
     unit_dir = "/etc/systemd/system" if system_svc else "/etc/systemd/user"
@@ -299,7 +319,7 @@ def generate_nfpm_custom_yaml(pkg_name, cfg, defaults_cfg):
         content_blocks = []
         for item in cfg["contents"]:
             content_blocks.append(
-                _content_block(f"../{item['src']}", item["dst"],
+                _content_block(f"../../{item['src']}", item["dst"],
                                entry_type=item.get("type")))
         lines.append("")
         lines.append("contents:")
@@ -351,11 +371,12 @@ def main():
         generated_files.append(str(unit_path.relative_to(output_dir)))
 
         # Install/remove scripts
+        default_enabled = cfg.get("default_enabled", True)
         if system_svc:
-            postinst = generate_postinst_system(name)
+            postinst = generate_postinst_system(name, default_enabled)
             prerm = generate_prerm_system(name)
         else:
-            postinst = generate_postinst_user(name)
+            postinst = generate_postinst_user(name, default_enabled)
             prerm = generate_prerm_user(name)
 
         postinst_path = output_dir / "scripts" / f"postinst-{name}.sh"

@@ -21,6 +21,11 @@ services:
     description: "Autopilot management service for ARK companion computers"
     script: autopilot_manager.py
     depends: [python3-pymavlink]
+    extra_contents:
+      - src: platform/common/scripts/px_uploader.py
+        dst: /opt/ark/bin/px_uploader.py
+      - src: platform/common/scripts/flash_firmware.sh
+        dst: /opt/ark/bin/flash_firmware.sh
     systemd:
       after: [default.target, network-online.target, syslog.target]
       wants: [default.target, network-online.target]
@@ -50,9 +55,14 @@ services:
 
   logloader:
     type: cpp
+    default_enabled: false
     description: "Automatic ULog download and upload service for ARK companion computers"
     build_dir: services/logloader/logloader
     depends: [libssl3, libsqlite3-0]
+    extra_contents:
+      - src: services/logloader/logloader/config.toml
+        dst: /opt/ark/share/logloader/config.toml
+        type: config
     systemd:
       after: [syslog.target, network.target, mavlink-router.service]
       wants: [network.target]
@@ -86,10 +96,15 @@ services:
 
   polaris:
     type: cpp
+    default_enabled: false
     description: "Polaris RTK corrections client for MAVLink"
     binary: polaris-client-mavlink
     build_dir: services/polaris/polaris-client-mavlink
     depends: [libssl3, libgflags2.2, libgoogle-glog0v6, libboost-system1.74.0]
+    extra_contents:
+      - src: services/polaris/polaris-client-mavlink/config.toml
+        dst: /opt/ark/share/polaris/config.toml
+        type: config
     systemd:
       description: "ARK Polaris RTK Corrections"
       after: [syslog.target, network.target, mavlink-router.service]
@@ -98,9 +113,14 @@ services:
 
   rid-transmitter:
     type: cpp
+    default_enabled: false
     description: "RemoteID Bluetooth transmitter for ARK companion computers"
     build_dir: services/rid-transmitter/RemoteIDTransmitter
     depends: [libbluetooth3]
+    extra_contents:
+      - src: services/rid-transmitter/RemoteIDTransmitter/config.toml
+        dst: /opt/ark/share/rid-transmitter/config.toml
+        type: config
     systemd:
       description: "ARK RemoteID Bluetooth Transmitter"
       condition_path_is_directory: /sys/class/bluetooth
@@ -110,8 +130,13 @@ services:
 
   rtsp-server:
     type: cpp
+    default_enabled: false
     description: "RTSP server for connected cameras on ARK companion computers"
     build_dir: services/rtsp-server/rtsp-server
+    extra_contents:
+      - src: services/rtsp-server/rtsp-server/config.toml
+        dst: /opt/ark/share/rtsp-server/config.toml
+        type: config
     depends:
       - libgstreamer1.0-0
       - libgstreamer-plugins-base1.0-0
@@ -124,6 +149,7 @@ services:
 
   dds-agent:
     type: cpp
+    default_enabled: false
     description: "Micro XRCE-DDS Agent for PX4-ROS2 bridge on ARK companion computers"
     binary: MicroXRCEAgent
     build_dir: services/dds-agent/Micro-XRCE-DDS-Agent
@@ -139,6 +165,7 @@ services:
 
   flight-review:
     type: custom
+    default_enabled: false
     description: "PX4 Flight Review server for ARK companion computers"
     depends: [python3, python3-pip, libsqlite3-0, libfftw3-3]
     contents:
@@ -169,6 +196,7 @@ services:
 
   jetson-can:
     type: bash
+    default_enabled: false
     description: "Jetson CAN interface enabler for ARK companion computers"
     script: start_can_interface.sh
     extra_contents:
@@ -210,14 +238,37 @@ custom_packages:
       rm -f /etc/nginx/sites-enabled/ark-ui 2>/dev/null
       nginx -t && systemctl reload nginx 2>/dev/null || true
 
-  ark-companion:
-    description: "ARK companion computer meta-package \u2014 installs all ARK-OS services"
+  ark-companion-base:
+    description: "ARK-OS base — core services for all platforms"
     depends:
+      # Core (enabled by default)
       - ark-autopilot-manager
       - ark-connection-manager
       - ark-service-manager
       - ark-system-manager
       - ark-mavlink-router
-      - ark-logloader
-      - ark-ui
       - ark-hotspot-updater
+      - ark-ui
+      # Optional (installed disabled)
+      - ark-logloader
+      - ark-polaris
+      - ark-dds-agent
+      - ark-rtsp-server
+      - ark-flight-review
+
+  ark-companion-jetson:
+    description: "ARK-OS for Jetson"
+    depends:
+      - ark-companion-base
+      - ark-rid-transmitter
+      - ark-jetson-can
+
+  ark-companion-pi:
+    description: "ARK-OS for Raspberry Pi"
+    depends:
+      - ark-companion-base
+
+  ark-companion-ubuntu:
+    description: "ARK-OS for Ubuntu desktop (dev)"
+    depends:
+      - ark-companion-base

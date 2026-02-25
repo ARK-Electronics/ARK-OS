@@ -175,3 +175,13 @@ None — this is a foundational fix.
 Medium. ~15 files across 6 repos (main + 4 C++ submodules + flight-review wrapper).
 The C++ changes are mechanical. The service_manager.py changes require care to maintain
 backward compatibility during transition. Estimate 2-3 focused sessions.
+
+## Completion Notes
+
+- **Date**: 2026-02-24
+- **Session ID**: fc9f2ca7-2003-48fe-b4f3-9213def9ca93
+- **Transcript**: ~/.claude/projects/-home-jake-code-ark-ARK-OS/fc9f2ca7-2003-48fe-b4f3-9213def9ca93.jsonl
+- **Planning session**: a0399aa8-6f9f-4357-8e39-c814c7e82711.jsonl
+- **Summary**: Completed full path migration from `~/.local/` to `/opt/ark/`. Updated all 4 C++ submodules (logloader, polaris, rid-transmitter, rtsp-server) with two-tier config lookup. Fixed Python services (service_manager.py, autopilot_manager.py) and shell scripts (flash_firmware.sh, start_flight_review.sh). Added config.toml, manifest.json, and helper scripts to deb packages via packages.yaml + generate.py auto-include. Deleted 4 legacy install.sh files from submodules. Updated submodule READMEs.
+- **Deviations**: Used inline two-tier config lookup in each main.cpp rather than a shared header, since the 4 submodules are separate repos and a shared header would need to be duplicated anyway. The `reset_fmu_*.py` scripts are not included in the autopilot-manager deb (platform-specific GPIO dependencies — noted in the plan as future work).
+- **Follow-up**: Submodule changes need to be committed and pushed in their respective repos (logloader, polaris-client-mavlink, RemoteIDTransmitter, rtsp-server). The main repo needs the submodule pointers updated after those pushes.

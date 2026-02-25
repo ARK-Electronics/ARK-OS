@@ -75,7 +75,7 @@ These are bugs or security issues in the current codebase.
 
 | Plan | Description | Dependencies |
 |------|-------------|--------------|
-| [P0-path-migration-cleanup.md](P0-path-migration-cleanup.md) | Complete `~/.local/` → `/opt/ark/` path migration | None |
+| ~~P0-path-migration-cleanup~~ | ~~Complete `~/.local/` → `/opt/ark/` path migration~~ | **Done** ([completed/2026-02-24-P0-path-migration-cleanup.md](completed/2026-02-24-P0-path-migration-cleanup.md)) |
 | [P0-security-hardening.md](P0-security-hardening.md) | Fix command injection, add input validation | None |
 
 ### P1 — High (next quarter)
@@ -86,7 +86,7 @@ Important improvements that add significant value.
 |------|-------------|--------------|
 | [P1-apt-repository.md](P1-apt-repository.md) | Hosted APT repo for OTA updates | None |
 | [P1-testing-framework.md](P1-testing-framework.md) | Unit/integration testing strategy | P0-security (tests validate fixes) |
-| [P1-flask-to-fastapi.md](P1-flask-to-fastapi.md) | Migrate Python services to FastAPI | P0-path-migration, P0-security |
+| [P1-flask-to-fastapi.md](P1-flask-to-fastapi.md) | Migrate Python services to FastAPI | ~~P0-path-migration~~, P0-security |
 
 ### P2 — Medium (this half)
 

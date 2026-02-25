@@ -74,22 +74,6 @@ is_platform_supported() {
     return 1
 }
 
-is_service_enabled() {
-    local manifest_file="$1"
-    local env_var
-    env_var=$(read_json_value "$manifest_file" "env_var" "")
-
-    if [ -z "$env_var" ]; then
-        return 0
-    fi
-
-    if [ "${!env_var:-}" = "y" ]; then
-        return 0
-    fi
-
-    return 1
-}
-
 # Look up a service's type from packages.yaml
 get_service_type() {
     local name="$1"
@@ -139,11 +123,6 @@ install_service() {
         return 0
     fi
 
-    if ! is_service_enabled "$manifest_file"; then
-        echo "Service $name is disabled in configuration, skipping."
-        return 0
-    fi
-
     local svc_type
     svc_type=$(get_service_type "$name")
 
@@ -166,6 +145,19 @@ install_service() {
 
     echo "Installing $deb_file..."
     sudo dpkg -i "$deb_file"
+
+    # Dev workflow: always enable+start the service after install, even if
+    # the deb postinst doesn't (default_enabled: false services).
+    local requires_sudo
+    requires_sudo=$(read_json_value "$manifest_file" "requires_sudo" "false")
+    if [ "$requires_sudo" = "true" ]; then
+        sudo systemctl enable "$name.service"
+        sudo systemctl restart "$name.service"
+    else
+        systemctl --user enable "$name.service"
+        systemctl --user restart "$name.service"
+    fi
+
     echo "$name installed successfully."
 }
 

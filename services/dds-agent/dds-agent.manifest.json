@@ -5,8 +5,5 @@
   "platform": ["jetson", "pi", "ubuntu"],
   "configFile": "",
   "visible": true,
-  "requires_sudo": false,
-  "env_var": "INSTALL_DDS_AGENT",
-  "install_script": "",
-  "install_files": []
+  "requires_sudo": false
 }

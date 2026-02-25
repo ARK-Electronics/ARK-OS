@@ -5,8 +5,5 @@
   "platform": ["jetson", "pi", "ubuntu"],
   "configFile": "config.toml",
   "visible": true,
-  "requires_sudo": false,
-  "env_var": "INSTALL_LOGLOADER",
-  "install_script": "",
-  "install_files": []
+  "requires_sudo": false
 }
