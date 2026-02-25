@@ -1,0 +1,8 @@
+Origin: ARK Electronics
+Label: ARK-OS
+Suite: stable
+Codename: stable
+Architectures: arm64
+Components: main
+Description: ARK-OS companion computer packages
+SignWith: default
