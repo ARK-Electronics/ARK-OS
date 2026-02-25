@@ -2265,7 +2265,7 @@ export default {
   width: 16px;
   left: 4px;
   bottom: 4px;
-  background-color: white;
+  background-color: var(--ark-color-black-bold);
   transition: .4s;
   border-radius: 50%;
 }
