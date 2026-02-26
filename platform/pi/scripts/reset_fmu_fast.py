@@ -21,31 +21,67 @@
 
 import RPi.GPIO as GPIO
 import time
+import subprocess
+import sys
 
 # Pin Definitions
 reset_pin = 25
 vbus_det_pin = 27
 
 def main():
-    # Pin Setup:
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
-    GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
-    GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
+    try:
+        # Pin Setup:
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
+        # set pin as an output pin with optional initial state of HIGH
+        GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
+        GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    # Disable vbus detect for a faster reset
-    GPIO.output(vbus_det_pin, GPIO.LOW)
+        # Disable vbus detect for a faster reset
+        GPIO.output(vbus_det_pin, GPIO.LOW)
 
-    print("Resetting Flight Controller!")
+        print("Resetting Flight Controller!")
 
-    GPIO.output(reset_pin, GPIO.HIGH)
-    time.sleep(0.1)
-    GPIO.output(reset_pin, GPIO.LOW)
+        GPIO.output(reset_pin, GPIO.HIGH)
+        time.sleep(0.1)
+        GPIO.output(reset_pin, GPIO.LOW)
 
-    # Do not enable VBUS, skips bootloader
-    time.sleep(1)
-    GPIO.output(vbus_det_pin, GPIO.HIGH)
+        # Do not enable VBUS, skips bootloader
+        time.sleep(1)
+        GPIO.output(vbus_det_pin, GPIO.HIGH)
+
+    except RuntimeError as e:
+        if "Cannot determine SOC peripheral base address" in str(e):
+            print("RPi.GPIO failed (likely Pi 5). Trying pinctrl...")
+            try:
+                # Fallback to pinctrl for Pi 5
+                # Set pins to Output High (dh) initially
+                subprocess.run(["pinctrl", "set", str(reset_pin), "op", "dh"], check=True)
+                subprocess.run(["pinctrl", "set", str(vbus_det_pin), "op", "dh"], check=True)
+
+                # Disable vbus detect for a faster reset
+                subprocess.run(["pinctrl", "set", str(vbus_det_pin), "op", "dl"], check=True)
+
+                print("Resetting Flight Controller!")
+
+                # Reset High
+                subprocess.run(["pinctrl", "set", str(reset_pin), "op", "dh"], check=True)
+                time.sleep(0.1)
+                # Reset Low
+                subprocess.run(["pinctrl", "set", str(reset_pin), "op", "dl"], check=True)
+
+                # Do not enable VBUS, skips bootloader
+                time.sleep(1)
+                subprocess.run(["pinctrl", "set", str(vbus_det_pin), "op", "dh"], check=True)
+
+            except FileNotFoundError:
+                print("Error: pinctrl not found. Cannot control GPIOs.")
+                sys.exit(1)
+            except subprocess.CalledProcessError as e2:
+                print(f"Error running pinctrl: {e2}")
+                sys.exit(1)
+        else:
+            raise e
 
 if __name__ == '__main__':
     main()

@@ -21,20 +21,43 @@
 
 import RPi.GPIO as GPIO
 import time
+import subprocess
+import sys
 
 # Pin Definitions
 vbus_det_pin = 27
 
 def main():
-    # Pin Setup:
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
-    GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
+    try:
+        # Pin Setup:
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
+        # set pin as an output pin with optional initial state of HIGH
+        GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    value = GPIO.HIGH
-    print("Outputting {} to pin {}".format(value, vbus_det_pin))
-    GPIO.output(vbus_det_pin, value)
+        value = GPIO.HIGH
+        print("Outputting {} to pin {}".format(value, vbus_det_pin))
+        GPIO.output(vbus_det_pin, value)
+    except RuntimeError as e:
+        if "Cannot determine SOC peripheral base address" in str(e):
+            print("RPi.GPIO failed (likely Pi 5). Trying pinctrl...")
+            try:
+                # Fallback to pinctrl for Pi 5
+                # Set pin to Output High (dh) initially
+                subprocess.run(["pinctrl", "set", str(vbus_det_pin), "op", "dh"], check=True)
+
+                value = 1 # HIGH
+                print("Outputting {} to pin {}".format(value, vbus_det_pin))
+                # Ensure it is high
+                subprocess.run(["pinctrl", "set", str(vbus_det_pin), "op", "dh"], check=True)
+            except FileNotFoundError:
+                print("Error: pinctrl not found. Cannot control GPIOs.")
+                sys.exit(1)
+            except subprocess.CalledProcessError as e2:
+                print(f"Error running pinctrl: {e2}")
+                sys.exit(1)
+        else:
+            raise e
 
 if __name__ == '__main__':
     main()
