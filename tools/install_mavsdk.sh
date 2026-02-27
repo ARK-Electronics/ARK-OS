@@ -1,4 +1,7 @@
 #!/bin/bash
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/functions.sh"
+
 function git_clone_retry() {
 	local url="$1" dir="$2" branch="$3" retries=3 delay=5
 
@@ -62,12 +65,8 @@ if [ "$success" = true ]; then
 	echo "Downloading completed successfully."
 	echo "Installing $file_name"
 
-	for attempt in {1..5}; do
-		sudo dpkg -i "$file_name" && break || sleep 5
-	done
-
-	if [ $attempt -eq 5 ]; then
-		echo "Failed to install $file_name after 5 attempts."
+	if ! apt_get_install install -y --allow-downgrades "./$file_name"; then
+		echo "Failed to install $file_name"
 		exit 1
 	fi
 

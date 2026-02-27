@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # Determine PROJECT_ROOT as one level up from this script's location
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+# Use _FUNCTIONS_DIR to avoid clobbering the caller's SCRIPT_DIR variable
+_FUNCTIONS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "$_FUNCTIONS_DIR/.." &> /dev/null && pwd )"
+unset _FUNCTIONS_DIR
 
 # Export the PROJECT_ROOT variable so it's available to scripts that source this file
 export PROJECT_ROOT
