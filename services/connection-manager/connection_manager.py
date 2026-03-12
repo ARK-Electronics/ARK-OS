@@ -52,7 +52,12 @@ class State:
     interface_stats = {}  # Store the latest stats for each interface
     last_stats_update = 0
     last_stats_report = 0
-    stats_lock = threading.Lock()  # Thread safety for stats access
+
+    # Use a re-entrant lock so that the same StatsThread may
+    # re-acquire the same lock in get_interface_usage_summary() **and**
+    # method update_interface_stats() that it calls if no interface stats available
+    # on first go-round
+    stats_lock = threading.RLock()  # Thread safety for stats access
 
     # Websocket clients for real-time updates
     active_stats_clients = set()
