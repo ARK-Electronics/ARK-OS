@@ -487,6 +487,7 @@ class LteManager:
             "simOperatorName": "",
             "simOperatorId": "",
             "simImsi": "",
+            "simIccid": "",
 
             # Bearer/APN information
             "initialApn": "",
@@ -596,6 +597,8 @@ class LteManager:
                             status["simOperatorId"] = line.split('operator id:')[1].strip()
                         elif 'imsi:' in line:
                             status["simImsi"] = line.split('imsi:')[1].strip()
+                        elif 'iccid:' in line:
+                            status["simIccid"] = line.split('iccid:')[1].strip()
                         elif 'active:' in line:
                             status["simActive"] = line.split('active:')[1].strip()
 

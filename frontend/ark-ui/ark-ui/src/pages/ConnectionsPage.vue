@@ -590,6 +590,11 @@
                   <span class="info-label">SIM IMSI:</span>
                   <span class="info-value monospace">{{ lteStatus.simImsi }}</span>
                 </div>
+
+                <div class="info-item" v-if="lteStatus.simIccid">
+                  <span class="info-label">SIM ICCID:</span>
+                  <span class="info-value monospace">{{ lteStatus.simIccid }}</span>
+                </div>
               </div>
             </div>
 
