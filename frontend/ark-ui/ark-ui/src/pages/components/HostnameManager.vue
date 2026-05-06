@@ -229,7 +229,7 @@ export default {
 }
 
 .hostname-card {
-  background: white;
+  background: var(--ark-color-white);
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -364,7 +364,7 @@ export default {
 }
 
 .modal-dialog {
-  background: white;
+  background: var(--ark-color-white);
   border-radius: 12px;
   width: 90%;
   max-width: 500px;
