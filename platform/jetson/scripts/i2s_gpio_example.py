@@ -1,49 +1,34 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-# Script to demonstrate I2S GPIO functionality on ARK Jetson Carrier
-# Uses I2S0_DOUT as output and I2S0_DIN as input
-# Requires physical connection between pin 40 (DOUT) and pin 38 (DIN)
-# Note: Jetson.GPIO does not support controlling pull-up/down resistors
+# I2S GPIO loopback demo for ARK Jetson Carriers.
+#
+# Toggles HDR40 pin 40 (I2S0_DOUT) HIGH/LOW/HIGH/LOW and reads each
+# transition back on pin 38 (I2S0_DIN). Connect pin 40 to pin 38 with
+# a jumper wire before running.
+#
+# Requires the ARK I2S to GPIO overlay:
+#   sudo /opt/nvidia/jetson-io/config-by-hardware.py -n "ARK I2S to GPIO"
+#   sudo reboot
+#
+# Requires Jetson.GPIO >= 2.1.12 (the apt-shipped version doesn't
+# recognize the Orin Nano Super and fails with "Could not determine
+# Jetson model"). ARK-OS installs this for you; standalone users:
+#   sudo pip3 install 'Jetson.GPIO>=2.1.12'
 
-import Jetson.GPIO as GPIO
 import time
+import Jetson.GPIO as GPIO
 
-output_pin = 40  # I2S0_DOUT - Header pin 40
-input_pin = 38   # I2S0_DIN - Header pin 38
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(40, GPIO.OUT, initial=GPIO.LOW)  # I2S0_DOUT
+GPIO.setup(38, GPIO.IN)                     # I2S0_DIN
 
-def main():
-    GPIO.setmode(GPIO.BOARD)  # Jetson board numbering scheme
-    GPIO.setup(output_pin, GPIO.OUT, initial=GPIO.HIGH)
-    GPIO.setup(input_pin, GPIO.IN)
-
-    print("Starting I2S GPIO test. Press CTRL+C to exit")
-    print("Make sure pins 40 (DOUT) and 38 (DIN) are connected together")
-
-    curr_output_value = GPIO.HIGH
-
-    try:
-        while True:
-            GPIO.output(output_pin, curr_output_value)
-            print(f"Output pin {output_pin} set to: {curr_output_value}")
-
-            input_value = GPIO.input(input_pin)
-            print(f"Input pin {input_pin} read as: {input_value}")
-
-            if input_value == curr_output_value:
-                print("SUCCESS: Input matches output")
-            else:
-                print("FAILURE: Input doesn't match output")
-
-            curr_output_value = GPIO.LOW if curr_output_value == GPIO.HIGH else GPIO.HIGH
-
-            time.sleep(1)
-            print("--------------------------")
-
-    except KeyboardInterrupt:
-        print("\nExiting program")
-    finally:
-        GPIO.cleanup()
-        print("GPIO pins cleaned up")
-
-if __name__ == '__main__':
-    main()
+try:
+    for level in (GPIO.HIGH, GPIO.LOW, GPIO.HIGH, GPIO.LOW):
+        GPIO.output(40, level)
+        time.sleep(0.2)
+        got = GPIO.input(38)
+        label = "HIGH" if level else "LOW"
+        result = "PASS" if got == level else f"FAIL (read {got})"
+        print(f"DOUT=40 {label}  DIN=38 {got}  {result}")
+finally:
+    GPIO.cleanup()
