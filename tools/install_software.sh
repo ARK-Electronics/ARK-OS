@@ -269,7 +269,7 @@ if [ "$TARGET" = "jetson" ]; then
 	apt_get_install install libqmi-utils -y
 
 	sudo pip3 install \
-		'Jetson.GPIO>=2.1.9' \
+		'Jetson.GPIO>=2.1.12' \
 		smbus2 \
 		meson \
 		pyserial \
