@@ -1,0 +1,8 @@
+Package: ark-os-jetson
+Version: 0.0.0
+Section: embedded
+Priority: optional
+Architecture: arm64
+Maintainer: ARK Electronics <info@arkelectron.com>
+Description: ARK-OS for Jetson — companion computer platform for autonomous vehicles
+ Pre-compiled services, web UI, and system configuration for ARK Jetson Carrier boards.
