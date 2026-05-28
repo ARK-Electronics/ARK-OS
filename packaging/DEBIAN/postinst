@@ -1,0 +1,231 @@
+#!/bin/bash
+# ARK-OS post-install. Runs on a running device (apt/dpkg) and inside the
+# ark_jetson_kernel chroot during image provisioning. Runtime-only operations
+# are gated on [ -d /run/systemd/system ], which is false in the chroot
+# (ark_jetson_kernel bind-mounts /dev but not /run, and installs no policy-rc.d).
+#
+# ARK_USER / PLATFORM are substituted at build time by assemble_tree.sh — there
+# is no runtime platform detection (/proc/device-tree/model reflects the build
+# host in a chroot, not the target).
+set -e
+
+ARK_USER="@ARK_USER@"
+PLATFORM="@PLATFORM@"
+
+case "$1" in
+configure)
+    ;;
+abort-upgrade|abort-remove|abort-deconfigure)
+    exit 0
+    ;;
+*)
+    exit 0
+    ;;
+esac
+
+ARK_HOME=$(getent passwd "$ARK_USER" | cut -d: -f6)
+UID_VAL=$(id -u "$ARK_USER" 2>/dev/null || true)
+MIGRATED=0
+
+# ===========================================================================
+# Step 0: Legacy cleanup — remove remnants of any pre-deb (source) install.
+# Idempotent; on a clean chroot / first install every operation is a no-op.
+# File deletions run unconditionally (rm -f is a no-op on missing targets);
+# systemctl operations are gated on a running system.
+# ===========================================================================
+
+if [ -n "$ARK_HOME" ]; then
+    # (a) Back up legacy configs once (so a re-install doesn't clobber the backup).
+    LEGACY_BACKUP="$ARK_HOME/.config/ark-os-legacy-backup"
+    if [ -d "$ARK_HOME/.local/share/mavlink-router" ] && [ ! -d "$LEGACY_BACKUP" ]; then
+        mkdir -p "$LEGACY_BACKUP"
+        for d in mavlink-router logloader polaris rtsp-server rid-transmitter flight_review; do
+            [ -d "$ARK_HOME/.local/share/$d" ] && cp -r "$ARK_HOME/.local/share/$d" "$LEGACY_BACKUP/" 2>/dev/null || true
+        done
+        chown -R "$ARK_USER:$ARK_USER" "$LEGACY_BACKUP" 2>/dev/null || true
+        echo "Legacy configs backed up to $LEGACY_BACKUP — merge custom edits into /etc/ark-os/ if needed."
+        MIGRATED=1
+    fi
+
+    # (b) Stop and disable legacy user services (running system only).
+    if [ -d /run/systemd/system ] && [ -n "$UID_VAL" ] && [ -d "$ARK_HOME/.config/systemd/user" ]; then
+        LEGACY_USER_SERVICES="mavlink-router dds-agent logloader rtsp-server polaris rid-transmitter flight-review ark-ui-backend autopilot-manager connection-manager service-manager system-manager"
+        for svc in $LEGACY_USER_SERVICES; do
+            sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user stop "$svc.service" 2>/dev/null || true
+            sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user disable "$svc.service" 2>/dev/null || true
+        done
+    fi
+
+    # (c) Remove legacy user-service unit files.
+    rm -f "$ARK_HOME"/.config/systemd/user/{mavlink-router,dds-agent,logloader,rtsp-server,polaris,rid-transmitter,flight-review,ark-ui-backend,autopilot-manager,connection-manager,service-manager,system-manager}.service
+
+    # (d) Remove legacy binaries and scripts from ~/.local/bin.
+    rm -f "$ARK_HOME"/.local/bin/{mavlink-routerd,logloader,rtsp-server,polaris-client-mavlink,rid-transmitter}
+    rm -f "$ARK_HOME"/.local/bin/{start_mavlink_router.sh,start_dds_agent.sh,start_ark_ui_backend.sh,start_flight_review.sh}
+    rm -f "$ARK_HOME"/.local/bin/{autopilot_manager.py,connection_manager.py,service_manager.py,system_manager.py}
+    rm -f "$ARK_HOME"/.local/bin/{vbus_enable.py,vbus_disable.py,get_serial_number.py,reset_fmu_fast.py,reset_fmu_wait_bl.py}
+    rm -f "$ARK_HOME"/.local/bin/{flash_firmware.sh,mavlink_shell.py,px4_shell_command.py,px_uploader.py,mavlink_ftp_upload.sh}
+    rm -f "$ARK_HOME"/.local/bin/{pcie_set_speed.sh,self_test.sh,set_mac.sh,create_hotspot_default.sh}
+    # example/diagnostic scripts the legacy installer copied wholesale (now in extras/, Task 10)
+    rm -f "$ARK_HOME"/.local/bin/{i2s_gpio_example.py,icm42688p_driver.py,ina238_test.py,test_jtop.py}
+
+    # (e) Remove legacy data dirs (configs were backed up in step a).
+    rm -rf "$ARK_HOME"/.local/share/{mavlink-router,logloader,polaris,rtsp-server,rid-transmitter,flight_review}
+
+    # (i) Remove NVM install (legacy install bootstrapped Node via nvm; we ship our own).
+    rm -rf "$ARK_HOME"/.config/nvm
+fi
+
+# (f) Remove legacy /usr/local/bin entries (replaced by /usr/lib/ark-os/{bin,scripts}/).
+rm -f /usr/local/bin/{MicroXRCEAgent,update_hotspot_default.sh,start_can_interface.sh,stop_can_interface.sh}
+
+# (g) Remove legacy system unit files (relocated to /lib/systemd/system/ and renamed).
+rm -f /etc/systemd/system/{hotspot-updater,jetson-can}.service
+
+# (h) Remove legacy sudoers/polkit/udev files (replaced by ark-os.* / ark-* prefixed versions).
+rm -f /etc/sudoers.d/ark_scripts
+rm -f /etc/polkit-1/rules.d/02-network-manager.rules
+rm -f /etc/polkit-1/localauthority/90-mandatory.d/99-network.pkla
+rm -f /etc/udev/rules.d/99-gpio.rules
+
+# (j) Remove legacy backend deploy path (moves to /usr/lib/ark-os/ark-ui-backend/).
+rm -rf /var/www/ark-ui/api
+
+# (k) Reload daemons to drop unloaded units (runtime only).
+if [ -d /run/systemd/system ]; then
+    [ -n "$UID_VAL" ] && sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user daemon-reload 2>/dev/null || true
+    systemctl daemon-reload || true
+fi
+
+# ===========================================================================
+# Step 1: Groups. Ensure the standard groups exist so the usermod can't fail
+# on a minimal rootfs, then add the service user to them.
+# ===========================================================================
+groupadd -f -r gpio
+for grp in dialout i2c netdev; do groupadd -f -r "$grp" 2>/dev/null || true; done
+usermod -a -G dialout,gpio,i2c,netdev "$ARK_USER"
+
+# ===========================================================================
+# Step 2: Runtime data dirs owned by the service user.
+# ===========================================================================
+mkdir -p /var/lib/ark-os/logs /var/lib/ark-os/flight-review/data
+chown -R "$ARK_USER:$ARK_USER" /var/lib/ark-os
+
+# ===========================================================================
+# Step 3: Make /etc/ark-os group-writable by the service user so the web UI
+# (service-manager, running as $ARK_USER) can rewrite configs. Setgid on the
+# dir makes new files inherit the group. Re-applied on every install/upgrade
+# because the configs are plain package files, not conffiles.
+# ===========================================================================
+chgrp -R "$ARK_USER" /etc/ark-os
+chmod 2775 /etc/ark-os
+chmod 0664 /etc/ark-os/* 2>/dev/null || true
+
+# ===========================================================================
+# Step 4: Point flight-review at the shipped ini. serve.py takes no config
+# flag; plot_app/config.py reads config_user.ini relative to the app tree.
+# ===========================================================================
+ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_user.ini
+
+# ===========================================================================
+# Step 5/6: Enable always-on services (and the group target). Opt-in services
+# (dds-agent, logloader, polaris, flight-review, rid-transmitter) are installed
+# but deliberately NOT enabled — the operator turns them on via the web UI.
+# systemctl enable is a static symlink operation that works offline in a chroot.
+# ===========================================================================
+ENABLE_SERVICES="mavlink-router rtsp-server ark-ui-backend autopilot-manager connection-manager service-manager system-manager hotspot-updater"
+if [ "$PLATFORM" = "jetson" ]; then
+    ENABLE_SERVICES="$ENABLE_SERVICES jetson-can"
+fi
+
+systemctl enable ark-os.target 2>/dev/null || true
+for svc in $ENABLE_SERVICES; do
+    systemctl enable "$svc.service" 2>/dev/null || true
+done
+# Jetsons typically have no RTC; gate time-dependent services on NTP convergence.
+systemctl enable systemd-time-wait-sync.service 2>/dev/null || true
+
+# ===========================================================================
+# Step 7: Jetson — disable nvgetty (NVIDIA serial console holds /dev/ttyTHS*,
+# blocking mavlink-router and dds-agent from opening the UART).
+# ===========================================================================
+if [ "$PLATFORM" = "jetson" ]; then
+    systemctl disable nvgetty.service 2>/dev/null || true
+fi
+
+# ===========================================================================
+# Step 8: rid-transmitter needs raw/admin net caps for Bluetooth LE advertising.
+# Binary present only on Jetson; || true also covers non-xattr filesystems.
+# ===========================================================================
+setcap 'cap_net_raw,cap_net_admin+eip' /usr/lib/ark-os/bin/rid-transmitter 2>/dev/null || true
+
+# ===========================================================================
+# Step 9: Persistent journal directory. Storage=persistent ships as a drop-in
+# (10-ark-os.conf), so postinst only creates the directory.
+# ===========================================================================
+mkdir -p /var/log/journal
+chown root:systemd-journal /var/log/journal 2>/dev/null || true
+chmod 2755 /var/log/journal
+
+# ===========================================================================
+# Step 10: nginx site.
+# ===========================================================================
+ln -sf /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui
+rm -f /etc/nginx/sites-enabled/default
+
+# ===========================================================================
+# Step 7 (cont.): web UI static files served by nginx (www-data), backend read
+# by node running as the service user.
+# ===========================================================================
+chown -R www-data:www-data /var/www/ark-ui/html 2>/dev/null || true
+chown -R "$ARK_USER:$ARK_USER" /usr/lib/ark-os/ark-ui-backend 2>/dev/null || true
+
+# ===========================================================================
+# Step 11: Runtime-only block — skipped in the chroot (no /run/systemd/system).
+# ===========================================================================
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+
+    if [ "$PLATFORM" = "jetson" ]; then
+        systemctl stop nvgetty.service 2>/dev/null || true
+    fi
+
+    if [ "$PLATFORM" = "pi" ]; then
+        # Stock Raspberry Pi OS can ship with the Wi-Fi radio soft-blocked.
+        nmcli radio wifi on 2>/dev/null || true
+    fi
+
+    systemctl start ark-os.target 2>/dev/null || true
+
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx 2>/dev/null || true
+    fi
+
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger 2>/dev/null || true
+
+    # Create the default hotspot if none exists (the script self-guards).
+    [ -x /usr/lib/ark-os/scripts/create_hotspot_default.sh ] && \
+        /usr/lib/ark-os/scripts/create_hotspot_default.sh 2>/dev/null || true
+
+    # Initialise the flight-review database once.
+    if [ ! -f /var/lib/ark-os/flight-review/data/logs.sqlite ]; then
+        ( cd /usr/lib/ark-os/flight-review/app && \
+          sudo -u "$ARK_USER" /usr/lib/ark-os/venv/bin/python3 setup_db.py ) 2>/dev/null || true
+    fi
+fi
+
+# ===========================================================================
+# Migration notice: if we detected and backed up a legacy source install on a
+# running device, stale `systemctl --user` units may still hold ports until the
+# user session ends. The unit files are gone, so a reboot fully clears them.
+# ===========================================================================
+if [ "$MIGRATED" = "1" ] && [ -d /run/systemd/system ]; then
+    echo "============================================================"
+    echo " ARK-OS migrated from a legacy source install."
+    echo " REBOOT NOW so no stale user-session services keep holding"
+    echo " the autopilot UART / MAVLink UDP ports."
+    echo "============================================================"
+fi
+
+exit 0
