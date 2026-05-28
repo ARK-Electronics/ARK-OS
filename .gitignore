@@ -3,3 +3,8 @@ polaris.key
 output.txt
 user.env
 CLAUDE.md
+
+# Packaging build outputs
+/build/
+*.deb
+node-v*-linux-arm64.tar.*
