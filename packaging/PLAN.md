@@ -8,7 +8,7 @@ ARK-OS is installed by cloning the repo on-device and running `install.sh`, whic
 
 ## Solution
 
-Pre-build everything in CI (ARM64 GitHub runners on Ubuntu 22.04 Jammy to match the JetPack 6 rootfs Python 3.10) and ship `.deb` packages. System-level systemd units with `User=jetson` replace user-session services for chroot compatibility. Configs move to `/etc/ark-os/` as dpkg conffiles. The package installs cleanly via `dpkg -i` in a chroot during `ark_jetson_kernel --provision` builds, and devices boot fully provisioned after flashing. Field updates via `sudo apt upgrade`.
+Pre-build everything in CI (ARM64 GitHub runners on Ubuntu 22.04 Jammy to match the JetPack 6 rootfs Python 3.10) and ship `.deb` packages. System-level systemd units with `User=jetson` replace user-session services for chroot compatibility. Configs move to `/etc/ark-os/` as dpkg conffiles. The package installs cleanly via `dpkg -i` in a chroot during `ark_jetson_kernel --provision` builds, and devices boot fully provisioned after flashing. Field updates: download the new `.deb` from the GitHub release and `sudo apt install ./ark-os-jetson_<ver>_arm64.deb` — there's no apt repo to subscribe to.
 
 ---
 
@@ -21,6 +21,8 @@ This plan is structured as ordered tasks for implementation. The `.deb` is the *
 Service unit files and manifests retain their current names — **no `ark-` prefix**. Example: `mavlink-router.service`, `mavlink-router.manifest.json`. Only the package itself is `ark-os-jetson` / `ark-os-pi`.
 
 ## Codebase context
+
+The tables and bullets in this section describe **pre-PR state** — the legacy install.sh world that Task 10 dismantles. Use them to understand what's being replaced; they're not the post-merge spec.
 
 ### Repository structure
 
@@ -115,7 +117,7 @@ Description: ARK-OS companion computer platform
  Pre-compiled services, web UI, and system configuration for autonomous vehicles.
 ```
 
-Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, mavsdk`. Pi adds: `gstreamer1.0-libcamera, mavsdk`.
+Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, libqmi-utils, mavsdk` (`libqmi-utils` is needed for ARK LTE firmware updates). Pi adds: `gstreamer1.0-libcamera, python3-rpi.gpio, mavsdk` (RPi.GPIO is shipped as an apt package on Pi rather than via the venv since it has C bindings against Raspberry Pi-specific kernel interfaces).
 
 MAVSDK has no public apt repo, so the upstream MAVSDK arm64 `.deb` is bundled alongside `ark-os-*.deb` on the same GitHub release. `Depends: mavsdk` gives correctness validation (`dpkg -i` fails loudly if missing) but doesn't auto-install — installer order matters. Pin a specific MAVSDK release (check `github.com/mavlink/MAVSDK/releases` for the current `v3.x.x`) in `packaging/build.sh` and update on each ARK-OS bump.
 
@@ -132,6 +134,7 @@ List every config file under `/etc/ark-os/` — dpkg preserves user edits on upg
 /etc/ark-os/rid-transmitter.toml
 /etc/ark-os/flight-review.ini
 /etc/nginx/sites-available/ark-ui
+/etc/systemd/journald.conf.d/10-ark-os.conf
 ```
 
 ### `packaging/DEBIAN/postinst`
@@ -214,16 +217,18 @@ The `[ -d /run/systemd/system ]` guard means the systemctl operations are skippe
 2. Create runtime dirs: `/var/lib/ark-os/logs`, `/var/lib/ark-os/flight-review/data` owned by `$ARK_USER`
 3. Make `/etc/ark-os/` writable by the service user: `chgrp -R $ARK_USER /etc/ark-os && chmod 2775 /etc/ark-os && chmod 0664 /etc/ark-os/*` — setgid bit on the directory means new files inherit the group. Files stay root-owned but group-writable so `service-manager.py` (running as `$ARK_USER`) can rewrite configs from the web UI. Conffile mechanics in dpkg track files by name/hash, not ownership, so this survives upgrades.
 4. Symlink flight-review config into the app tree: `ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_user.ini` — `serve.py` takes no config-file flag, `plot_app/config.py` reads `config_user.ini` from a hardcoded path relative to the script.
-5. `systemctl enable` always-on services: `mavlink-router`, `rtsp-server`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only).
+5. `systemctl enable` always-on services: `mavlink-router`, `rtsp-server`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only), `systemd-time-wait-sync.service` (so time-dependent services don't fire before NTP converges — Jetsons typically have no RTC).
 6. Opt-in services are installed but **not** enabled: `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`. Operator turns them on via the web UI or `systemctl enable --now <svc>`. There is no `[services]` section in `ark-os.conf` — systemd's enabled-state is the source of truth, so there's no parallel config to drift.
-7. `setcap 'cap_net_raw,cap_net_admin+eip' /usr/lib/ark-os/bin/rid-transmitter 2>/dev/null || true` (file present only on Jetson; `|| true` covers non-xattr filesystems)
-8. Drop `/etc/systemd/journald.conf.d/10-ark-os.conf` containing `[Journal]\nStorage=persistent`; `mkdir -p /var/log/journal && chown root:systemd-journal /var/log/journal && chmod 2755 /var/log/journal`
-9. Nginx: `ln -sf /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui` and `rm -f /etc/nginx/sites-enabled/default`
-10. **Runtime-only block** (inside `if [ -d /run/systemd/system ]`):
+7. On Jetson, `systemctl disable nvgetty.service 2>/dev/null || true` (the NVIDIA serial-console daemon holds `/dev/ttyTHS*`, blocking mavlink-router and dds-agent from opening the UART). The corresponding stop runs inside the runtime block (step 11).
+8. `setcap 'cap_net_raw,cap_net_admin+eip' /usr/lib/ark-os/bin/rid-transmitter 2>/dev/null || true` (file present only on Jetson; `|| true` covers non-xattr filesystems).
+9. Journal directory: `mkdir -p /var/log/journal && chown root:systemd-journal /var/log/journal && chmod 2755 /var/log/journal`. The `[Journal] Storage=persistent` setting is shipped as a packaged conffile (`/etc/systemd/journald.conf.d/10-ark-os.conf`, see Task 7), so postinst doesn't write it.
+10. Nginx: `ln -sf /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui` and `rm -f /etc/nginx/sites-enabled/default`.
+11. **Runtime-only block** (inside `if [ -d /run/systemd/system ]`):
     - `systemctl daemon-reload`
+    - `systemctl stop nvgetty.service 2>/dev/null || true` (Jetson only — paired with the disable in step 7)
     - `systemctl start ark-os.target` — starts all enabled units in the target (see Task 2)
     - `nginx -t && systemctl reload nginx`
-    - `udevadm control --reload-rules && udevadm trigger` (skipped in chroot via the outer guard)
+    - `udevadm control --reload-rules && udevadm trigger`
     - run `create_hotspot_default.sh` if hotspot NM connection missing
     - init flight-review DB: `[ -f /var/lib/ark-os/flight-review/data/logs.sqlite ] || (cd /usr/lib/ark-os/flight-review/app && sudo -u $ARK_USER /usr/lib/ark-os/venv/bin/python3 setup_db.py)`
 
@@ -370,7 +375,7 @@ The polkit rule (Task 5) still needs an explicit list — polkit can't shell out
 
 ## Task 3: Modified start scripts for FHS paths
 
-Create `packaging/scripts/` with modified versions of each start script. These replace `$XDG_DATA_HOME`, `$HOME/.local/bin`, and `$HOME/.config/nvm` references with FHS paths.
+Edit the start scripts **in place** at `services/<svc>/start_<svc>.sh` and `platform/<plat>/scripts/` to use FHS paths. The legacy install is gone (Task 10), so there's no need for two copies — `assemble_tree.sh` copies these into the deb tree at build time.
 
 ### Path mapping (old → new)
 
@@ -385,43 +390,44 @@ Create `packaging/scripts/` with modified versions of each start script. These r
 | `~/.config/nvm/` | not used — system Node.js binary bundled |
 | `python3` | `/usr/lib/ark-os/venv/bin/python3` |
 
-### Scripts to create
+### Files to edit in place
 
-**`start_mavlink_router.sh`** — Based on `services/mavlink-router/start_mavlink_router.sh`. Changes:
-- Config: `/etc/ark-os/mavlink-router.conf`
-- Binary: `/usr/lib/ark-os/bin/mavlink-routerd`
-- vbus_enable: `/usr/lib/ark-os/scripts/vbus_enable.py` (called via `/usr/lib/ark-os/venv/bin/python3`)
+**`services/mavlink-router/start_mavlink_router.sh`**:
+- Config var → `/etc/ark-os/mavlink-router.conf`
+- Binary → `/usr/lib/ark-os/bin/mavlink-routerd`
+- vbus_enable → `/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/scripts/vbus_enable.py`
 
-**`start_dds_agent.sh`** — Based on `services/dds-agent/start_dds_agent.sh`. Changes:
-- Binary: `/usr/lib/ark-os/bin/MicroXRCEAgent`
-- Platform detection logic stays the same (reads kernel info)
+**`services/dds-agent/start_dds_agent.sh`**:
+- `MicroXRCEAgent` invocation → `/usr/lib/ark-os/bin/MicroXRCEAgent`
+- Platform detection logic stays unchanged (reads kernel info)
 
-**`start_flight_review.sh`** — Based on `services/flight-review/start_flight_review.sh`. Changes:
-- Python: `/usr/lib/ark-os/venv/bin/python3`
-- App path: `/usr/lib/ark-os/flight-review/app/serve.py`
-- Config: `/etc/ark-os/flight-review.ini`
+**`services/flight-review/start_flight_review.sh`**:
+- `python3` → `/usr/lib/ark-os/venv/bin/python3`
+- App path → `/usr/lib/ark-os/flight-review/app/serve.py`
 
-**`start_can_interface.sh`** — Based on `services/jetson-can/start_can_interface.sh`. No path changes needed (uses system commands `modprobe`, `ip`).
+**`services/jetson-can/start_can_interface.sh`** and **`stop_can_interface.sh`**: no path changes (uses system `modprobe`, `ip`).
 
-**`stop_can_interface.sh`** — Based on `services/jetson-can/stop_can_interface.sh`. No path changes needed.
+**`services/hotspot-updater/update_hotspot_default.sh`**: no path changes (uses system `nmcli`, `hostname`).
 
-**`update_hotspot_default.sh`** — Based on `services/hotspot-updater/update_hotspot_default.sh`. No path changes needed (uses system commands `nmcli`, `hostname`).
+**`platform/common/scripts/create_hotspot_default.sh`**: no path changes.
 
-**`create_hotspot_default.sh`** — Based on `platform/common/scripts/create_hotspot_default.sh`. No path changes needed.
+There is no `start_ark_ui_backend.sh` — the ark-ui-backend service runs `node index.js` directly (see Task 2 unit file). Delete the existing `services/ark-ui-backend/start_ark_ui_backend.sh` as part of Task 10 since it sources NVM and is obsolete.
 
-Note: there is no separate `start_ark_ui_backend.sh` in the package. The ark-ui-backend service runs `node index.js` directly from `/usr/lib/ark-os/ark-ui-backend/` (see Task 2 unit file).
+### Platform utility scripts — edit in place
 
-**Platform utility scripts** — Copy from `platform/jetson/scripts/` and `platform/common/scripts/`:
+Under `platform/jetson/scripts/`, `platform/pi/scripts/`, and `platform/common/scripts/`:
+
 - `vbus_enable.py`, `vbus_disable.py`, `get_serial_number.py`, `reset_fmu_fast.py`, `reset_fmu_wait_bl.py`
 - `flash_firmware.sh`, `mavlink_shell.py`, `px4_shell_command.py`, `px_uploader.py`, `mavlink_ftp_upload.sh`
 - `pcie_set_speed.sh`, `self_test.sh`, `set_mac.sh` (Jetson only)
-- These go into `/usr/lib/ark-os/scripts/` with Python shebangs rewritten to `#!/usr/lib/ark-os/venv/bin/python3`
+
+For each Python file, rewrite the shebang to `#!/usr/lib/ark-os/venv/bin/python3` in place. `assemble_tree.sh` copies all of these into `/usr/lib/ark-os/scripts/` at build time.
 
 ---
 
 ## Task 4: Default config files
 
-Create `packaging/config/` with default configuration files that get installed to `/etc/ark-os/`.
+Create `packaging/config/` with default configuration files that get installed to `/etc/ark-os/`. The `mavlink-router.conf` source stays at its existing location `services/mavlink-router/main.conf` (edit in place if needed) — `assemble_tree.sh` copies it to `/etc/ark-os/mavlink-router.conf`. The rest live under `packaging/config/` because they're derived from submodule defaults (which we can't edit) and need an editable home in our tree.
 
 ### `ark-os.conf` — Master config
 
@@ -443,13 +449,13 @@ api_key =
 
 Service enable/disable is **not** in this file. Opt-in services (`dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`) are installed but disabled; operator turns them on via the web UI or `systemctl enable --now <svc>`. Using systemd state as the single source of truth means there's no parallel config knob for the UI to drift against.
 
-### `mavlink-router.conf`
+### `services/mavlink-router/main.conf` → `/etc/ark-os/mavlink-router.conf`
 
-Copy from `services/mavlink-router/main.conf` — this is the hub config with UART endpoint and UDP endpoints (ports 14550-14571). No path changes needed (it references `/dev/serial/by-id/` device paths).
+The hub config (UART endpoint + UDP endpoints, ports 14550-14571). Edit in place if you need to change defaults; no FHS-path rewrites are required since the file references `/dev/serial/by-id/` device paths.
 
-### `logloader.toml`, `polaris.toml`, `rtsp-server.toml`, `rid-transmitter.toml`
+### `packaging/config/{logloader,polaris,rtsp-server,rid-transmitter}.toml`
 
-Copy from each service's existing config file. No path changes needed — they contain connection URLs, API keys, and streaming parameters.
+Copy from each submodule's `config.toml` default (e.g., `services/logloader/logloader/config.toml`) into `packaging/config/<svc>.toml`. We can't edit the submodule files, so we maintain our own copy. No path changes inside the configs — they contain connection URLs, API keys, and streaming parameters only.
 
 ### `flight-review.ini`
 
@@ -465,11 +471,11 @@ This is the most significant code change. `service_manager.py` must switch from 
 
 ### Changes to `service_manager.py`
 
-Create a deb-compatible version at `packaging/python/service_manager.py`. Key changes (showing current line numbers from `services/service-manager/service_manager.py`):
+Edit `services/service-manager/service_manager.py` **in place** (the legacy install path that consumed the user-service version is gone, so there's no need for a separate `packaging/python/` copy). Key changes (line numbers reference the current file):
 
 1. **Service discovery** (line 106-112): Replace the `~/.config/systemd/user/` scan with a call to `systemctl list-dependencies ark-os.target --plain --no-legend` and parse the output (one unit name per line). This gives the live list of ARK-OS units derived from filesystem state — no hardcoded list to maintain in Python.
 2. **Manifest location** (lines 69-70, 89-90): Read from `/usr/lib/ark-os/manifests/<svc>.manifest.json` instead of `~/.local/share/<svc>/<svc>.manifest.json`.
-3. **Config location** (lines 67-85): `os.path.join('/etc/ark-os', configFile)` where `configFile` is read from the manifest. The `configFile` field already holds the bare filename (`main.conf`, `config.toml`) — the rename to `/etc/ark-os/mavlink-router.conf` etc. means manifests must also be updated so `configFile` holds the new filename (e.g., `mavlink-router.conf`, `logloader.toml`).
+3. **Config location** (lines 67-85): `os.path.join('/etc/ark-os', configFile)` where `configFile` is read from the manifest. Manifests must also be updated in place at `services/<svc>/<svc>.manifest.json` so `configFile` holds the new filename (e.g., `mavlink-router.conf`, `logloader.toml`) instead of the bare `main.conf` / `config.toml`.
 4. **systemctl commands** (line 30, 53): Replace all `systemctl --user` with `systemctl`. Service names are unchanged (no `ark-` prefix).
 5. **Journal logs** (line 212): Replace `journalctl --user -u <svc>` with `journalctl -u <svc>`.
 
@@ -518,19 +524,19 @@ polkit.addRule(function(action, subject) {
 
 ### Changes to other Python services
 
-Create deb-compatible versions at `packaging/python/`. Specific edits required:
+Edit in place at `services/<svc>/<svc>.py`. Specific edits required:
 
-**`autopilot_manager.py`** (current `services/autopilot-manager/autopilot_manager.py`):
+**`services/autopilot-manager/autopilot_manager.py`**:
 - Line 401: `subprocess.run(["systemctl", "--user", "stop", "mavlink-router"], ...)` → drop `"--user"`
 - Line 418: `subprocess.run(["systemctl", "--user", "restart", "mavlink-router"], ...)` → drop `"--user"`
 - Line 441: `subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")], ...)` → `subprocess.run(["/usr/lib/ark-os/venv/bin/python3", f"/usr/lib/ark-os/scripts/{script}"], ...)`
 - Line 526 onwards (`flash_firmware` `Popen`): audit the firmware flash subprocess invocation for any `~/.local/bin/` paths and rewrite to `/usr/lib/ark-os/scripts/`. The flash function calls `px_uploader.py` — confirm and rewrite.
 
-**`connection_manager.py`**: works as-is — only calls `nmcli` and `hostnamectl` (system utilities). Existing sudoers/polkit handle permissions.
+**`services/connection-manager/connection_manager.py`**: no edits required — only calls `nmcli` and `hostnamectl` (system utilities). Existing sudoers/polkit handle permissions.
 
-**`system_manager.py`**: works as-is — only calls `vcgencmd`, `hostnamectl`, and reads sysfs/procfs.
+**`services/system-manager/system_manager.py`**: no edits required — only calls `vcgencmd`, `hostnamectl`, and reads sysfs/procfs.
 
-For all three, copy them to `packaging/python/` to keep one source of truth for the deb build.
+`assemble_tree.sh` copies all four Python service files from `services/<svc>/<svc>.py` into `/usr/lib/ark-os/python/` at build time.
 
 ---
 
@@ -649,28 +655,31 @@ The venv is created at the real target path so all internal paths (shebangs, `py
 
 Assembles all build outputs into the `BUILD_DIR` following the package file layout. Creates the full directory tree, copies files, substitutes `PLATFORM`/`VERSION` in DEBIAN/control, sets file permissions (scripts +x, DEBIAN scripts +x, configs 644, dirs 755).
 
-Final tree (relative to `$BUILD_DIR`):
+Source-of-truth for each tree entry (where `assemble_tree.sh` reads from):
 
-```
-DEBIAN/                          # control, conffiles, postinst, prerm, postrm
-etc/ark-os/                      # configs (conffiles)
-etc/nginx/sites-available/ark-ui
-etc/polkit-1/rules.d/            # 02-ark-network-manager.rules, 03-ark-service-manager.rules
-etc/polkit-1/localauthority/90-mandatory.d/99-ark-network.pkla
-etc/sudoers.d/ark-os
-etc/systemd/journald.conf.d/10-ark-os.conf
-etc/udev/rules.d/99-ark-gpio.rules         # Jetson only
-lib/systemd/system/                # service units
-usr/lib/ark-os/bin/                # native binaries + bundled node/npm + mavsdk-examples
-usr/lib/ark-os/lib/                # bundled node lib/node_modules/npm/
-usr/lib/ark-os/scripts/            # start scripts + platform utility scripts
-usr/lib/ark-os/venv/               # Python venv
-usr/lib/ark-os/python/             # autopilot_manager.py etc.
-usr/lib/ark-os/manifests/          # mavlink-router.manifest.json etc.
-usr/lib/ark-os/flight-review/      # full flight_review app tree
-usr/lib/ark-os/ark-ui-backend/     # index.js, package.json, node_modules/
-var/www/ark-ui/html/               # built Vue dist (owned root:root, chowned to www-data in postinst)
-```
+| Package path | Source in repo |
+|---|---|
+| `lib/systemd/system/<svc>.service` | `packaging/service-files/<platform>/<svc>.service` |
+| `lib/systemd/system/ark-os.target` | `packaging/service-files/ark-os.target` |
+| `usr/lib/ark-os/bin/<binary>` | Compiled outputs from `build_binaries.sh` + `bundle_node.sh` |
+| `usr/lib/ark-os/scripts/start_<svc>.sh` | `services/<svc>/start_<svc>.sh` (edited in place per Task 3) |
+| `usr/lib/ark-os/scripts/<util>.{sh,py}` | `platform/{jetson,pi,common}/scripts/<util>.{sh,py}` (edited in place per Task 3) |
+| `usr/lib/ark-os/python/<svc>.py` | `services/<svc>/<svc>.py` (edited in place per Task 5) |
+| `usr/lib/ark-os/manifests/<svc>.manifest.json` | `services/<svc>/<svc>.manifest.json` (edited in place per Task 5) |
+| `usr/lib/ark-os/venv/` | Built by `build_venv.sh` |
+| `usr/lib/ark-os/flight-review/` | `services/flight-review/flight_review/app/` (submodule, copied verbatim) |
+| `usr/lib/ark-os/ark-ui-backend/` | `frontend/ark-ui/backend/` + `node_modules/` from `build_frontend.sh` |
+| `var/www/ark-ui/html/` | `frontend/ark-ui/ark-ui/dist/` from `build_frontend.sh` |
+| `etc/ark-os/mavlink-router.conf` | `services/mavlink-router/main.conf` |
+| `etc/ark-os/<svc>.toml` and `ark-os.conf`, `flight-review.ini` | `packaging/config/` |
+| `etc/nginx/sites-available/ark-ui` | `frontend/ark-ui.nginx` |
+| `etc/sudoers.d/ark-os` | `platform/common/ark_scripts.sudoers` (renamed at install time) |
+| `etc/polkit-1/rules.d/02-ark-network-manager.rules` | `platform/common/wifi/02-network-manager.rules` (renamed) |
+| `etc/polkit-1/localauthority/90-mandatory.d/99-ark-network.pkla` | `platform/common/wifi/99-network.pkla` (renamed) |
+| `etc/polkit-1/rules.d/03-ark-service-manager.rules` | `packaging/system-config/03-ark-service-manager.rules` (new file) |
+| `etc/udev/rules.d/99-ark-gpio.rules` | `platform/jetson/99-gpio.rules` (renamed, Jetson only) |
+| `etc/systemd/journald.conf.d/10-ark-os.conf` | `packaging/system-config/10-ark-os.conf` (new file) |
+| `DEBIAN/{control,conffiles,postinst,prerm,postrm}` | `packaging/DEBIAN/` |
 
 ### `packaging/bundle_node.sh` — Download and extract Node.js binary
 
@@ -698,18 +707,25 @@ This avoids depending on NodeSource or NVM and locks the runtime version to a kn
 
 ## Task 7: System config files
 
-Create `packaging/system-config/` with system-level configuration files. Install destinations:
+Most system-config files already exist under `platform/` and `frontend/`. `assemble_tree.sh` copies them into the package tree, renaming where needed to namespace under `ark-` / `ark-os.`. Only one new file is added under `packaging/system-config/` (plus the journald snippet).
 
-| Source | Destination | Mode |
+| Source in repo | Destination in package | Mode |
 |---|---|---|
-| `ark-ui.nginx` (from `frontend/ark-ui.nginx`) | `/etc/nginx/sites-available/ark-ui` | 0644 |
-| `99-ark-gpio.rules` (from `platform/jetson/99-gpio.rules`) | `/etc/udev/rules.d/99-ark-gpio.rules` | 0644 (Jetson only) |
-| `ark-os.sudoers` (from `platform/common/ark_scripts.sudoers`) | `/etc/sudoers.d/ark-os` | 0440 |
-| `02-ark-network-manager.rules` (from `platform/common/wifi/02-network-manager.rules`) | `/etc/polkit-1/rules.d/02-ark-network-manager.rules` | 0644 |
-| `99-ark-network.pkla` (from `platform/common/wifi/99-network.pkla`) | `/etc/polkit-1/localauthority/90-mandatory.d/99-ark-network.pkla` | 0644 |
-| `03-ark-service-manager.rules` (new — see Task 5) | `/etc/polkit-1/rules.d/03-ark-service-manager.rules` | 0644 |
+| `frontend/ark-ui.nginx` | `/etc/nginx/sites-available/ark-ui` | 0644 |
+| `platform/jetson/99-gpio.rules` | `/etc/udev/rules.d/99-ark-gpio.rules` (Jetson only) | 0644 |
+| `platform/common/ark_scripts.sudoers` | `/etc/sudoers.d/ark-os` | 0440 |
+| `platform/common/wifi/02-network-manager.rules` | `/etc/polkit-1/rules.d/02-ark-network-manager.rules` | 0644 |
+| `platform/common/wifi/99-network.pkla` | `/etc/polkit-1/localauthority/90-mandatory.d/99-ark-network.pkla` | 0644 |
+| `packaging/system-config/03-ark-service-manager.rules` (new — see Task 5) | `/etc/polkit-1/rules.d/03-ark-service-manager.rules` | 0644 |
+| `packaging/system-config/10-ark-os.conf` (new — journald snippet) | `/etc/systemd/journald.conf.d/10-ark-os.conf` | 0644 |
 
 The `ark-ui.nginx` content needs no changes — it already references `/var/www/ark-ui/html` and proxies to `localhost:3000`/`localhost:5006`.
+
+The journald snippet (`10-ark-os.conf`) contains:
+```
+[Journal]
+Storage=persistent
+```
 
 Ownership in postinst:
 - `/var/www/ark-ui/html` → `chown -R www-data:www-data` (nginx-served static files)
@@ -836,12 +852,17 @@ services/system-manager/system-manager.service
 
 The per-service `<svc>.service` files were user-session units (`%h/.local/bin/...`, `WantedBy=default.target`). They're fully replaced by `packaging/service-files/{jetson,pi}/<svc>.service`. Leaving them would only confuse future readers.
 
-Keep:
-- `services/<svc>/start_<svc>.sh` and `services/<svc>/<svc>.py` — these are the **source** that `packaging/scripts/` and `packaging/python/` derive from (Tasks 3, 5).
-- `services/<svc>/<svc>.manifest.json` — source for `packaging/manifests/`; update the `configFile` field in place (Task 5).
-- `services/mavlink-router/main.conf` — source for `packaging/config/mavlink-router.conf`.
-- Submodules under `services/<svc>/<svc>/` — untouched.
-- `platform/` tree — referenced by `packaging/system-config/` and `packaging/scripts/`.
+Keep (and edit in place — these are the canonical sources `assemble_tree.sh` reads from):
+
+- `services/<svc>/start_<svc>.sh` — start scripts, edited per Task 3 to use FHS paths. Exception: `services/ark-ui-backend/start_ark_ui_backend.sh` is deleted (the new service runs `node index.js` directly).
+- `services/<svc>/<svc>.py` — Python services (autopilot-manager, connection-manager, service-manager, system-manager), edited per Task 5.
+- `services/<svc>/<svc>.manifest.json` — edited per Task 5 (update `configFile` field to new filename).
+- `services/mavlink-router/main.conf` — copied to `/etc/ark-os/mavlink-router.conf` at install time.
+- `platform/<plat>/scripts/*.{sh,py}` — utility scripts, edited per Task 3 (shebang rewrites for Python files).
+- `platform/jetson/99-gpio.rules`, `platform/common/ark_scripts.sudoers`, `platform/common/wifi/*` — copied (and renamed) into the package by `assemble_tree.sh`.
+- Submodules under `services/<svc>/<svc>/` — untouched, built by `build_binaries.sh`.
+
+Also delete from the repo: `services/ark-ui-backend/start_ark_ui_backend.sh` (NVM-based start script, obsolete — backend now runs `node index.js` directly from a system service unit).
 
 ### `README.md` update
 
@@ -875,10 +896,11 @@ Drop the README sections covering `default.env`, `user.env`, the per-component `
 
 ## File tree summary
 
-All new files created by this PR:
+New files created by this PR (in-place edits to `services/`, `platform/`, `frontend/` are not listed here — see Tasks 3, 5, 10 for those):
 
 ```
 packaging/
+├── PLAN.md                           # This document
 ├── build.sh                          # Master build orchestrator
 ├── build_binaries.sh                 # Compile C++ submodules
 ├── build_frontend.sh                 # Build Vue.js + backend deps
@@ -888,11 +910,11 @@ packaging/
 ├── DEBIAN/
 │   ├── control                       # Package metadata (template)
 │   ├── conffiles                     # Config files list
-│   ├── postinst                      # Post-install script
-│   ├── prerm                         # Pre-removal script
+│   ├── postinst                      # Post-install script (incl. legacy cleanup, step 0)
+│   ├── prerm                         # Pre-removal script (systemctl stop ark-os.target)
 │   └── postrm                        # Post-removal script
 ├── service-files/
-│   ├── ark-os.target               # Group target for discovery + bulk control
+│   ├── ark-os.target                 # Group target for discovery + bulk control
 │   ├── jetson/
 │   │   ├── mavlink-router.service
 │   │   ├── dds-agent.service
@@ -910,39 +932,25 @@ packaging/
 │   │   └── jetson-can.service
 │   └── pi/
 │       └── ... (same minus jetson-can and rid-transmitter, User=pi)
-├── scripts/
-│   ├── start_mavlink_router.sh
-│   ├── start_dds_agent.sh
-│   ├── start_flight_review.sh
-│   ├── start_can_interface.sh
-│   ├── stop_can_interface.sh
-│   ├── update_hotspot_default.sh
-│   ├── create_hotspot_default.sh
-│   └── ... (platform utility scripts)
-├── python/
-│   ├── service_manager.py            # Updated for system service management
-│   ├── autopilot_manager.py          # Updated paths + systemctl (no --user)
-│   ├── connection_manager.py         # Unchanged (system utilities only)
-│   └── system_manager.py             # Unchanged (system utilities only)
-├── manifests/
-│   ├── mavlink-router.manifest.json  # Updated configFile field
-│   ├── logloader.manifest.json
-│   └── ... (one per service)
 ├── config/
-│   ├── ark-os.conf                   # Master config
-│   ├── mavlink-router.conf
-│   ├── logloader.toml
+│   ├── ark-os.conf                   # Master config (runtime params only — no [services] section)
+│   ├── logloader.toml                # Submodule-default-derived
 │   ├── polaris.toml
 │   ├── rtsp-server.toml
 │   ├── rid-transmitter.toml
 │   └── flight-review.ini
 └── system-config/
-    ├── ark-ui.nginx
-    ├── 99-ark-gpio.rules
-    ├── ark-os.sudoers
-    ├── 02-ark-network-manager.rules
-    ├── 99-ark-network.pkla
-    └── 03-ark-service-manager.rules
+    ├── 03-ark-service-manager.rules  # New polkit rule (per-unit allowlist for jetson user)
+    └── 10-ark-os.conf                # journald snippet: Storage=persistent
 
-.github/workflows/build-deb.yml      # CI pipeline
+.github/workflows/build-deb.yml       # CI pipeline
 ```
+
+Files edited in place (see Tasks 3, 5, 10):
+- `services/<svc>/start_<svc>.sh` — FHS path rewrites
+- `services/<svc>/<svc>.py` — FHS path rewrites + `systemctl --user` → `systemctl`
+- `services/<svc>/<svc>.manifest.json` — `configFile` field updated
+- `services/mavlink-router/main.conf` — sourced for `/etc/ark-os/mavlink-router.conf`
+- `platform/<plat>/scripts/*.py` — shebangs rewritten to `/usr/lib/ark-os/venv/bin/python3`
+
+Files deleted (Task 10): `install.sh`, `default.env`, `all_submodules_main.sh`, `tools/install_*.sh`, `tools/service_control.sh`, `tools/functions.sh`, all 14 `services/<svc>/<svc>.service` user units, `services/ark-ui-backend/start_ark_ui_backend.sh`.
