@@ -46,12 +46,15 @@ jobs:
         # ("libgstreamer1.0-dev : Depends: libunwind-dev / held broken packages").
         # astyle is invoked by the service Makefiles' `all` target (make runs the
         # formatter before cmake), so it is a build-time requirement too.
+        # libgflags/libgoogle-glog/libboost are required by the Polaris SDK that
+        # polaris-client-mavlink fetches and builds at configure time.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake meson ninja-build pkg-config gcc g++ astyle \
             python3-pip python3-venv \
             libssl-dev libsqlite3-dev libunwind-dev \
+            libgflags-dev libgoogle-glog-dev libboost-all-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
             lintian ${{ matrix.extra_deps }}
 
