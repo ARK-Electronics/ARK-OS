@@ -8,3 +8,7 @@ CLAUDE.md
 /build/
 *.deb
 node-v*-linux-arm64.tar.*
+
+# Python bytecode
+__pycache__/
+*.pyc
