@@ -18,7 +18,7 @@ if [ -z "$SERIALDEVICE" ]; then
     exit 1
 fi
 
-systemctl --user stop mavlink-router &>/dev/null
+systemctl stop mavlink-router &>/dev/null
 
 /usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/scripts/reset_fmu_wait_bl.py &>/dev/null
 
@@ -35,4 +35,4 @@ done
 
 sleep 3
 
-systemctl --user restart mavlink-router &>/dev/null
+systemctl restart mavlink-router &>/dev/null
