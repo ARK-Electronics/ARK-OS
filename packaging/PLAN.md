@@ -14,7 +14,7 @@ Pre-build everything in CI (ARM64 GitHub runners on Ubuntu 22.04 Jammy to match 
 
 # Implementation Plan
 
-This plan is structured as ordered tasks for implementation. The existing `install.sh` path continues working — all new files are additive under `packaging/`.
+This plan is structured as ordered tasks for implementation. The `.deb` is the **only** supported install path after this PR — the legacy `install.sh` mechanism and its supporting scripts are removed (Task 10), and the postinst cleans up remnants from any prior source-based install (Task 1, step 0).
 
 ## Naming convention
 
@@ -142,6 +142,74 @@ Post-install script. Key requirements:
 - Guard runtime operations (`systemctl start/restart`, `udevadm trigger`, `nginx -t`, hotspot creation, flight-review DB init) behind `[ -d /run/systemd/system ]` — this is the standard mechanism and the sole guard since `ark_jetson_kernel` does not install a `policy-rc.d`. Note: in the `ark_jetson_kernel` chroot, `/dev` is bind-mounted from host but `/run` is not, so `[ -d /run/systemd/system ]` is correctly false.
 
 Operations in order:
+
+**0. Legacy cleanup** — runs first to remove remnants of any pre-deb install. Idempotent; on a clean chroot or first install everything is a no-op. The block is structured as:
+
+```sh
+ARK_HOME=$(getent passwd "$ARK_USER" | cut -d: -f6)
+UID_VAL=$(id -u "$ARK_USER" 2>/dev/null || true)
+
+# (a) Backup legacy configs (only the first time, so re-install doesn't clobber the backup)
+LEGACY_BACKUP="$ARK_HOME/.config/ark-os-legacy-backup"
+if [ -d "$ARK_HOME/.local/share/mavlink-router" ] && [ ! -d "$LEGACY_BACKUP" ]; then
+    mkdir -p "$LEGACY_BACKUP"
+    for d in mavlink-router logloader polaris rtsp-server rid-transmitter flight_review; do
+        [ -d "$ARK_HOME/.local/share/$d" ] && cp -r "$ARK_HOME/.local/share/$d" "$LEGACY_BACKUP/" 2>/dev/null || true
+    done
+    chown -R "$ARK_USER:$ARK_USER" "$LEGACY_BACKUP"
+    echo "Legacy configs backed up to $LEGACY_BACKUP — merge custom edits into /etc/ark-os/ if needed."
+fi
+
+# (b) Stop and disable legacy user services (only on running system)
+if [ -d /run/systemd/system ] && [ -n "$UID_VAL" ] && [ -d "$ARK_HOME/.config/systemd/user" ]; then
+    LEGACY_USER_SERVICES="mavlink-router dds-agent logloader rtsp-server polaris rid-transmitter flight-review ark-ui-backend autopilot-manager connection-manager service-manager system-manager"
+    for svc in $LEGACY_USER_SERVICES; do
+        sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user stop "$svc.service" 2>/dev/null || true
+        sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user disable "$svc.service" 2>/dev/null || true
+    done
+fi
+
+# (c) Remove legacy user-service unit files
+rm -f "$ARK_HOME"/.config/systemd/user/{mavlink-router,dds-agent,logloader,rtsp-server,polaris,rid-transmitter,flight-review,ark-ui-backend,autopilot-manager,connection-manager,service-manager,system-manager}.service
+
+# (d) Remove legacy binaries and scripts from ~/.local/bin
+rm -f "$ARK_HOME"/.local/bin/{mavlink-routerd,logloader,rtsp-server,polaris-client-mavlink,rid-transmitter}
+rm -f "$ARK_HOME"/.local/bin/{start_mavlink_router.sh,start_dds_agent.sh,start_ark_ui_backend.sh,start_flight_review.sh}
+rm -f "$ARK_HOME"/.local/bin/{autopilot_manager.py,connection_manager.py,service_manager.py,system_manager.py}
+rm -f "$ARK_HOME"/.local/bin/{vbus_enable.py,vbus_disable.py,get_serial_number.py,reset_fmu_fast.py,reset_fmu_wait_bl.py}
+rm -f "$ARK_HOME"/.local/bin/{flash_firmware.sh,mavlink_shell.py,px4_shell_command.py,px_uploader.py,mavlink_ftp_upload.sh}
+rm -f "$ARK_HOME"/.local/bin/{pcie_set_speed.sh,self_test.sh,set_mac.sh,create_hotspot_default.sh}
+
+# (e) Remove legacy data dirs (configs were backed up in step a)
+rm -rf "$ARK_HOME"/.local/share/{mavlink-router,logloader,polaris,rtsp-server,rid-transmitter,flight_review}
+
+# (f) Remove legacy /usr/local/bin entries (replaced by /usr/lib/ark-os/{bin,scripts}/)
+rm -f /usr/local/bin/{MicroXRCEAgent,update_hotspot_default.sh,start_can_interface.sh,stop_can_interface.sh}
+
+# (g) Remove legacy system unit files (relocated to /lib/systemd/system/ and renamed)
+rm -f /etc/systemd/system/{hotspot-updater,jetson-can}.service
+
+# (h) Remove legacy sudoers/polkit/udev files (replaced by ark-os.* / ark-* prefixed versions)
+rm -f /etc/sudoers.d/ark_scripts
+rm -f /etc/polkit-1/rules.d/02-network-manager.rules
+rm -f /etc/polkit-1/localauthority/90-mandatory.d/99-network.pkla
+rm -f /etc/udev/rules.d/99-gpio.rules
+
+# (i) Remove NVM install (legacy install bootstrapped Node via nvm; we ship our own)
+rm -rf "$ARK_HOME"/.config/nvm
+
+# (j) Remove legacy backend deploy path (moves to /usr/lib/ark-os/ark-ui-backend/)
+rm -rf /var/www/ark-ui/api
+
+# (k) Reload daemons to drop unloaded units (runtime only)
+if [ -d /run/systemd/system ]; then
+    [ -n "$UID_VAL" ] && sudo -u "$ARK_USER" XDG_RUNTIME_DIR="/run/user/$UID_VAL" systemctl --user daemon-reload 2>/dev/null || true
+    systemctl daemon-reload
+fi
+```
+
+The `[ -d /run/systemd/system ]` guard means the systemctl operations are skipped in the `ark_jetson_kernel` chroot (where the rootfs is virgin and there's nothing to clean up anyway). File deletions run unconditionally — `rm -f` is a no-op when the target doesn't exist.
+
 1. `groupadd -f -r gpio` and `usermod -a -G dialout,gpio,i2c,netdev "$ARK_USER"`
 2. Create runtime dirs: `/var/lib/ark-os/logs`, `/var/lib/ark-os/flight-review/data` owned by `$ARK_USER`
 3. Make `/etc/ark-os/` writable by the service user: `chgrp -R $ARK_USER /etc/ark-os && chmod 2775 /etc/ark-os && chmod 0664 /etc/ark-os/*` — setgid bit on the directory means new files inherit the group. Files stay root-owned but group-writable so `service-manager.py` (running as `$ARK_USER`) can rewrite configs from the web UI. Conffile mechanics in dpkg track files by name/hash, not ownership, so this survives upgrades.
@@ -732,6 +800,64 @@ Both versions are hardcoded — update manually when bumping ARK-OS or MAVSDK.
 
 ---
 
+## Task 10: Remove legacy install mechanism
+
+Delete the source-based install path from the repo. After this PR, the `.deb` is the only supported way to install ARK-OS — operators who previously ran `install.sh` get migrated by the postinst legacy-cleanup block (Task 1, step 0).
+
+### Files to delete from the repo
+
+```
+install.sh                              # Top-level legacy installer entry point
+default.env                             # Legacy install env config
+all_submodules_main.sh                  # Submodule sync helper used only by the legacy path
+tools/install_software.sh               # Main legacy installer
+tools/install_mavsdk.sh                 # MAVSDK now comes from the upstream deb (Task 8)
+tools/install_mavsdk_examples.sh        # Now part of build_binaries.sh
+tools/install_opencv.sh                 # Unused by deb path
+tools/install_ros2.sh                   # Unused by deb path
+tools/service_control.sh                # Replaced by dpkg + systemctl
+tools/functions.sh                      # Helper for the deleted scripts above
+
+services/ark-ui-backend/ark-ui-backend.service
+services/autopilot-manager/autopilot-manager.service
+services/connection-manager/connection-manager.service
+services/dds-agent/dds-agent.service
+services/flight-review/flight-review.service
+services/hotspot-updater/hotspot-updater.service
+services/jetson-can/jetson-can.service
+services/logloader/logloader.service
+services/mavlink-router/mavlink-router.service
+services/polaris/polaris.service
+services/rid-transmitter/rid-transmitter.service
+services/rtsp-server/rtsp-server.service
+services/service-manager/service-manager.service
+services/system-manager/system-manager.service
+```
+
+The per-service `<svc>.service` files were user-session units (`%h/.local/bin/...`, `WantedBy=default.target`). They're fully replaced by `packaging/service-files/{jetson,pi}/<svc>.service`. Leaving them would only confuse future readers.
+
+Keep:
+- `services/<svc>/start_<svc>.sh` and `services/<svc>/<svc>.py` — these are the **source** that `packaging/scripts/` and `packaging/python/` derive from (Tasks 3, 5).
+- `services/<svc>/<svc>.manifest.json` — source for `packaging/manifests/`; update the `configFile` field in place (Task 5).
+- `services/mavlink-router/main.conf` — source for `packaging/config/mavlink-router.conf`.
+- Submodules under `services/<svc>/<svc>/` — untouched.
+- `platform/` tree — referenced by `packaging/system-config/` and `packaging/scripts/`.
+
+### `README.md` update
+
+Replace the source-install instructions with the `.deb` install path:
+
+```
+sudo apt install ./mavsdk_<ver>_arm64.deb
+sudo apt install ./ark-os-jetson_<ver>_arm64.deb
+```
+
+Plus a one-line note for Jetson image bakers: "For chroot install during `ark_jetson_kernel --provision`, see `packaging/PLAN.md` Task 9."
+
+Drop the README sections covering `default.env`, `user.env`, the per-component `INSTALL_*=y` env vars, and the manual submodule sync — none of those exist after this PR.
+
+---
+
 ## Verification checklist
 
 1. **Build locally on ARM64**: Run `./packaging/build.sh jetson` on a Jetson, verify it produces a valid `.deb`
@@ -743,6 +869,7 @@ Both versions are hardcoded — update manually when bumping ARK-OS or MAVSDK.
 7. **Purge**: `sudo apt purge ark-os-jetson` — verify `/etc/ark-os/` also removed
 8. **Opt-in services**: Verify `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter` are installed (unit files present) but not running by default; `systemctl enable --now <svc>` brings them up
 9. **Target grouping**: `systemctl list-dependencies ark-os.target --plain` returns all 14 (Jetson) / 12 (Pi) services; `systemctl stop ark-os.target` stops the running set
+10. **Legacy migration**: on a device that previously had a source-based install (`~/.local/share/mavlink-router/` etc. present), `sudo dpkg -i ark-os-jetson.deb` removes the legacy user services and binaries, leaves a backup at `~/.config/ark-os-legacy-backup/`, and brings the new system services up cleanly with no conflicting processes (`systemctl --user list-units --type=service` shows no ARK-OS units; `systemctl list-units 'mavlink-router.service'` shows the new system unit active)
 
 ---
 
