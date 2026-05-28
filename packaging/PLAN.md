@@ -8,7 +8,7 @@ ARK-OS is installed by cloning the repo on-device and running `install.sh`, whic
 
 ## Solution
 
-Pre-build everything in CI (ARM64 GitHub runners on Ubuntu 22.04 Jammy to match the JetPack 6 rootfs Python 3.10) and ship `.deb` packages. System-level systemd units with `User=jetson` replace user-session services for chroot compatibility. Configs move to `/etc/ark-os/` as dpkg conffiles. The package installs cleanly via `dpkg -i` in a chroot during `ark_jetson_kernel --provision` builds, and devices boot fully provisioned after flashing. Field updates: download the new `.deb` from the GitHub release and `sudo apt install ./ark-os-jetson_<ver>_arm64.deb` — there's no apt repo to subscribe to.
+Pre-build everything in CI (ARM64 GitHub runners on Ubuntu 22.04 Jammy to match the JetPack 6 rootfs Python 3.10) and ship `.deb` packages. System-level systemd units with `User=jetson` (or `User=pi` on Pi) replace user-session services for chroot compatibility. Configs move to `/etc/ark-os/` as dpkg conffiles. On Jetson the package installs cleanly via `dpkg -i` in a chroot during `ark_jetson_kernel --provision` builds (Task 9), and devices boot fully provisioned after flashing. On Pi there is no kernel-repo provisioning step — Pi flow is "flash stock Raspberry Pi OS, then `sudo apt install ./libmavsdk-dev_<ver>_debian12_arm64.deb ./ark-os-pi_<ver>_arm64.deb`" on the running system, where the default `pi` user already exists. Field updates on either platform: download the new `.deb` from the GitHub release and `sudo apt install ./ark-os-<plat>_<ver>_arm64.deb` — there's no apt repo to subscribe to.
 
 ---
 
@@ -111,15 +111,15 @@ Version: VERSION
 Section: embedded
 Priority: optional
 Architecture: arm64
-Depends: nginx, python3 (>= 3.8), python3-venv, avahi-daemon, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, libgstrtspserver-1.0-0, gstreamer1.0-plugins-ugly, gstreamer1.0-tools, gstreamer1.0-gl, gstreamer1.0-rtsp, libssl3, libsqlite3-0, libcap2-bin, curl, jq, systemd, network-manager
+Depends: nginx, python3 (>= 3.8), python3-venv, avahi-daemon, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, libgstrtspserver-1.0-0, gstreamer1.0-plugins-ugly, gstreamer1.0-tools, gstreamer1.0-gl, gstreamer1.0-rtsp, libssl3, libsqlite3-0, libcap2-bin, curl, jq, systemd, network-manager, libmavsdk-dev (>= 3.0)
 Maintainer: ARK Electronics <info@arkelectron.com>
 Description: ARK-OS companion computer platform
  Pre-compiled services, web UI, and system configuration for autonomous vehicles.
 ```
 
-Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, libqmi-utils, mavsdk` (`libqmi-utils` is needed for ARK LTE firmware updates). Pi adds: `gstreamer1.0-libcamera, python3-rpi.gpio, mavsdk` (RPi.GPIO is shipped as an apt package on Pi rather than via the venv since it has C bindings against Raspberry Pi-specific kernel interfaces).
+Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, libqmi-utils` (`libqmi-utils` is needed for ARK LTE firmware updates). Pi adds: `gstreamer1.0-libcamera, python3-rpi.gpio` (RPi.GPIO is shipped as an apt package on Pi rather than via the venv since it has C bindings against Raspberry Pi-specific kernel interfaces).
 
-MAVSDK has no public apt repo, so the upstream MAVSDK arm64 `.deb` is bundled alongside `ark-os-*.deb` on the same GitHub release. `Depends: mavsdk` gives correctness validation (`dpkg -i` fails loudly if missing) but doesn't auto-install — installer order matters. Pin a specific MAVSDK release (check `github.com/mavlink/MAVSDK/releases` for the current `v3.x.x`) in `packaging/build.sh` and update on each ARK-OS bump.
+MAVSDK has no public apt repo. The upstream package name is `libmavsdk-dev` (confirmed via `dpkg-deb -f` on the upstream asset — not `mavsdk`) and the closest arm64 build for the JetPack 6 Jammy rootfs is `libmavsdk-dev_<ver>_debian12_arm64.deb` — upstream does not publish an `ubuntu22.04_arm64` asset, so the debian12 variant is canonical here (the legacy `tools/install_mavsdk.sh` already uses this asset on Jammy, so glibc compatibility is proven in practice). The deb is downloaded from `github.com/mavlink/MAVSDK/releases` at install time: chroot installs fetch it during `provision.sh` (Task 9) before installing the ARK-OS deb, and field updates use the same upstream download. `Depends: libmavsdk-dev (>= 3.0)` gives correctness validation — `dpkg -i ark-os-jetson.deb` fails loudly if MAVSDK isn't already installed. Pin the same MAVSDK version in `packaging/build.sh` (used during CI for linking `libs/mavsdk-examples`) and in `ark_jetson_kernel/provision.sh`; bump both together when upgrading.
 
 ### `packaging/DEBIAN/conffiles`
 
@@ -217,7 +217,7 @@ The `[ -d /run/systemd/system ]` guard means the systemctl operations are skippe
 2. Create runtime dirs: `/var/lib/ark-os/logs`, `/var/lib/ark-os/flight-review/data` owned by `$ARK_USER`
 3. Make `/etc/ark-os/` writable by the service user: `chgrp -R $ARK_USER /etc/ark-os && chmod 2775 /etc/ark-os && chmod 0664 /etc/ark-os/*` — setgid bit on the directory means new files inherit the group. Files stay root-owned but group-writable so `service-manager.py` (running as `$ARK_USER`) can rewrite configs from the web UI. Conffile mechanics in dpkg track files by name/hash, not ownership, so this survives upgrades.
 4. Symlink flight-review config into the app tree: `ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_user.ini` — `serve.py` takes no config-file flag, `plot_app/config.py` reads `config_user.ini` from a hardcoded path relative to the script.
-5. `systemctl enable` always-on services: `mavlink-router`, `rtsp-server`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only), `systemd-time-wait-sync.service` (so time-dependent services don't fire before NTP converges — Jetsons typically have no RTC).
+5. `systemctl enable` always-on services: `mavlink-router`, `rtsp-server`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only), `systemd-time-wait-sync.service` (so time-dependent services don't fire before NTP converges — Jetsons typically have no RTC). Same as the legacy install (`tools/install_software.sh:374`), which has been doing this in the field — `systemd-timesyncd` is the active NTP client on JetPack 6 in practice.
 6. Opt-in services are installed but **not** enabled: `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`. Operator turns them on via the web UI or `systemctl enable --now <svc>`. There is no `[services]` section in `ark-os.conf` — systemd's enabled-state is the source of truth, so there's no parallel config to drift.
 7. On Jetson, `systemctl disable nvgetty.service 2>/dev/null || true` (the NVIDIA serial-console daemon holds `/dev/ttyTHS*`, blocking mavlink-router and dds-agent from opening the UART). The corresponding stop runs inside the runtime block (step 11).
 8. `setcap 'cap_net_raw,cap_net_admin+eip' /usr/lib/ark-os/bin/rid-transmitter 2>/dev/null || true` (file present only on Jetson; `|| true` covers non-xattr filesystems).
@@ -270,12 +270,14 @@ fi
 Create `packaging/service-files/` with all 14 service unit files. All services become system-level units (`/lib/systemd/system/`) with `User=jetson` and `Group=jetson` (or `pi`/`pi`) for unprivileged execution. **Service names retain current naming — no `ark-` prefix.**
 
 The key differences from current user service files:
-- `WantedBy=multi-user.target ark-os.target` — `multi-user.target` for boot autostart, `ark-os.target` for grouping (enables bulk start/stop and dynamic discovery)
+- `WantedBy=multi-user.target ark-os.target` — `multi-user.target` for boot autostart, `ark-os.target` for grouping (enables bulk start/stop; see Task 5 #1 for why discovery uses manifest globbing instead)
 - Absolute paths instead of `%h` specifier
 - `User=jetson` and `Group=jetson` directives
 - Binaries at `/usr/lib/ark-os/bin/`, scripts at `/usr/lib/ark-os/scripts/`
 - Python services use `/usr/lib/ark-os/venv/bin/python3`
 - Config at `/etc/ark-os/`
+
+**All other `[Service]` directives are preserved verbatim from the current `services/<svc>/<svc>.service` files** — `Type=`, `Restart=`, `RestartSec=`, `KillMode=`, `Environment=`, `LimitNOFILE=`, etc. The per-service breakdown below highlights only the additions and the path/User changes; treat the current unit file as the source for everything else (notably `Restart=on-failure` / `Restart=always` + `RestartSec=5` on most services, `Type=exec` on mavlink-router, and `KillMode=process` on hotspot-updater / jetson-can). Once Task 2 is implemented, diff `packaging/service-files/jetson/<svc>.service` against the legacy `services/<svc>/<svc>.service` (which Task 10 deletes) and confirm only the path/User/WantedBy/`%h`→absolute differences remain.
 
 Create service files for both platforms under `packaging/service-files/jetson/` and `packaging/service-files/pi/`. The only differences between platforms are `User=`/`Group=` values and which services exist (rid-transmitter and jetson-can are Jetson-only).
 
@@ -292,13 +294,12 @@ Documentation=https://github.com/ARK-Electronics/ARK-OS
 WantedBy=multi-user.target
 ```
 
-Every ARK-OS service unit declares `WantedBy=ark-os.target` in its `[Install]` section. This gives three things for free:
+Every ARK-OS service unit declares `WantedBy=ark-os.target` in its `[Install]` section. This gives:
 
-- **Discovery**: `systemctl list-dependencies ark-os.target --plain` returns the live list of ARK-OS units — no separate `services.list` file, no drift between the package and the discovery code.
-- **Bulk control**: `systemctl stop ark-os.target` stops every ARK-OS service in one command (used in `prerm` above).
-- **Self-documenting**: each unit declares its own membership; adding a new service auto-registers it.
+- **Bulk control of the enabled set**: `systemctl stop ark-os.target` stops every currently-enabled ARK-OS service in one command (used in `prerm` above).
+- **Self-documenting membership**: each unit declares its own membership; adding a new service auto-registers it for bulk control.
 
-The polkit rule (Task 5) still needs an explicit list — polkit can't shell out to `systemctl` — but that's now the only place duplication exists.
+`systemctl list-dependencies ark-os.target` is NOT used for service-manager discovery — that approach only surfaces enabled units pulled into the target by their `WantedBy` symlink, so the five opt-in (installed-but-disabled) services would be invisible. service-manager instead globs `/usr/lib/ark-os/manifests/*.manifest.json` to enumerate all installed ARK-OS services regardless of enabled state (see Task 5 #1). The polkit rule (Task 5) and the manifest directory are the two explicit lists; everything else derives from them or from systemd's enabled-state.
 
 ### Service file details
 
@@ -337,9 +338,10 @@ The polkit rule (Task 5) still needs an explicit list — polkit can't shell out
 **ark-ui-backend.service**
 - `WorkingDirectory=/usr/lib/ark-os/ark-ui-backend`
 - `ExecStart=/usr/lib/ark-os/bin/node /usr/lib/ark-os/ark-ui-backend/index.js`
-- `After=network-online.target`
+- `After=network-online.target nginx.service`
 - `Environment=NODE_ENV=production`
 - `Environment=PATH=/usr/lib/ark-os/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+- Replaces the legacy `start_ark_ui_backend.sh` which sourced nvm to invoke `npm start`. The new unit invokes the bundled Node 20 binary at `/usr/lib/ark-os/bin/node` directly (matching `backend/package.json`'s `start` script, which is literally `node index.js`); nvm is no longer involved.
 
 **autopilot-manager.service**
 - `ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/autopilot_manager.py`
@@ -453,6 +455,8 @@ Service enable/disable is **not** in this file. Opt-in services (`dds-agent`, `l
 
 The hub config (UART endpoint + UDP endpoints, ports 14550-14571). Edit in place if you need to change defaults; no FHS-path rewrites are required since the file references `/dev/serial/by-id/` device paths.
 
+**Upgrade UX note**: `start_mavlink_router.sh` writes to this file in place via `sed` on first boot (and on any boot where the auto-detected device path differs from the recorded one). Since the file is a dpkg-managed conffile, every apt upgrade will see it as modified. `dpkg` defaults under apt-noninteractive contexts (chroot installs via `provision.sh`, `unattended-upgrades`, and `apt-get -o Dpkg::Options::="--force-confold" upgrade`) are to **keep the user's modified version**, so upgrades won't stall — the auto-detected `Device=` is preserved and any new options the upstream conf adds in a future release are silently ignored. If those new options become required for a release, document them as a manual migration step (or ship a postinst that merges them via `ucf` or a sentinel-comment-aware sed). Field upgrade docs should mention running `sudo apt-get -o Dpkg::Options::="--force-confold" upgrade ark-os-jetson` to suppress conffile prompts on interactive shells.
+
 ### `packaging/config/{logloader,polaris,rtsp-server,rid-transmitter}.toml`
 
 Copy from each submodule's `config.toml` default (e.g., `services/logloader/logloader/config.toml`) into `packaging/config/<svc>.toml`. We can't edit the submodule files, so we maintain our own copy. No path changes inside the configs — they contain connection URLs, API keys, and streaming parameters only.
@@ -473,10 +477,10 @@ This is the most significant code change. `service_manager.py` must switch from 
 
 Edit `services/service-manager/service_manager.py` **in place** (the legacy install path that consumed the user-service version is gone, so there's no need for a separate `packaging/python/` copy). Key changes (line numbers reference the current file):
 
-1. **Service discovery** (line 106-112): Replace the `~/.config/systemd/user/` scan with a call to `systemctl list-dependencies ark-os.target --plain --no-legend` and parse the output (one unit name per line). This gives the live list of ARK-OS units derived from filesystem state — no hardcoded list to maintain in Python.
+1. **Service discovery** (lines 106-118): Replace the `~/.config/systemd/user/` scan with a glob over `/usr/lib/ark-os/manifests/*.manifest.json`. Each `<svc>.manifest.json` corresponds to `<svc>.service` (filename-based mapping). Manifest-based discovery surfaces installed-but-disabled opt-in services (`dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`), which a `systemctl list-dependencies ark-os.target` approach would miss (that only returns enabled units pulled into the target). The deb is the source of truth for what's installed, so scanning what the deb dropped is the right move.
 2. **Manifest location** (lines 69-70, 89-90): Read from `/usr/lib/ark-os/manifests/<svc>.manifest.json` instead of `~/.local/share/<svc>/<svc>.manifest.json`.
-3. **Config location** (lines 67-85): `os.path.join('/etc/ark-os', configFile)` where `configFile` is read from the manifest. Manifests must also be updated in place at `services/<svc>/<svc>.manifest.json` so `configFile` holds the new filename (e.g., `mavlink-router.conf`, `logloader.toml`) instead of the bare `main.conf` / `config.toml`.
-4. **systemctl commands** (line 30, 53): Replace all `systemctl --user` with `systemctl`. Service names are unchanged (no `ark-` prefix).
+3. **Config location** (lines 67-85): `os.path.join('/etc/ark-os', configFile)` where `configFile` is read from the manifest. Manifests must also be updated in place at `services/<svc>/<svc>.manifest.json` so `configFile` holds the new filename (e.g., `mavlink-router.conf`, `logloader.toml`) instead of the bare `main.conf` / `config.toml`. The current `flight-review.manifest.json` has an empty `configFile` — set it to `flight-review.ini`.
+4. **systemctl commands** (lines 30, 53, 106, 117-118): Replace all `systemctl --user` with `systemctl`. Verify with `grep -n 'systemctl --user' service_manager.py` after editing — no matches should remain. Service names are unchanged (no `ark-` prefix).
 5. **Journal logs** (line 212): Replace `journalctl --user -u <svc>` with `journalctl -u <svc>`.
 
 The service manager runs as `User=jetson` in its system service unit. The polkit rule (below) grants it permission to manage the specific ARK-OS units.
@@ -520,17 +524,16 @@ polkit.addRule(function(action, subject) {
 });
 ```
 
-(Pi package uses the same rule with `"pi"` instead of `"jetson"`.)
+(Pi package uses the same rule template with `"pi"` instead of `"jetson"` AND the `ARK_OS_UNITS` array drops `rid-transmitter.service` and `jetson-can.service` — those services don't exist on Pi.)
 
 ### Changes to other Python services
 
 Edit in place at `services/<svc>/<svc>.py`. Specific edits required:
 
-**`services/autopilot-manager/autopilot_manager.py`**:
-- Line 401: `subprocess.run(["systemctl", "--user", "stop", "mavlink-router"], ...)` → drop `"--user"`
-- Line 418: `subprocess.run(["systemctl", "--user", "restart", "mavlink-router"], ...)` → drop `"--user"`
-- Line 441: `subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")], ...)` → `subprocess.run(["/usr/lib/ark-os/venv/bin/python3", f"/usr/lib/ark-os/scripts/{script}"], ...)`
-- Line 526 onwards (`flash_firmware` `Popen`): audit the firmware flash subprocess invocation for any `~/.local/bin/` paths and rewrite to `/usr/lib/ark-os/scripts/`. The flash function calls `px_uploader.py` — confirm and rewrite.
+**`services/autopilot-manager/autopilot_manager.py`** (verify after editing: `grep -n 'systemctl --user\|~/.local' autopilot_manager.py` returns no matches):
+- Lines 389, 401, 418: drop `"--user"` from each `subprocess.run(["systemctl", "--user", ...])` call (is-active, stop, restart respectively).
+- Line 441: `subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")], ...)` → `subprocess.run(["/usr/lib/ark-os/venv/bin/python3", f"/usr/lib/ark-os/scripts/{script}"], ...)`.
+- Line ~521 (inside `flash_firmware`): rewrite `os.path.expanduser("~/.local/bin/px_uploader.py")` to `/usr/lib/ark-os/scripts/px_uploader.py`.
 
 **`services/connection-manager/connection_manager.py`**: no edits required — only calls `nmcli` and `hostnamectl` (system utilities). Existing sudoers/polkit handle permissions.
 
@@ -577,27 +580,25 @@ cmake ..
 make -j$(nproc)
 # Output: build/MicroXRCEAgent
 
-# logloader (make)
+# logloader (Makefile wraps cmake)
 cd services/logloader/logloader
 make
-# Output: logloader (in source dir)
+# Output: build/logloader
 
-# rtsp-server (make, needs GStreamer dev libs)
+# rtsp-server (Makefile wraps cmake, needs GStreamer dev libs)
 cd services/rtsp-server/rtsp-server
 make
-# Output: rtsp-server
+# Output: build/rtsp-server
 
-# polaris-client-mavlink (make)
+# polaris-client-mavlink (Makefile wraps cmake)
 cd services/polaris/polaris-client-mavlink
 make
-# Output: polaris-client-mavlink
+# Output: build/polaris-client-mavlink
 
-# rid-transmitter (cmake, Jetson only, needs libbluetooth-dev)
+# rid-transmitter (Makefile wraps cmake, Jetson only, needs libbluetooth-dev)
 cd services/rid-transmitter/RemoteIDTransmitter
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-# Output: rid-transmitter
+make
+# Output: build/rid-transmitter
 
 # mavsdk-examples (cmake) — needs MAVSDK installed on the runner
 cd libs/mavsdk-examples
@@ -761,12 +762,12 @@ strategy:
 
 1. `actions/checkout@v4` with `submodules: recursive`
 2. Install build dependencies: `cmake, meson, ninja-build, pkg-config, gcc, g++, python3-pip, python3-venv, libssl-dev, libsqlite3-dev, libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstrtspserver-1.0-dev, lintian, ${{ matrix.extra_deps }}`
-3. Download and install the pinned MAVSDK arm64 `.deb` from `github.com/mavlink/MAVSDK/releases` (needed by `libs/mavsdk-examples` link step). Cache the downloaded `.deb` — it gets re-uploaded to the ARK-OS release in step 8.
+3. Download and install the pinned `libmavsdk-dev_<ver>_debian12_arm64.deb` from `github.com/mavlink/MAVSDK/releases` (needed only at build time to link `libs/mavsdk-examples`). Do **not** re-upload it — `ark_jetson_kernel/provision.sh` (Task 9) and field installs download MAVSDK directly from the upstream release.
 4. Install Node.js 20: `actions/setup-node@v4`
 5. Extract version from tag: `echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV`
 6. Run `./packaging/build.sh ${{ matrix.platform }} --version=${{ env.VERSION }}`
-7. Upload `.deb` artifact (both `ark-os-${platform}_${VERSION}_arm64.deb` and the cached `mavsdk_*_arm64.deb`)
-8. Create GitHub Release and attach **both** `.deb` files (ARK-OS and MAVSDK) so `ark_jetson_kernel/provision.sh` can fetch them from the same release page
+7. Upload the `ark-os-${platform}_${VERSION}_arm64.deb` artifact
+8. Create GitHub Release and attach the ARK-OS `.deb` (single file per platform). MAVSDK is **not** rebundled — its canonical source remains the upstream MAVSDK release page.
 
 ### Considerations
 
@@ -776,23 +777,35 @@ strategy:
 
 ---
 
-## Task 9: `ark_jetson_kernel` integration
+## Task 9: `ark_jetson_kernel` integration (Jetson only)
 
-Update `provision.sh` in the `ark_jetson_kernel` repo to install the `.deb` during image builds.
+Pi has no equivalent kernel-repo provisioning flow — ARK-OS for Pi installs on a running stock Raspberry Pi OS image via `sudo apt install ./ark-os-pi_<ver>_arm64.deb` (after first installing the MAVSDK deb the same way). This section covers the Jetson chroot flow only.
+
+Update `provision.sh` in the `ark_jetson_kernel` repo to install the `.deb` during image builds. The current `provision.sh` is a stub of commented examples (verified at `/home/jake/code/ark/ark_jetson_kernel/provision.sh`); nothing else runs that would conflict.
 
 ```bash
 #!/bin/bash
 set -e
 
-RELEASE_BASE="https://github.com/ARK-Electronics/ARK-OS/releases/download/v1.0.0"
-ARK_OS_DEB="ark-os-jetson_1.0.0_arm64.deb"
-MAVSDK_DEB="mavsdk_3.0.0_arm64.deb"   # pin to whatever the release attaches
+ARK_OS_VERSION="1.0.0"
+MAVSDK_VERSION="3.17.1"  # pin; bump alongside ARK-OS
 
-echo "Downloading ARK-OS debs..."
-sudo wget -q -O "$ROOTFS_DIR/tmp/$MAVSDK_DEB" "$RELEASE_BASE/$MAVSDK_DEB"
-sudo wget -q -O "$ROOTFS_DIR/tmp/$ARK_OS_DEB" "$RELEASE_BASE/$ARK_OS_DEB"
+ARK_OS_DEB="ark-os-jetson_${ARK_OS_VERSION}_arm64.deb"
+# No ubuntu22.04_arm64 build is published upstream; debian12_arm64 is what
+# tools/install_mavsdk.sh has historically used on Jammy.
+MAVSDK_DEB="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
 
-echo "Installing MAVSDK first (ark-os depends on it)..."
+ARK_OS_URL="https://github.com/ARK-Electronics/ARK-OS/releases/download/v${ARK_OS_VERSION}/${ARK_OS_DEB}"
+MAVSDK_URL="https://github.com/mavlink/MAVSDK/releases/download/v${MAVSDK_VERSION}/${MAVSDK_DEB}"
+
+echo "Downloading MAVSDK and ARK-OS debs..."
+sudo wget -q -O "$ROOTFS_DIR/tmp/$MAVSDK_DEB" "$MAVSDK_URL"
+sudo wget -q -O "$ROOTFS_DIR/tmp/$ARK_OS_DEB" "$ARK_OS_URL"
+
+# dpkg in non-interactive contexts (no terminal) defaults to keeping existing
+# conffiles, so chroot installs never stall on conffile prompts — see Task 4
+# mavlink-router upgrade-UX note.
+echo "Installing MAVSDK first (ark-os depends on libmavsdk-dev)..."
 sudo chroot "$ROOTFS_DIR" apt-get update
 sudo chroot "$ROOTFS_DIR" dpkg -i "/tmp/$MAVSDK_DEB" || true
 sudo chroot "$ROOTFS_DIR" apt-get install -f -y
@@ -804,13 +817,14 @@ sudo chroot "$ROOTFS_DIR" apt-get install -f -y
 sudo rm "$ROOTFS_DIR/tmp/$MAVSDK_DEB" "$ROOTFS_DIR/tmp/$ARK_OS_DEB"
 ```
 
-MAVSDK installs first because ARK-OS declares `Depends: mavsdk` — `dpkg -i ark-os` would fail without it (and `apt-get install -f` can't resolve MAVSDK since it's not in any apt repo).
+MAVSDK installs first because ARK-OS declares `Depends: libmavsdk-dev (>= 3.0)` — `dpkg -i ark-os` would fail without it, and `apt-get install -f` can't resolve `libmavsdk-dev` since it's not in any apt repo.
 
-This works because `build.sh` already:
-- Registers `qemu-aarch64` binfmt handler (line 169-171)
-- Bind-mounts `/proc`, `/sys`, `/dev`, `/dev/pts` (lines 205-208)
-- Copies `/etc/resolv.conf` for DNS (line 209)
-- Creates the `jetson` user via `l4t_create_default_user.sh` (lines 180-181) before provisioning runs
+This works because `build.sh` already (verified against current `ark_jetson_kernel/build.sh`):
+- Registers `qemu-aarch64` binfmt handler (lines 177-181)
+- Bind-mounts `/proc`, `/sys`, `/dev`, `/dev/pts` into the rootfs (lines 214-217)
+- Copies `/etc/resolv.conf` for DNS (line 218)
+- Creates the `jetson` user via `l4t_create_default_user.sh` (lines 189-190) before invoking `provision.sh` (line ~200)
+- Does **not** install a `policy-rc.d` and does **not** bind-mount `/run` — so `[ -d /run/systemd/system ]` is correctly false inside the chroot, gating runtime-only operations in postinst (Task 1)
 
 Both versions are hardcoded — update manually when bumping ARK-OS or MAVSDK.
 
@@ -827,10 +841,8 @@ install.sh                              # Top-level legacy installer entry point
 default.env                             # Legacy install env config
 all_submodules_main.sh                  # Submodule sync helper used only by the legacy path
 tools/install_software.sh               # Main legacy installer
-tools/install_mavsdk.sh                 # MAVSDK now comes from the upstream deb (Task 8)
+tools/install_mavsdk.sh                 # MAVSDK now downloaded by ark_jetson_kernel/provision.sh (Task 9)
 tools/install_mavsdk_examples.sh        # Now part of build_binaries.sh
-tools/install_opencv.sh                 # Unused by deb path
-tools/install_ros2.sh                   # Unused by deb path
 tools/service_control.sh                # Replaced by dpkg + systemctl
 tools/functions.sh                      # Helper for the deleted scripts above
 
@@ -852,6 +864,15 @@ services/system-manager/system-manager.service
 
 The per-service `<svc>.service` files were user-session units (`%h/.local/bin/...`, `WantedBy=default.target`). They're fully replaced by `packaging/service-files/{jetson,pi}/<svc>.service`. Leaving them would only confuse future readers.
 
+After these deletions, `tools/` is empty — remove the directory itself.
+
+**Move (not delete) — standalone dev-machine helpers, no longer part of the install path:**
+
+- `tools/install_opencv.sh` → `extras/install_opencv.sh`
+- `tools/install_ros2.sh` → `extras/install_ros2.sh`
+
+Add `extras/README.md` explaining that these are not invoked by the deb build or install — they're convenience scripts for manually installing OpenCV/ROS2 on a dev workstation. Kept around because they encode non-trivial Jetson-specific build flags that would be expensive to rediscover.
+
 Keep (and edit in place — these are the canonical sources `assemble_tree.sh` reads from):
 
 - `services/<svc>/start_<svc>.sh` — start scripts, edited per Task 3 to use FHS paths. Exception: `services/ark-ui-backend/start_ark_ui_backend.sh` is deleted (the new service runs `node index.js` directly).
@@ -860,18 +881,27 @@ Keep (and edit in place — these are the canonical sources `assemble_tree.sh` r
 - `services/mavlink-router/main.conf` — copied to `/etc/ark-os/mavlink-router.conf` at install time.
 - `platform/<plat>/scripts/*.{sh,py}` — utility scripts, edited per Task 3 (shebang rewrites for Python files).
 - `platform/jetson/99-gpio.rules`, `platform/common/ark_scripts.sudoers`, `platform/common/wifi/*` — copied (and renamed) into the package by `assemble_tree.sh`.
+- `frontend/ark-ui.nginx` — copied verbatim to `/etc/nginx/sites-available/ark-ui` by `assemble_tree.sh` (Task 7).
+- `frontend/ark-ui/ark-ui/` (Vue source) and `frontend/ark-ui/backend/` (Node source) — built by `build_frontend.sh` (Task 6). Outputs go into the deb tree; sources stay in the repo for development.
 - Submodules under `services/<svc>/<svc>/` — untouched, built by `build_binaries.sh`.
 
 Also delete from the repo: `services/ark-ui-backend/start_ark_ui_backend.sh` (NVM-based start script, obsolete — backend now runs `node index.js` directly from a system service unit).
 
 ### `README.md` update
 
-Replace the source-install instructions with the `.deb` install path:
+Replace the source-install instructions with the `.deb` install path. MAVSDK lives on the upstream `github.com/mavlink/MAVSDK/releases` page (no apt repo); ARK-OS lives on the ARK-OS release page:
 
 ```
-sudo apt install ./mavsdk_<ver>_arm64.deb
-sudo apt install ./ark-os-jetson_<ver>_arm64.deb
+# 1. Download both debs (replace <mavsdk-ver> and <ark-os-ver> with current pins)
+wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson_<ark-os-ver>_arm64.deb
+
+# 2. Install MAVSDK first (ark-os Depends on it)
+sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+sudo apt install ./ark-os-jetson_<ark-os-ver>_arm64.deb
 ```
+
+Pi flow is identical, replacing `ark-os-jetson` with `ark-os-pi`. For unattended/upgrade scenarios pass `-o Dpkg::Options::="--force-confold"` to avoid conffile prompts (see Task 4 mavlink-router upgrade-UX note).
 
 Plus a one-line note for Jetson image bakers: "For chroot install during `ark_jetson_kernel --provision`, see `packaging/PLAN.md` Task 9."
 
@@ -889,7 +919,7 @@ Drop the README sections covering `default.env`, `user.env`, the per-component `
 6. **Removal**: `sudo apt remove ark-os-jetson` — verify services stopped, files removed, `/etc/ark-os/` preserved
 7. **Purge**: `sudo apt purge ark-os-jetson` — verify `/etc/ark-os/` also removed
 8. **Opt-in services**: Verify `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter` are installed (unit files present) but not running by default; `systemctl enable --now <svc>` brings them up
-9. **Target grouping**: `systemctl list-dependencies ark-os.target --plain` returns all 14 (Jetson) / 12 (Pi) services; `systemctl stop ark-os.target` stops the running set
+9. **Target grouping**: `systemctl list-dependencies ark-os.target --plain` returns the **enabled** ARK-OS services (always-on plus any opt-in the operator has enabled); `systemctl stop ark-os.target` stops the running set. service-manager discovery of all installed services (including disabled opt-ins) is verified separately by globbing `/usr/lib/ark-os/manifests/*.manifest.json` (Task 5 #1).
 10. **Legacy migration**: on a device that previously had a source-based install (`~/.local/share/mavlink-router/` etc. present), `sudo dpkg -i ark-os-jetson.deb` removes the legacy user services and binaries, leaves a backup at `~/.config/ark-os-legacy-backup/`, and brings the new system services up cleanly with no conflicting processes (`systemctl --user list-units --type=service` shows no ARK-OS units; `systemctl list-units 'mavlink-router.service'` shows the new system unit active)
 
 ---
@@ -914,7 +944,7 @@ packaging/
 │   ├── prerm                         # Pre-removal script (systemctl stop ark-os.target)
 │   └── postrm                        # Post-removal script
 ├── service-files/
-│   ├── ark-os.target                 # Group target for discovery + bulk control
+│   ├── ark-os.target                 # Group target for bulk start/stop (discovery uses manifest glob — Task 5 #1)
 │   ├── jetson/
 │   │   ├── mavlink-router.service
 │   │   ├── dds-agent.service
@@ -944,6 +974,11 @@ packaging/
     └── 10-ark-os.conf                # journald snippet: Storage=persistent
 
 .github/workflows/build-deb.yml       # CI pipeline
+
+extras/                               # Moved out of tools/ (Task 10) — standalone dev-workstation helpers
+├── README.md                         # Explains: not part of the deb path; manual installs only
+├── install_opencv.sh                 # Moved from tools/
+└── install_ros2.sh                   # Moved from tools/
 ```
 
 Files edited in place (see Tasks 3, 5, 10):
@@ -953,4 +988,6 @@ Files edited in place (see Tasks 3, 5, 10):
 - `services/mavlink-router/main.conf` — sourced for `/etc/ark-os/mavlink-router.conf`
 - `platform/<plat>/scripts/*.py` — shebangs rewritten to `/usr/lib/ark-os/venv/bin/python3`
 
-Files deleted (Task 10): `install.sh`, `default.env`, `all_submodules_main.sh`, `tools/install_*.sh`, `tools/service_control.sh`, `tools/functions.sh`, all 14 `services/<svc>/<svc>.service` user units, `services/ark-ui-backend/start_ark_ui_backend.sh`.
+Files deleted (Task 10): `install.sh`, `default.env`, `all_submodules_main.sh`, `tools/install_software.sh`, `tools/install_mavsdk.sh`, `tools/install_mavsdk_examples.sh`, `tools/service_control.sh`, `tools/functions.sh`, the empty `tools/` directory, all 14 `services/<svc>/<svc>.service` user units, `services/ark-ui-backend/start_ark_ui_backend.sh`.
+
+Files moved (Task 10): `tools/install_opencv.sh` → `extras/install_opencv.sh`, `tools/install_ros2.sh` → `extras/install_ros2.sh` (+ new `extras/README.md` explaining their role).
