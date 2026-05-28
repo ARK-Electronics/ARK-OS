@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/lib/ark-os/venv/bin/python3
 ############################################################################
 #
 #   Copyright (c) 2012-2024 PX4 Development Team. All rights reserved.

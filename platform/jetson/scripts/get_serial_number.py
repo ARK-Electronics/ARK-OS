@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/lib/ark-os/venv/bin/python3
 
 import smbus2
 

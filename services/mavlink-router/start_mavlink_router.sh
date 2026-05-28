@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Assumes there is a conf file here
-export MAVLINK_ROUTERD_CONF_FILE="/home/$USER/.local/share/mavlink-router/main.conf"
+export MAVLINK_ROUTERD_CONF_FILE="/etc/ark-os/mavlink-router.conf"
 
 # 1) Read the currently configured Device path from main.conf
 CONFIGURED_PATH=$(grep -E '^Device\s*=' "$MAVLINK_ROUTERD_CONF_FILE" \
@@ -28,9 +28,9 @@ else
 fi
 
 # Enable mavlink USB stream first
-python3 ~/.local/bin/vbus_enable.py
+/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/scripts/vbus_enable.py
 
 sleep 3
 
 # Finally, launch mavlink-routerd
-~/.local/bin/mavlink-routerd
+/usr/lib/ark-os/bin/mavlink-routerd
