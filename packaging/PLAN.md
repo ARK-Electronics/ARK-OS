@@ -115,7 +115,9 @@ Description: ARK-OS companion computer platform
  Pre-compiled services, web UI, and system configuration for autonomous vehicles.
 ```
 
-Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, mavsdk`. Pi adds: `gstreamer1.0-libcamera, mavsdk` (MAVSDK is bundled as an arm64 deb dep — fetch from MAVSDK releases and host alongside the ARK-OS debs, or add a third-party apt repo entry).
+Jetson adds to Depends: `bluez, bluez-tools, libbluetooth3, mavsdk`. Pi adds: `gstreamer1.0-libcamera, mavsdk`.
+
+MAVSDK has no public apt repo, so the upstream MAVSDK arm64 `.deb` is bundled alongside `ark-os-*.deb` on the same GitHub release. `Depends: mavsdk` gives correctness validation (`dpkg -i` fails loudly if missing) but doesn't auto-install — installer order matters. Pin a specific MAVSDK release (check `github.com/mavlink/MAVSDK/releases` for the current `v3.x.x`) in `packaging/build.sh` and update on each ARK-OS bump.
 
 ### `packaging/DEBIAN/conffiles`
 
@@ -142,16 +144,16 @@ Post-install script. Key requirements:
 Operations in order:
 1. `groupadd -f -r gpio` and `usermod -a -G dialout,gpio,i2c,netdev "$ARK_USER"`
 2. Create runtime dirs: `/var/lib/ark-os/logs`, `/var/lib/ark-os/flight-review/data` owned by `$ARK_USER`
-3. Copy manifests from `/usr/lib/ark-os/manifests/` to `$ARK_HOME/.local/share/<svc>/` (for service-manager compatibility during transition)
-4. Parse `/etc/ark-os/ark-os.conf` `[services]` section to determine which optional services to enable
-5. `systemctl enable` core services unconditionally: `mavlink-router`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only), `dds-agent`, `rtsp-server`
-6. Conditionally `systemctl enable` opt-in services based on config: `logloader`, `polaris`, `flight-review`, `rid-transmitter` — all installed but disabled by default
+3. Make `/etc/ark-os/` writable by the service user: `chgrp -R $ARK_USER /etc/ark-os && chmod 2775 /etc/ark-os && chmod 0664 /etc/ark-os/*` — setgid bit on the directory means new files inherit the group. Files stay root-owned but group-writable so `service-manager.py` (running as `$ARK_USER`) can rewrite configs from the web UI. Conffile mechanics in dpkg track files by name/hash, not ownership, so this survives upgrades.
+4. Symlink flight-review config into the app tree: `ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_user.ini` — `serve.py` takes no config-file flag, `plot_app/config.py` reads `config_user.ini` from a hardcoded path relative to the script.
+5. `systemctl enable` always-on services: `mavlink-router`, `rtsp-server`, `ark-ui-backend`, `autopilot-manager`, `connection-manager`, `service-manager`, `system-manager`, `hotspot-updater`, `jetson-can` (Jetson only).
+6. Opt-in services are installed but **not** enabled: `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`. Operator turns them on via the web UI or `systemctl enable --now <svc>`. There is no `[services]` section in `ark-os.conf` — systemd's enabled-state is the source of truth, so there's no parallel config to drift.
 7. `setcap 'cap_net_raw,cap_net_admin+eip' /usr/lib/ark-os/bin/rid-transmitter 2>/dev/null || true` (file present only on Jetson; `|| true` covers non-xattr filesystems)
 8. Drop `/etc/systemd/journald.conf.d/10-ark-os.conf` containing `[Journal]\nStorage=persistent`; `mkdir -p /var/log/journal && chown root:systemd-journal /var/log/journal && chmod 2755 /var/log/journal`
 9. Nginx: `ln -sf /etc/nginx/sites-available/ark-ui /etc/nginx/sites-enabled/ark-ui` and `rm -f /etc/nginx/sites-enabled/default`
 10. **Runtime-only block** (inside `if [ -d /run/systemd/system ]`):
     - `systemctl daemon-reload`
-    - start all enabled services
+    - `systemctl start ark-os.target` — starts all enabled units in the target (see Task 2)
     - `nginx -t && systemctl reload nginx`
     - `udevadm control --reload-rules && udevadm trigger` (skipped in chroot via the outer guard)
     - run `create_hotspot_default.sh` if hotspot NM connection missing
@@ -159,16 +161,13 @@ Operations in order:
 
 ### `packaging/DEBIAN/prerm`
 
-On removal/upgrade, stop services by explicit list (no globs — globs don't expand in `systemctl stop`):
+On removal/upgrade, stop all ARK-OS services via the target — one command handles the group:
 
 ```bash
 #!/bin/sh
 set -e
-SERVICES="mavlink-router dds-agent logloader rtsp-server polaris rid-transmitter flight-review ark-ui-backend autopilot-manager connection-manager service-manager system-manager hotspot-updater jetson-can"
 if [ -d /run/systemd/system ]; then
-    for svc in $SERVICES; do
-        systemctl stop "$svc.service" 2>/dev/null || true
-    done
+    systemctl stop ark-os.target 2>/dev/null || true
 fi
 ```
 
@@ -198,7 +197,7 @@ fi
 Create `packaging/service-files/` with all 14 service unit files. All services become system-level units (`/lib/systemd/system/`) with `User=jetson` and `Group=jetson` (or `pi`/`pi`) for unprivileged execution. **Service names retain current naming — no `ark-` prefix.**
 
 The key differences from current user service files:
-- `WantedBy=multi-user.target` instead of `default.target`
+- `WantedBy=multi-user.target ark-os.target` — `multi-user.target` for boot autostart, `ark-os.target` for grouping (enables bulk start/stop and dynamic discovery)
 - Absolute paths instead of `%h` specifier
 - `User=jetson` and `Group=jetson` directives
 - Binaries at `/usr/lib/ark-os/bin/`, scripts at `/usr/lib/ark-os/scripts/`
@@ -206,6 +205,27 @@ The key differences from current user service files:
 - Config at `/etc/ark-os/`
 
 Create service files for both platforms under `packaging/service-files/jetson/` and `packaging/service-files/pi/`. The only differences between platforms are `User=`/`Group=` values and which services exist (rid-transmitter and jetson-can are Jetson-only).
+
+### `ark-os.target` — Group target
+
+Create `packaging/service-files/ark-os.target`:
+
+```ini
+[Unit]
+Description=ARK-OS service group
+Documentation=https://github.com/ARK-Electronics/ARK-OS
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Every ARK-OS service unit declares `WantedBy=ark-os.target` in its `[Install]` section. This gives three things for free:
+
+- **Discovery**: `systemctl list-dependencies ark-os.target --plain` returns the live list of ARK-OS units — no separate `services.list` file, no drift between the package and the discovery code.
+- **Bulk control**: `systemctl stop ark-os.target` stops every ARK-OS service in one command (used in `prerm` above).
+- **Self-documenting**: each unit declares its own membership; adding a new service auto-registers it.
+
+The polkit rule (Task 5) still needs an explicit list — polkit can't shell out to `systemctl` — but that's now the only place duplication exists.
 
 ### Service file details
 
@@ -337,15 +357,9 @@ Create `packaging/config/` with default configuration files that get installed t
 
 ### `ark-os.conf` — Master config
 
-```ini
-[services]
-dds_agent = true
-rtsp_server = true
-logloader = false
-rid_transmitter = false
-polaris = false
-flight_review = false
+Runtime parameters only — service enable/disable lives in systemd state, not here:
 
+```ini
 [logloader]
 upload_enabled = false
 public_logs = false
@@ -359,7 +373,7 @@ serial_number = 000000000000
 api_key =
 ```
 
-`logloader`, `rid_transmitter`, `polaris`, and `flight_review` are installed but disabled by default — operator opts in via this config + reboot (or `systemctl enable --now`).
+Service enable/disable is **not** in this file. Opt-in services (`dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`) are installed but disabled; operator turns them on via the web UI or `systemctl enable --now <svc>`. Using systemd state as the single source of truth means there's no parallel config knob for the UI to drift against.
 
 ### `mavlink-router.conf`
 
@@ -385,7 +399,7 @@ This is the most significant code change. `service_manager.py` must switch from 
 
 Create a deb-compatible version at `packaging/python/service_manager.py`. Key changes (showing current line numbers from `services/service-manager/service_manager.py`):
 
-1. **Service discovery** (line 106-112): Scan `/lib/systemd/system/*.service` filtered against an explicit list of ARK-OS service names, instead of `~/.config/systemd/user/`.
+1. **Service discovery** (line 106-112): Replace the `~/.config/systemd/user/` scan with a call to `systemctl list-dependencies ark-os.target --plain --no-legend` and parse the output (one unit name per line). This gives the live list of ARK-OS units derived from filesystem state — no hardcoded list to maintain in Python.
 2. **Manifest location** (lines 69-70, 89-90): Read from `/usr/lib/ark-os/manifests/<svc>.manifest.json` instead of `~/.local/share/<svc>/<svc>.manifest.json`.
 3. **Config location** (lines 67-85): `os.path.join('/etc/ark-os', configFile)` where `configFile` is read from the manifest. The `configFile` field already holds the bare filename (`main.conf`, `config.toml`) — the rename to `/etc/ark-os/mavlink-router.conf` etc. means manifests must also be updated so `configFile` holds the new filename (e.g., `mavlink-router.conf`, `logloader.toml`).
 4. **systemctl commands** (line 30, 53): Replace all `systemctl --user` with `systemctl`. Service names are unchanged (no `ark-` prefix).
@@ -592,7 +606,25 @@ var/www/ark-ui/html/               # built Vue dist (owned root:root, chowned to
 
 ### `packaging/bundle_node.sh` — Download and extract Node.js binary
 
-Download the Node.js 20 LTS arm64 binary tarball and extract `bin/node` and `bin/npm` + `lib/node_modules/npm/` into the package tree at `/usr/lib/ark-os/bin/` and `/usr/lib/ark-os/lib/`. This avoids depending on NodeSource or NVM.
+Pin **Node 20.20.2** (latest 20.x LTS released 2026-03-24). 20 not 22 because the current frontend was developed against Node 20 (`nvm install 20`); no reason to bump major in a packaging change.
+
+```bash
+NODE_VER=20.20.2
+NODE_TARBALL=node-v${NODE_VER}-linux-arm64.tar.xz
+NODE_URL=https://nodejs.org/dist/v${NODE_VER}/${NODE_TARBALL}
+SHASUMS_URL=https://nodejs.org/dist/v${NODE_VER}/SHASUMS256.txt
+
+curl -fsSLO "$NODE_URL"
+curl -fsSL "$SHASUMS_URL" | grep "$NODE_TARBALL" | sha256sum -c -
+tar -xJf "$NODE_TARBALL"
+
+# Extract into package tree
+install -m 0755 "node-v${NODE_VER}-linux-arm64/bin/node" "$BUILD_DIR/usr/lib/ark-os/bin/node"
+install -m 0755 "node-v${NODE_VER}-linux-arm64/bin/npm" "$BUILD_DIR/usr/lib/ark-os/bin/npm"
+cp -r "node-v${NODE_VER}-linux-arm64/lib/node_modules" "$BUILD_DIR/usr/lib/ark-os/lib/"
+```
+
+This avoids depending on NodeSource or NVM and locks the runtime version to a known-good release.
 
 ---
 
@@ -645,12 +677,12 @@ strategy:
 
 1. `actions/checkout@v4` with `submodules: recursive`
 2. Install build dependencies: `cmake, meson, ninja-build, pkg-config, gcc, g++, python3-pip, python3-venv, libssl-dev, libsqlite3-dev, libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstrtspserver-1.0-dev, lintian, ${{ matrix.extra_deps }}`
-3. Install MAVSDK arm64 from the upstream deb (needed by `libs/mavsdk-examples` build)
+3. Download and install the pinned MAVSDK arm64 `.deb` from `github.com/mavlink/MAVSDK/releases` (needed by `libs/mavsdk-examples` link step). Cache the downloaded `.deb` — it gets re-uploaded to the ARK-OS release in step 8.
 4. Install Node.js 20: `actions/setup-node@v4`
 5. Extract version from tag: `echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV`
 6. Run `./packaging/build.sh ${{ matrix.platform }} --version=${{ env.VERSION }}`
-7. Upload `.deb` artifact
-8. Create GitHub Release and attach `.deb` files (on tag push)
+7. Upload `.deb` artifact (both `ark-os-${platform}_${VERSION}_arm64.deb` and the cached `mavsdk_*_arm64.deb`)
+8. Create GitHub Release and attach **both** `.deb` files (ARK-OS and MAVSDK) so `ark_jetson_kernel/provision.sh` can fetch them from the same release page
 
 ### Considerations
 
@@ -668,17 +700,27 @@ Update `provision.sh` in the `ark_jetson_kernel` repo to install the `.deb` duri
 #!/bin/bash
 set -e
 
-ARK_OS_DEB_URL="https://github.com/ARK-Electronics/ARK-OS/releases/download/v1.0.0/ark-os-jetson_1.0.0_arm64.deb"
+RELEASE_BASE="https://github.com/ARK-Electronics/ARK-OS/releases/download/v1.0.0"
+ARK_OS_DEB="ark-os-jetson_1.0.0_arm64.deb"
+MAVSDK_DEB="mavsdk_3.0.0_arm64.deb"   # pin to whatever the release attaches
 
-echo "Downloading ark-os-jetson..."
-sudo wget -q -O "$ROOTFS_DIR/tmp/ark-os-jetson.deb" "$ARK_OS_DEB_URL"
+echo "Downloading ARK-OS debs..."
+sudo wget -q -O "$ROOTFS_DIR/tmp/$MAVSDK_DEB" "$RELEASE_BASE/$MAVSDK_DEB"
+sudo wget -q -O "$ROOTFS_DIR/tmp/$ARK_OS_DEB" "$RELEASE_BASE/$ARK_OS_DEB"
+
+echo "Installing MAVSDK first (ark-os depends on it)..."
+sudo chroot "$ROOTFS_DIR" apt-get update
+sudo chroot "$ROOTFS_DIR" dpkg -i "/tmp/$MAVSDK_DEB" || true
+sudo chroot "$ROOTFS_DIR" apt-get install -f -y
 
 echo "Installing ark-os-jetson..."
-sudo chroot "$ROOTFS_DIR" apt-get update
-sudo chroot "$ROOTFS_DIR" dpkg -i /tmp/ark-os-jetson.deb || true
+sudo chroot "$ROOTFS_DIR" dpkg -i "/tmp/$ARK_OS_DEB" || true
 sudo chroot "$ROOTFS_DIR" apt-get install -f -y
-sudo rm "$ROOTFS_DIR/tmp/ark-os-jetson.deb"
+
+sudo rm "$ROOTFS_DIR/tmp/$MAVSDK_DEB" "$ROOTFS_DIR/tmp/$ARK_OS_DEB"
 ```
+
+MAVSDK installs first because ARK-OS declares `Depends: mavsdk` — `dpkg -i ark-os` would fail without it (and `apt-get install -f` can't resolve MAVSDK since it's not in any apt repo).
 
 This works because `build.sh` already:
 - Registers `qemu-aarch64` binfmt handler (line 169-171)
@@ -686,7 +728,7 @@ This works because `build.sh` already:
 - Copies `/etc/resolv.conf` for DNS (line 209)
 - Creates the `jetson` user via `l4t_create_default_user.sh` (lines 180-181) before provisioning runs
 
-The version is hardcoded — update manually when bumping ARK-OS.
+Both versions are hardcoded — update manually when bumping ARK-OS or MAVSDK.
 
 ---
 
@@ -699,7 +741,8 @@ The version is hardcoded — update manually when bumping ARK-OS.
 5. **Config persistence**: Modify `/etc/ark-os/mavlink-router.conf`, upgrade package — verify dpkg prompts about changed conffile
 6. **Removal**: `sudo apt remove ark-os-jetson` — verify services stopped, files removed, `/etc/ark-os/` preserved
 7. **Purge**: `sudo apt purge ark-os-jetson` — verify `/etc/ark-os/` also removed
-8. **Opt-in services**: Verify `logloader`, `polaris`, `flight-review`, `rid-transmitter` are installed but not running by default; toggling in `/etc/ark-os/ark-os.conf` + reboot (or `systemctl enable --now <svc>`) brings them up
+8. **Opt-in services**: Verify `dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter` are installed (unit files present) but not running by default; `systemctl enable --now <svc>` brings them up
+9. **Target grouping**: `systemctl list-dependencies ark-os.target --plain` returns all 14 (Jetson) / 12 (Pi) services; `systemctl stop ark-os.target` stops the running set
 
 ---
 
@@ -722,6 +765,7 @@ packaging/
 │   ├── prerm                         # Pre-removal script
 │   └── postrm                        # Post-removal script
 ├── service-files/
+│   ├── ark-os.target               # Group target for discovery + bulk control
 │   ├── jetson/
 │   │   ├── mavlink-router.service
 │   │   ├── dds-agent.service
