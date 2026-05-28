@@ -44,10 +44,12 @@ jobs:
         # listed explicitly because libgstreamer1.0-dev's transitive dependency on
         # it is not auto-resolved on the ubuntu-22.04-arm runner image
         # ("libgstreamer1.0-dev : Depends: libunwind-dev / held broken packages").
+        # astyle is invoked by the service Makefiles' `all` target (make runs the
+        # formatter before cmake), so it is a build-time requirement too.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake meson ninja-build pkg-config gcc g++ \
+            cmake meson ninja-build pkg-config gcc g++ astyle \
             python3-pip python3-venv \
             libssl-dev libsqlite3-dev libunwind-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
