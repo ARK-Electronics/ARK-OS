@@ -1,0 +1,86 @@
+name: Build .deb packages
+
+# Release builds run on tag push (v*). workflow_dispatch allows a manual build
+# (versioned 0.0.0-<sha>, no release attachment).
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create/attach the GitHub Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: jetson
+            runner: ubuntu-22.04-arm
+            extra_deps: "libbluetooth-dev"
+          - platform: pi
+            runner: ubuntu-22.04-arm
+            extra_deps: ""
+    # ubuntu-22.04-arm provides Python 3.10, matching the JetPack 6 / Jammy
+    # rootfs. A Noble (24.04) runner would build a Python 3.12 venv that won't
+    # run on the target.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake meson ninja-build pkg-config gcc g++ \
+            python3-pip python3-venv \
+            libssl-dev libsqlite3-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
+            lintian ${{ matrix.extra_deps }}
+
+      - name: Install MAVSDK (build-time only, to link libs/mavsdk-examples)
+        run: |
+          MAVSDK_VERSION="$(grep -oP 'MAVSDK_VERSION="\K[^"]+' packaging/build.sh)"
+          DEB="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
+          echo "Installing MAVSDK $MAVSDK_VERSION ($DEB)"
+          curl -fsSLO "https://github.com/mavlink/MAVSDK/releases/download/v${MAVSDK_VERSION}/${DEB}"
+          sudo apt-get install -y "./${DEB}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/v}" ]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build .deb
+        run: ./packaging/build.sh ${{ matrix.platform }} --version=${{ steps.ver.outputs.version }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-os-${{ matrix.platform }}_${{ steps.ver.outputs.version }}_arm64
+          path: ark-os-${{ matrix.platform }}_*_arm64.deb
+          if-no-files-found: error
+
+      # Attach the per-platform .deb to the release for this tag. MAVSDK is NOT
+      # rebundled — its canonical home is the upstream MAVSDK releases page.
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ark-os-${{ matrix.platform }}_*_arm64.deb
+          fail_on_unmatched_files: true
