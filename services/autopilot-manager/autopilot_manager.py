@@ -386,7 +386,7 @@ class AutopilotManager:
         """Check if a systemd service is active"""
         try:
             result = subprocess.run(
-                ["systemctl", "--user", "is-active", service_name],
+                ["systemctl", "is-active", service_name],
                 capture_output=True,
                 text=True
             )
@@ -398,7 +398,7 @@ class AutopilotManager:
     def stop_mavlink_router(self):
         try:
             logger.debug("Stopping mavlink-router service")
-            result = subprocess.run(["systemctl", "--user", "stop", "mavlink-router"],
+            result = subprocess.run(["systemctl", "stop", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -415,7 +415,7 @@ class AutopilotManager:
     def restart_mavlink_router(self):
         try:
             logger.debug("Restarting mavlink-router service")
-            result = subprocess.run(["systemctl", "--user", "restart", "mavlink-router"],
+            result = subprocess.run(["systemctl", "restart", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -438,7 +438,7 @@ class AutopilotManager:
         script = "reset_fmu_wait_bl.py" if mode == "wait_bl" else "reset_fmu_fast.py"
         try:
             logger.debug(f"Resetting FMU using {script}")
-            result = subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")],
+            result = subprocess.run(["/usr/lib/ark-os/venv/bin/python3", f"/usr/lib/ark-os/scripts/{script}"],
                                    check=False,
                                    capture_output=True,
                                    text=True)
@@ -517,8 +517,8 @@ class AutopilotManager:
             # Run px_uploader.py with JSON progress output
             logger.debug(f"Starting firmware upload using px_uploader.py")
             command = [
-                "python3", "-u",
-                os.path.expanduser("~/.local/bin/px_uploader.py"),
+                "/usr/lib/ark-os/venv/bin/python3", "-u",
+                "/usr/lib/ark-os/scripts/px_uploader.py",
                 "--json-progress", "--port", serial_device, firmware_path
             ]
 

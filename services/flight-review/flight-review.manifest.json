@@ -2,7 +2,7 @@
   "displayName": "Flight Review",
   "description": "Flight Review server hosted locally.",
   "platform": ["jetson", "pi"],
-  "configFile": "",
+  "configFile": "flight-review.ini",
   "visible": true,
   "requires_sudo": false,
   "env_var": "INSTALL_LOGLOADER",

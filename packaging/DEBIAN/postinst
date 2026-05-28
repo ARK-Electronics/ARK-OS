@@ -99,11 +99,12 @@ fi
 
 # ===========================================================================
 # Step 1: Groups. Ensure the standard groups exist so the usermod can't fail
-# on a minimal rootfs, then add the service user to them.
+# on a minimal rootfs, then add the service user to them. systemd-journal lets
+# service-manager (running as $ARK_USER) read system unit logs via journalctl -u.
 # ===========================================================================
 groupadd -f -r gpio
-for grp in dialout i2c netdev; do groupadd -f -r "$grp" 2>/dev/null || true; done
-usermod -a -G dialout,gpio,i2c,netdev "$ARK_USER"
+for grp in dialout i2c netdev systemd-journal; do groupadd -f -r "$grp" 2>/dev/null || true; done
+usermod -a -G dialout,gpio,i2c,netdev,systemd-journal "$ARK_USER"
 
 # ===========================================================================
 # Step 2: Runtime data dirs owned by the service user.
