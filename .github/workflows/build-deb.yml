@@ -6,6 +6,10 @@ on:
   push:
     tags:
       - 'v*'
+  # TEMPORARY (remove before merging #68): build a downloadable .deb artifact on
+  # PR updates so the package can be validated pre-merge. No release is published
+  # on PR runs — the "Attach to GitHub Release" step is gated on refs/tags/v.
+  pull_request:
   workflow_dispatch:
 
 permissions:
