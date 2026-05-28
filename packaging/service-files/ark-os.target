@@ -1,0 +1,6 @@
+[Unit]
+Description=ARK-OS service group
+Documentation=https://github.com/ARK-Electronics/ARK-OS
+
+[Install]
+WantedBy=multi-user.target

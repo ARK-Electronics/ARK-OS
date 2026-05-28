@@ -1,0 +1,15 @@
+[Unit]
+Description=Mavlink Router
+Wants=network.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=pi
+Group=pi
+ExecStart=/usr/lib/ark-os/scripts/start_mavlink_router.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

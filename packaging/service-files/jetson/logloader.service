@@ -1,0 +1,18 @@
+[Unit]
+Description=Automatic ulog download and upload
+Wants=network.target
+After=network.target mavlink-router.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ExecStart=/usr/lib/ark-os/bin/logloader --config /etc/ark-os/logloader.toml
+Restart=always
+RestartSec=5
+Nice=10
+CPUWeight=50
+
+[Install]
+WantedBy=multi-user.target ark-os.target

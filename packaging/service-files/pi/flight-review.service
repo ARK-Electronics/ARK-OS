@@ -1,0 +1,15 @@
+[Unit]
+Description=PX4 Flight Review
+Wants=network.target
+After=network-online.target nginx.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+ExecStart=/usr/lib/ark-os/scripts/start_flight_review.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

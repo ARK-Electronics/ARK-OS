@@ -1,0 +1,14 @@
+[Unit]
+Description=Updates the hotspot name from hotspot-default to <hostname>-<serial>
+Wants=network.target network-online.target NetworkManager.service
+After=network-online.target NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/ark-os/scripts/update_hotspot_default.sh
+Restart=on-failure
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target ark-os.target
