@@ -1,0 +1,4 @@
+bluetooth_device = "hci0"
+connection_url = "udp://:14553"
+manufacturer_code = "MFR1"
+serial_number = "123456789ABC"

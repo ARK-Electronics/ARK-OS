@@ -1,0 +1,12 @@
+[rtsp]
+url = "camera1"
+address = "0.0.0.0"
+port = 5600
+
+[camera]
+framerate = 30
+bitrate = 5000
+resolution = "1920x1080"
+resolution_options = ["320x240", "640x480", "1280x720", "1920x1080"]
+rotation = "0"
+rotation_options = ["0", "90", "180", "270"]
