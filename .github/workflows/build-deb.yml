@@ -39,12 +39,17 @@ jobs:
           fetch-depth: 0
 
       - name: Install build dependencies
+        # The gstreamer *-dev libs are only needed to build/link rtsp-server in
+        # CI; on the Jetson target they ship with nvidia-jetpack. libunwind-dev is
+        # listed explicitly because libgstreamer1.0-dev's transitive dependency on
+        # it is not auto-resolved on the ubuntu-22.04-arm runner image
+        # ("libgstreamer1.0-dev : Depends: libunwind-dev / held broken packages").
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake meson ninja-build pkg-config gcc g++ \
             python3-pip python3-venv \
-            libssl-dev libsqlite3-dev \
+            libssl-dev libsqlite3-dev libunwind-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
             lintian ${{ matrix.extra_deps }}
 
