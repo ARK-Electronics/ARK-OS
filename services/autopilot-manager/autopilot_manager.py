@@ -506,13 +506,28 @@ class AutopilotManager:
             router_was_active = self.is_service_active("mavlink-router")
             if router_was_active:
                 logger.debug("mavlink-router is active, stopping it")
-                self.stop_mavlink_router()
+                if not self.stop_mavlink_router():
+                    error_msg = ("Could not stop mavlink-router; it still holds the autopilot "
+                                 "serial port, so the bootloader erase would stall. This usually "
+                                 "means the service user lacks polkit authorization to run "
+                                 "systemctl (the 99-ark-service-manager.pkla grant is missing).")
+                    logger.error(error_msg)
+                    socket.emit('error', {"message": error_msg}, room=socket_id)
+                    return False
             else:
                 logger.debug("mavlink-router is not active")
 
             # Reset FMU to enter bootloader mode
             logger.debug("Resetting FMU to enter bootloader mode")
-            self.reset_fmu(mode="wait_bl")
+            reset_ok, reset_msg = self.reset_fmu(mode="wait_bl")
+            if not reset_ok:
+                error_msg = f"Failed to reset FMU into bootloader mode: {reset_msg}"
+                logger.error(error_msg)
+                socket.emit('error', {"message": error_msg}, room=socket_id)
+                if router_was_active:
+                    self.restart_mavlink_router()
+                    self.mavlink.connect()
+                return False
 
             # Run px_uploader.py with JSON progress output
             logger.debug(f"Starting firmware upload using px_uploader.py")

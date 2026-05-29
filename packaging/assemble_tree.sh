@@ -97,6 +97,15 @@ else
 fi
 chmod 0644 "$SMR"
 
+# --- service-manager polkit pkla: the JetPack-6 / Ubuntu 22.04 rootfs runs polkit
+# 0.105, which honors .pkla (local authority) and ignores JS .rules; Pi/Bookworm is
+# the reverse. Ship both so the grant applies on each. pkla can't scope per-unit, so
+# it grants the service user blanket systemd manage rights (same breadth as the
+# NetworkManager grant above); the .rules file keeps per-unit scoping where honored.
+SMPKLA="$PKG/etc/polkit-1/localauthority/90-mandatory.d/99-ark-service-manager.pkla"
+sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/99-ark-service-manager.pkla > "$SMPKLA"
+chmod 0644 "$SMPKLA"
+
 # --- udev gpio rules (jetson only, renamed) ---
 if [ "$P" = "jetson" ]; then
     mkdir -p "$PKG/etc/udev/rules.d"

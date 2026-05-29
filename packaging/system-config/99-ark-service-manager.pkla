@@ -1,0 +1,6 @@
+[Allow @ARK_USER@ to manage ARK-OS systemd units]
+Identity=unix-user:@ARK_USER@
+Action=org.freedesktop.systemd1.manage-units;org.freedesktop.systemd1.manage-unit-files;org.freedesktop.systemd1.reload-daemon
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

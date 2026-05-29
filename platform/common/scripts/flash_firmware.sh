@@ -18,9 +18,23 @@ if [ -z "$SERIALDEVICE" ]; then
     exit 1
 fi
 
-systemctl stop mavlink-router &>/dev/null
+# Stop mavlink-router so it releases the autopilot serial port. If it can't be
+# stopped it keeps the port open at 2 Mbaud and the bootloader erase will stall,
+# so fail loud instead of hanging. (systemctl stop succeeds as a no-op if the unit
+# is already stopped.) A polkit denial here means the service user is missing the
+# 99-ark-service-manager.pkla grant.
+if ! systemctl stop mavlink-router &>/dev/null; then
+    jq -n --arg msg "Could not stop mavlink-router; it still holds the autopilot serial port. Check the service-manager polkit authorization." \
+          '{status: "failed", message: $msg, percent: 0}'
+    exit 1
+fi
 
-/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/scripts/reset_fmu_wait_bl.py &>/dev/null
+if ! /usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/scripts/reset_fmu_wait_bl.py &>/dev/null; then
+    jq -n --arg msg "Failed to reset the flight controller into bootloader mode." \
+          '{status: "failed", message: $msg, percent: 0}'
+    systemctl restart mavlink-router &>/dev/null
+    exit 1
+fi
 
 echo "Flashing $SERIALDEVICE"
 
