@@ -1,11 +1,6 @@
 {
   "displayName": "Autopilot Manager",
   "description": "Microservice backend for managing the autopilot",
-  "platform": ["all"],
   "configFile": "",
-  "visible": false,
-  "requires_sudo": false,
-  "env_var": "",
-  "install_script": "",
-  "install_files": ["autopilot_manager.py"]
+  "visible": false
 }
