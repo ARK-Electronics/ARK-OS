@@ -51,6 +51,25 @@ if [ "$(uname -m)" != "aarch64" ]; then
     echo "         for a release build (see .github/workflows/build-deb.yml)." >&2
 fi
 
+# The bundled venv, compiled binaries, and Node assume the build host's ABI
+# matches the target (JetPack 6 / Ubuntu 22.04 "jammy", Python 3.10). A mismatch
+# silently produces a .deb that won't run on the device, so fail fast unless the
+# operator knowingly overrides with ARK_OS_ALLOW_HOST_MISMATCH=1.
+HOST_CODENAME=""
+[ -r /etc/os-release ] && HOST_CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"
+HOST_PYTHON="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+if [ "$HOST_CODENAME" != "jammy" ] || [ "$HOST_PYTHON" != "3.10" ]; then
+    MSG="build host is ${HOST_CODENAME:-unknown}/python${HOST_PYTHON:-unknown}, expected jammy/python3.10 (JetPack 6 baseline)"
+    if [ "${ARK_OS_ALLOW_HOST_MISMATCH:-0}" = "1" ]; then
+        echo "WARNING: $MSG — continuing because ARK_OS_ALLOW_HOST_MISMATCH=1." >&2
+    else
+        echo "ERROR: $MSG." >&2
+        echo "       The venv/binaries/Node would not run on the target. Build on an" >&2
+        echo "       ubuntu-22.04-arm runner, or set ARK_OS_ALLOW_HOST_MISMATCH=1 to override." >&2
+        exit 1
+    fi
+fi
+
 # Fresh staging tree.
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
