@@ -24,8 +24,14 @@ echo "==> flight-review requirements"
 
 # Platform GPIO/sensor libs go INTO the venv (built without system-site-packages,
 # so apt-installed modules are invisible to the venv interpreter).
+#
+# jetson-stats is intentionally NOT installed here. Its jtop client talks to a
+# root-owned jtop.service daemon that only a system-wide install provides (and
+# its setup.py refuses venv installs off-target). It is installed system-wide
+# during Jetson provisioning instead; system-manager degrades gracefully when
+# the jtop client is unavailable.
 if [ "$PLATFORM" = "jetson" ]; then
-    "$VENV/bin/pip" install "Jetson.GPIO>=2.1.12" smbus2 jetson-stats
+    "$VENV/bin/pip" install "Jetson.GPIO>=2.1.12" smbus2
 elif [ "$PLATFORM" = "pi" ]; then
     "$VENV/bin/pip" install RPi.GPIO
 fi

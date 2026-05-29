@@ -80,14 +80,6 @@ jobs:
             echo "version=0.0.0-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Allow jetson-stats to install into the off-target venv
-        # jetson-stats' setup.py refuses to install into a virtualenv unless it
-        # also detects a super-user or Docker environment. The Jetson venv is
-        # built off-target on a generic arm runner, so present a Docker marker to
-        # satisfy that check (on-device, jetson-stats lives on the host).
-        if: matrix.platform == 'jetson'
-        run: sudo touch /.dockerenv
-
       - name: Build .deb
         run: ./packaging/build.sh ${{ matrix.platform }} --version=${{ steps.ver.outputs.version }}
 
