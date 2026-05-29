@@ -53,6 +53,21 @@ Installing the package on a device that was set up with the old `install.sh` flo
 ### Building Jetson images
 To install ARK-OS into a Jetson image during an `ark_jetson_kernel --provision` build (chroot), see `packaging/PLAN.md` Task 9.
 
+## Command-line tools
+The package puts its operator scripts on `PATH` via `/etc/profile.d/ark-os.sh`, which adds `/usr/lib/ark-os/scripts`. Each script's shebang points at the bundled venv (`/usr/lib/ark-os/venv/bin/python3`), so there is nothing to source or activate — open a login shell (e.g. SSH in) and run them by name:
+
+```
+mavlink_shell.py              # interactive PX4 NSH shell over MAVLink
+px4_shell_command.py <cmd>    # run a single PX4 console command over MAVLink
+flash_firmware.sh <fw.px4>    # flash FC firmware end to end (defaults to the bundled image)
+px_uploader.py ...            # low-level uploader (bootloader must already be active)
+reset_fmu_fast.py             # reset the FC (boots the application)
+reset_fmu_wait_bl.py          # reset the FC into bootloader mode
+get_serial_number.py          # print the Jetson serial number (Jetson only)
+```
+
+The directory also holds the service start-scripts and other internal helpers; the ones above are the operator-facing tools. The `PATH` entry takes effect on your next login — in the current shell, run `source /etc/profile.d/ark-os.sh` (or invoke a script by its full path under `/usr/lib/ark-os/scripts/`).
+
 ## ARK-UI
 A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
 

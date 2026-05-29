@@ -48,6 +48,12 @@ for f in platform/"$P"/scripts/* platform/common/scripts/*; do
     [ -f "$f" ] && install -m 0755 "$f" "$PKG$ARK/scripts/$(basename "$f")"
 done
 
+# --- operator scripts on PATH: a profile.d snippet adds $ARK/scripts to PATH for
+# login shells. The scripts carry #!/usr/lib/ark-os/venv/bin/python3, so they run
+# under the bundled venv with nothing to activate -- operators run them by name.
+mkdir -p "$PKG/etc/profile.d"
+install -m 0644 packaging/system-config/ark-os-path.sh "$PKG/etc/profile.d/ark-os.sh"
+
 # --- python services ---
 for svc in autopilot_manager connection_manager service_manager system_manager; do
     dir=$(echo "$svc" | tr '_' '-')
