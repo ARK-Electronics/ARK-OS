@@ -6,6 +6,12 @@ on:
   push:
     tags:
       - 'v*'
+  # Build a downloadable .deb on PR updates to validate the package pre-merge.
+  # This is the only pre-merge build path: workflow_dispatch is unavailable until
+  # build-deb.yml is on the default branch. No release is published on PR runs
+  # (the "Attach to GitHub Release" step is gated on refs/tags/v). Drop this
+  # before merging #68, or keep it as a deliberate PR check.
+  pull_request:
   workflow_dispatch:
 
 permissions:
