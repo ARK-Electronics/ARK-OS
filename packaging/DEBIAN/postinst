@@ -28,6 +28,22 @@ UID_VAL=$(id -u "$ARK_USER" 2>/dev/null || true)
 MIGRATED=0
 
 # ===========================================================================
+# Sudoers validation. The package ships /etc/sudoers.d/ark-os as a plain file;
+# a syntactically invalid drop-in there makes sudo refuse to run *system-wide*,
+# which could lock the operator out of sudo. Validate the shipped file and, on
+# failure, rename it to a dotted name (sudo ignores files with a '.' in the
+# name) so the bad fragment is quarantined rather than breaking sudo. visudo is
+# provided by the `sudo` package; skip the check if it is not present.
+# ===========================================================================
+if command -v visudo >/dev/null 2>&1 && [ -f /etc/sudoers.d/ark-os ]; then
+    if ! visudo -cf /etc/sudoers.d/ark-os >/dev/null 2>&1; then
+        mv -f /etc/sudoers.d/ark-os /etc/sudoers.d/ark-os.invalid 2>/dev/null || rm -f /etc/sudoers.d/ark-os
+        echo "WARNING: /etc/sudoers.d/ark-os failed validation and was disabled." >&2
+        echo "         connection-manager's 'sudo hostnamectl' will not work until this is fixed." >&2
+    fi
+fi
+
+# ===========================================================================
 # Step 0: Legacy cleanup — remove remnants of any pre-deb (source) install.
 # Idempotent; on a clean chroot / first install every operation is a no-op.
 # File deletions run unconditionally (rm -f is a no-op on missing targets);
