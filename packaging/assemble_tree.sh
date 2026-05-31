@@ -122,6 +122,13 @@ fi
 install -m 0644 packaging/system-config/10-ark-os.conf \
     "$PKG/etc/systemd/journald.conf.d/10-ark-os.conf"
 
+# --- ld.so.conf for the private C++ libs (polaris SDK + Micro-XRCE-DDS agent and
+# its FastDDS chain) that build_binaries.sh bundles under $ARK/lib. ldconfig in the
+# postinst builds the cache so the loader finds them on-device. ---
+mkdir -p "$PKG/etc/ld.so.conf.d"
+printf '%s\n' "$ARK/lib" > "$PKG/etc/ld.so.conf.d/ark-os.conf"
+chmod 0644 "$PKG/etc/ld.so.conf.d/ark-os.conf"
+
 # --- DEBIAN control (token substitution) + maintainer scripts ---
 sed -e "s/@PLATFORM@/$PLATFORM/g" \
     -e "s/@VERSION@/$VERSION/g" \

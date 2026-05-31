@@ -123,6 +123,16 @@ for grp in dialout i2c netdev systemd-journal; do groupadd -f -r "$grp" 2>/dev/n
 usermod -a -G dialout,gpio,i2c,netdev,systemd-journal "$ARK_USER"
 
 # ===========================================================================
+# Step 1b: Refresh the dynamic linker cache so the private C++ libs bundled under
+# /usr/lib/ark-os/lib (shipped with /etc/ld.so.conf.d/ark-os.conf) are found.
+# polaris-client-mavlink and MicroXRCEAgent link against libs that ship only in
+# this package (libpolaris_cpp_client, libmicroxrcedds_agent + its FastDDS chain);
+# without this they fail to load (exit 127). Runs in the chroot too so the flashed
+# image already has the cache.
+# ===========================================================================
+ldconfig
+
+# ===========================================================================
 # Step 2: Runtime data dirs owned by the service user.
 # ===========================================================================
 mkdir -p /var/lib/ark-os/logs /var/lib/ark-os/flight-review/data

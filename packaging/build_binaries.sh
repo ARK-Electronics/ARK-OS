@@ -8,8 +8,34 @@ set -euo pipefail
 
 cd "$REPO_ROOT"
 BIN_DIR="$BUILD_DIR$PKG_PREFIX/bin"
-mkdir -p "$BIN_DIR"
+LIB_DIR="$BUILD_DIR$PKG_PREFIX/lib"
+mkdir -p "$BIN_DIR" "$LIB_DIR"
 NPROC="$(nproc)"
+
+# Bundle a freshly-built binary's private (build-tree) shared-library deps into
+# LIB_DIR. The polaris SDK (libpolaris_cpp_client) and the Micro-XRCE-DDS agent +
+# its FastDDS/FastCDR chain are FetchContent/temp_install libs that exist only in
+# the submodule build trees, so `install`-ing just the executable leaves them
+# missing on-device (loader error 127). ldd is run while the binary's build-tree
+# RUNPATH still resolves; only libs resolving inside $REPO_ROOT are copied — system
+# libs and apt Depends (libmavsdk, gstreamer, bluez, openssl, sqlite) resolve
+# elsewhere and stay external. A shipped /etc/ld.so.conf.d/ark-os.conf + ldconfig
+# (postinst) make these findable, so the stale build-tree RUNPATH is harmless (the
+# loader falls through to the cache). Fail loud if anything is unresolved at build.
+bundle_build_tree_libs() {
+    local built_bin="$1" ldd_out
+    ldd_out="$(ldd "$built_bin")"
+    if grep -q 'not found' <<<"$ldd_out"; then
+        echo "ERROR: $built_bin has unresolved shared libraries at build time:" >&2
+        grep 'not found' <<<"$ldd_out" >&2
+        exit 1
+    fi
+    awk '/=> \// {print $3}' <<<"$ldd_out" | while read -r lib; do
+        case "$lib" in
+            "$REPO_ROOT"/*) install -m 0644 "$(readlink -f "$lib")" "$LIB_DIR/$(basename "$lib")" ;;
+        esac
+    done
+}
 
 echo "==> mavlink-router (meson + ninja)"
 ( cd services/mavlink-router/mavlink-router
@@ -25,6 +51,7 @@ echo "==> Micro-XRCE-DDS-Agent (cmake)"
   cmake -B build -DCMAKE_BUILD_TYPE=Release
   cmake --build build -j"$NPROC" )
 install -m 0755 services/dds-agent/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent "$BIN_DIR/"
+bundle_build_tree_libs services/dds-agent/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent
 
 echo "==> logloader (make -> cmake)"
 ( cd services/logloader/logloader && make )
@@ -37,6 +64,7 @@ install -m 0755 services/rtsp-server/rtsp-server/build/rtsp-server "$BIN_DIR/"
 echo "==> polaris-client-mavlink (make -> cmake)"
 ( cd services/polaris/polaris-client-mavlink && make )
 install -m 0755 services/polaris/polaris-client-mavlink/build/polaris-client-mavlink "$BIN_DIR/"
+bundle_build_tree_libs services/polaris/polaris-client-mavlink/build/polaris-client-mavlink
 
 if [ "$PLATFORM" = "jetson" ]; then
     echo "==> rid-transmitter (make -> cmake, jetson only)"
@@ -56,5 +84,15 @@ find libs/mavsdk-examples/build -type f -perm -u+x -not -path '*/CMakeFiles/*' |
     fi
 done
 
+# Fail loud if the private libs the FetchContent/cmake services need did not get
+# bundled (e.g. an ldd / path-filter regression) — shipping the binaries without
+# them reproduces the on-device "cannot open shared object" crash.
+for must in 'libpolaris_cpp_client.so*' 'libmicroxrcedds_agent.so*'; do
+    compgen -G "$LIB_DIR/$must" >/dev/null \
+        || { echo "ERROR: no library matching '$must' was bundled into $LIB_DIR" >&2; exit 1; }
+done
+
 echo "==> binaries staged in $BIN_DIR:"
 ls -1 "$BIN_DIR"
+echo "==> libraries bundled in $LIB_DIR:"
+ls -1 "$LIB_DIR"
