@@ -65,6 +65,19 @@ echo "==> polaris-client-mavlink (make -> cmake)"
 ( cd services/polaris/polaris-client-mavlink && make )
 install -m 0755 services/polaris/polaris-client-mavlink/build/polaris-client-mavlink "$BIN_DIR/"
 bundle_build_tree_libs services/polaris/polaris-client-mavlink/build/polaris-client-mavlink
+# The Polaris SDK also links libglog (and, where glog links it, libgflags), which
+# are installed on the build runner (see the CI build-deps step) but ship on
+# neither the Jetson nor the Pi rootfs and are not apt Depends. Their package names
+# differ across releases (libgoogle-glog0v5 / 0v6t64 / Debian's own), so a single
+# shared Depends would be wrong on one target — bundle the libs instead. ldd
+# resolves them (recursively, so glog's gflags dep is included) to system paths.
+polaris_extra_libs="$(ldd services/polaris/polaris-client-mavlink/build/polaris-client-mavlink \
+    | awk '/=> \// {print $3}' | grep -E '/lib(glog|gflags)\.so' || true)"
+[ -n "$polaris_extra_libs" ] \
+    || { echo "ERROR: polaris no longer links libglog/libgflags — revisit the bundling list" >&2; exit 1; }
+while read -r lib; do
+    install -m 0644 "$(readlink -f "$lib")" "$LIB_DIR/$(basename "$lib")"
+done <<<"$polaris_extra_libs"
 
 if [ "$PLATFORM" = "jetson" ]; then
     echo "==> rid-transmitter (make -> cmake, jetson only)"
@@ -87,7 +100,7 @@ done
 # Fail loud if the private libs the FetchContent/cmake services need did not get
 # bundled (e.g. an ldd / path-filter regression) — shipping the binaries without
 # them reproduces the on-device "cannot open shared object" crash.
-for must in 'libpolaris_cpp_client.so*' 'libmicroxrcedds_agent.so*'; do
+for must in 'libpolaris_cpp_client.so*' 'libmicroxrcedds_agent.so*' 'libglog.so*'; do
     compgen -G "$LIB_DIR/$must" >/dev/null \
         || { echo "ERROR: no library matching '$must' was bundled into $LIB_DIR" >&2; exit 1; }
 done
