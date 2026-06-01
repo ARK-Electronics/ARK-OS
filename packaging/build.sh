@@ -11,9 +11,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# --- Pinned toolchain/runtime versions (single source of truth) ---
-export NODE_VERSION="20.20.2"
-export MAVSDK_VERSION="3.17.1"   # bump alongside ark_jetson_kernel/provision.sh
+# --- Pinned toolchain/runtime versions ---
+# versions.env is the single source of truth (shared with install_ark_os.sh and
+# the CI workflow). Source it, then export the pins the helper scripts consume.
+# shellcheck source=packaging/versions.env
+source "$SCRIPT_DIR/versions.env"
+export NODE_VERSION MAVSDK_VERSION
 
 # --- Parse args ---
 PLATFORM="${1:-}"

@@ -23,19 +23,43 @@ sudo nmcli dev wifi connect <ssid> password <password>
 
 # Installation
 
-ARK-OS is distributed as a Debian package on the [Releases page](https://github.com/ARK-Electronics/ARK-OS/releases). Install the matching MAVSDK runtime first (ARK-OS depends on it) — MAVSDK lives on the [upstream MAVSDK releases](https://github.com/mavlink/MAVSDK/releases), there is no apt repository to subscribe to. Replace `<mavsdk-ver>` and `<ark-os-ver>` with the current pinned versions.
+ARK-OS is distributed as a Debian package on the [Releases page](https://github.com/ARK-Electronics/ARK-OS/releases). It depends on the MAVSDK C++ runtime, which has no apt repository — it is downloaded from the [upstream MAVSDK releases](https://github.com/mavlink/MAVSDK/releases). On Jetson, the web UI's system stats additionally need `jetson-stats` (jtop) installed system-wide. The install script below handles all of this; manual steps follow if you prefer.
 
-### Jetson
+### Install / update with the script (recommended)
+
+`packaging/install_ark_os.sh` installs MAVSDK, `jetson-stats` (Jetson only), and ARK-OS in the correct order, and is also the supported way to update a live device. Run it from a checkout of this repo on the device:
+
+```
+git clone https://github.com/ARK-Electronics/ARK-OS.git
+cd ARK-OS
+
+# Download and install a published release (replace X.Y.Z):
+sudo ./packaging/install_ark_os.sh --ark-os-version=X.Y.Z
+
+# ...or install a .deb you already have (built locally or downloaded):
+sudo ./packaging/install_ark_os.sh ./ark-os-jetson_X.Y.Z_arm64.deb
+```
+
+The script auto-detects Jetson vs Pi (override with `--platform`), skips MAVSDK/jtop when they are already at the pinned versions, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
+
+### Manual install
+
+Install MAVSDK first (ARK-OS depends on it), then ARK-OS. Replace `<mavsdk-ver>`, `<ark-os-ver>`, and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`.
+
+#### Jetson
 ```
 wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson_<ark-os-ver>_arm64.deb
 
 sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 sudo apt install ./ark-os-jetson_<ark-os-ver>_arm64.deb
+
+# Recommended: jtop, for Jetson system stats in the web UI
+sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
 ```
 
-### Raspberry Pi
-Identical, replacing `ark-os-jetson` with `ark-os-pi`:
+#### Raspberry Pi
+Identical, replacing `ark-os-jetson` with `ark-os-pi` (no jetson-stats step):
 ```
 wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi_<ark-os-ver>_arm64.deb
@@ -45,7 +69,7 @@ sudo apt install ./ark-os-pi_<ark-os-ver>_arm64.deb
 ```
 
 ### Updating
-Download the newer `.deb` from the Releases page and `sudo apt install ./ark-os-<platform>_<ver>_arm64.deb`. **Upgrading resets the per-service configuration under `/etc/ark-os/` to packaged defaults** — reconfigure via the web UI afterward.
+Re-run `install_ark_os.sh` (it upgrades ARK-OS in place and leaves MAVSDK/jtop alone when already current), or manually `sudo apt install ./ark-os-<platform>_<ver>_arm64.deb`. **Upgrading resets the per-service configuration under `/etc/ark-os/` to packaged defaults** — reconfigure via the web UI afterward.
 
 ### Migrating from a source install
 Installing the package on a device that was set up with the old `install.sh` flow migrates it automatically: the legacy user services and binaries are removed and your previous configs are backed up to `~/.config/ark-os-legacy-backup/`. **Reboot after installing** so no stale user-session services keep holding the autopilot UART / MAVLink ports.

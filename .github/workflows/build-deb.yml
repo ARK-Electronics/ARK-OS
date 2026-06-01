@@ -62,7 +62,7 @@ jobs:
 
       - name: Install MAVSDK (build-time only, to link libs/mavsdk-examples)
         run: |
-          MAVSDK_VERSION="$(grep -oP 'MAVSDK_VERSION="\K[^"]+' packaging/build.sh)"
+          . packaging/versions.env
           DEB="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
           echo "Installing MAVSDK $MAVSDK_VERSION ($DEB)"
           curl -fsSLO "https://github.com/mavlink/MAVSDK/releases/download/v${MAVSDK_VERSION}/${DEB}"
