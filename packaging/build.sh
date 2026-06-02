@@ -54,21 +54,27 @@ if [ "$(uname -m)" != "aarch64" ]; then
     echo "         for a release build (see .github/workflows/build-deb.yml)." >&2
 fi
 
-# The bundled venv, compiled binaries, and Node assume the build host's ABI
-# matches the target (JetPack 6 / Ubuntu 22.04 "jammy", Python 3.10). A mismatch
-# silently produces a .deb that won't run on the device, so fail fast unless the
-# operator knowingly overrides with ARK_OS_ALLOW_HOST_MISMATCH=1.
+# The bundled venv (built with `python3 -m venv --copies`, which references the
+# system python's stdlib at runtime), the natively-compiled binaries, and Node
+# assume the build host's OS/ABI matches the target. Each platform has a distinct
+# baseline, so building on the wrong host silently produces a .deb that won't run
+# on the device. Fail fast on a mismatch unless ARK_OS_ALLOW_HOST_MISMATCH=1.
+case "$PLATFORM" in
+    jetson) EXPECT_CODENAME="jammy";    EXPECT_PYTHON="3.10" ;;  # JetPack 6 / Ubuntu 22.04
+    pi)     EXPECT_CODENAME="bookworm"; EXPECT_PYTHON="3.11" ;;  # Raspberry Pi OS / Debian 12
+esac
 HOST_CODENAME=""
 [ -r /etc/os-release ] && HOST_CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"
 HOST_PYTHON="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
-if [ "$HOST_CODENAME" != "jammy" ] || [ "$HOST_PYTHON" != "3.10" ]; then
-    MSG="build host is ${HOST_CODENAME:-unknown}/python${HOST_PYTHON:-unknown}, expected jammy/python3.10 (JetPack 6 baseline)"
+if [ "$HOST_CODENAME" != "$EXPECT_CODENAME" ] || [ "$HOST_PYTHON" != "$EXPECT_PYTHON" ]; then
+    MSG="build host is ${HOST_CODENAME:-unknown}/python${HOST_PYTHON:-unknown}, expected $EXPECT_CODENAME/python$EXPECT_PYTHON for the $PLATFORM target"
     if [ "${ARK_OS_ALLOW_HOST_MISMATCH:-0}" = "1" ]; then
         echo "WARNING: $MSG — continuing because ARK_OS_ALLOW_HOST_MISMATCH=1." >&2
     else
         echo "ERROR: $MSG." >&2
-        echo "       The venv/binaries/Node would not run on the target. Build on an" >&2
-        echo "       ubuntu-22.04-arm runner, or set ARK_OS_ALLOW_HOST_MISMATCH=1 to override." >&2
+        echo "       The venv/binaries/Node would not run on the target. Build $PLATFORM on" >&2
+        echo "       its matching host (see .github/workflows/build-deb.yml), or set" >&2
+        echo "       ARK_OS_ALLOW_HOST_MISMATCH=1 to override." >&2
         exit 1
     fi
 fi

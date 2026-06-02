@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Create the Python virtualenv AT ITS FINAL INSTALL PATH so that shebangs and
 # pyvenv.cfg resolve correctly on the device, then move it into the package tree.
-# The runner must be arm64 with Python 3.10 (matches the JetPack 6 / Jammy
-# rootfs). Invoked by build.sh.
+# The build host must be arm64 with the target's system Python: 3.10 for jetson
+# (JetPack 6 / Jammy) or 3.11 for pi (Raspberry Pi OS / Bookworm). build.sh
+# enforces this baseline. Invoked by build.sh.
 set -euo pipefail
 
 cd "$REPO_ROOT"
@@ -33,7 +34,13 @@ echo "==> flight-review requirements"
 if [ "$PLATFORM" = "jetson" ]; then
     "$VENV/bin/pip" install "Jetson.GPIO>=2.1.12" smbus2
 elif [ "$PLATFORM" = "pi" ]; then
-    "$VENV/bin/pip" install RPi.GPIO
+    # No Python GPIO library is installed for Pi. The vbus_*/reset_fmu_* helpers
+    # drive GPIO via the system `pinctrl` tool (raspi-utils) instead. Classic
+    # RPi.GPIO can't reach the CM5's RP1 I/O controller, and gpiochip-based shims
+    # (rpi-lgpio) RELEASE the line when the process exits — reverting the pin —
+    # which the set-and-exit helpers can't tolerate. pinctrl writes the pad
+    # register directly and persists the level across exit on both CM4 and CM5.
+    :
 fi
 
 # The Jetson venv must import the host's system-wide jetson-stats (the jtop
