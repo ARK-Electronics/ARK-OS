@@ -11,11 +11,13 @@ P="$PLATFORM"
 ARK="$PKG_PREFIX"   # /usr/lib/ark-os
 
 # Platform-specific control Depends. EXTRA_DEPENDS is a suffix inserted after
-# libmavsdk-dev; PYTHON_PKG names the system python the bundled venv binds to
-# (jetson builds on Jammy/3.10, pi on Bookworm/3.11 — see build.sh).
+# libmavsdk-dev. PYTHON_PKG (the system python the bundled venv binds to) and
+# CODENAME come from build.sh, which resolves them from the build host's release.
+# NOTE: the base Depends in DEBIAN/control use bookworm/jammy package names; revisit
+# them per release when adding one (e.g. Debian 13/trixie renamed several libs *t64).
 case "$P" in
-    jetson) EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils"; PYTHON_PKG="python3.10" ;;
-    pi)     EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils";              PYTHON_PKG="python3.11" ;;
+    jetson) EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
+    pi)     EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
 esac
 
 # --- directory skeleton ---
@@ -140,11 +142,17 @@ chmod 0644 "$PKG/etc/ld.so.conf.d/ark-os.conf"
 
 # --- DEBIAN control (token substitution) + maintainer scripts ---
 sed -e "s/@PLATFORM@/$PLATFORM/g" \
+    -e "s/@CODENAME@/$CODENAME/g" \
     -e "s/@VERSION@/$VERSION/g" \
     -e "s/@PYTHON@/$PYTHON_PKG/g" \
     -e "s|@EXTRA_DEPENDS@|$EXTRA_DEPENDS|g" \
     packaging/DEBIAN/control > "$PKG/DEBIAN/control"
 chmod 0644 "$PKG/DEBIAN/control"
+
+sed -e "s/@PLATFORM@/$PLATFORM/g" \
+    -e "s/@CODENAME@/$CODENAME/g" \
+    packaging/DEBIAN/preinst > "$PKG/DEBIAN/preinst"
+chmod 0755 "$PKG/DEBIAN/preinst"
 
 sed -e "s/@ARK_USER@/$ARK_USER/g" \
     -e "s/@PLATFORM@/$PLATFORM/g" \

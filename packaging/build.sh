@@ -4,8 +4,9 @@
 # Usage: ./packaging/build.sh <jetson|pi> [--version=X.Y.Z]
 #
 # Must run on arm64 (native compilation, arm64 venv, arm64 Node). Produces
-# ark-os-<platform>_<version>_arm64.deb in the repo root. The helper scripts read
-# the exported environment below; run them via this orchestrator, not directly.
+# ark-os-<platform>-<codename>_<version>_arm64.deb in the repo root; <codename> is
+# read from the build host's OS release. The helper scripts read the exported
+# environment below; run them via this orchestrator, not directly.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,21 +56,44 @@ if [ "$(uname -m)" != "aarch64" ]; then
 fi
 
 # The bundled venv (built with `python3 -m venv --copies`, which references the
-# system python's stdlib at runtime), the natively-compiled binaries, and Node
-# assume the build host's OS/ABI matches the target. Each platform has a distinct
-# baseline, so building on the wrong host silently produces a .deb that won't run
-# on the device. Fail fast on a mismatch unless ARK_OS_ALLOW_HOST_MISMATCH=1.
+# system python's stdlib at runtime), the natively-compiled binaries, and Node are
+# ABI-bound to the build host's OS release. The host codename is therefore read
+# here and baked into the package name (ark-os-<platform>-<codename>): you build
+# each target on a host whose OS matches it. Building on a host outside the
+# supported set silently produces a .deb that won't run on the device, so fail fast
+# unless ARK_OS_ALLOW_HOST_MISMATCH=1.
+#
+# BASELINES is the per-platform table of supported "codename:python" baselines
+# (first entry = default, used for naming when overriding off-target). Supporting a
+# new OS release = add an entry here and a matching leg to the CI build matrix
+# (.github/workflows/build-deb.yml).
 case "$PLATFORM" in
-    jetson) EXPECT_CODENAME="jammy";    EXPECT_PYTHON="3.10" ;;  # JetPack 6 / Ubuntu 22.04
-    pi)     EXPECT_CODENAME="bookworm"; EXPECT_PYTHON="3.11" ;;  # Raspberry Pi OS / Debian 12
+    jetson) BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7 (noble = future, untested)
+    pi)     BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 / Debian 13 (trixie = future, untested)
 esac
+
 HOST_CODENAME=""
 [ -r /etc/os-release ] && HOST_CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"
 HOST_PYTHON="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
-if [ "$HOST_CODENAME" != "$EXPECT_CODENAME" ] || [ "$HOST_PYTHON" != "$EXPECT_PYTHON" ]; then
-    MSG="build host is ${HOST_CODENAME:-unknown}/python${HOST_PYTHON:-unknown}, expected $EXPECT_CODENAME/python$EXPECT_PYTHON for the $PLATFORM target"
+
+# Resolve the host codename against the platform's baseline table.
+EXPECT_PYTHON=""
+for entry in $BASELINES; do
+    [ "${entry%%:*}" = "$HOST_CODENAME" ] && { EXPECT_PYTHON="${entry#*:}"; break; }
+done
+
+if [ -n "$EXPECT_PYTHON" ] && [ "$HOST_PYTHON" = "$EXPECT_PYTHON" ]; then
+    CODENAME="$HOST_CODENAME"
+    PYTHON_PKG="python$EXPECT_PYTHON"
+else
+    DEFAULT_ENTRY="${BASELINES%% *}"
+    MSG="build host is ${HOST_CODENAME:-unknown}/python${HOST_PYTHON:-unknown}; not a supported $PLATFORM baseline ($BASELINES)"
     if [ "${ARK_OS_ALLOW_HOST_MISMATCH:-0}" = "1" ]; then
+        CODENAME="${DEFAULT_ENTRY%%:*}"
+        PYTHON_PKG="python${DEFAULT_ENTRY#*:}"
         echo "WARNING: $MSG — continuing because ARK_OS_ALLOW_HOST_MISMATCH=1." >&2
+        echo "         Naming the package ark-os-$PLATFORM-$CODENAME, but its venv/binaries/Node" >&2
+        echo "         were built off-target and will NOT run on a real device." >&2
     else
         echo "ERROR: $MSG." >&2
         echo "       The venv/binaries/Node would not run on the target. Build $PLATFORM on" >&2
@@ -78,6 +102,7 @@ if [ "$HOST_CODENAME" != "$EXPECT_CODENAME" ] || [ "$HOST_PYTHON" != "$EXPECT_PY
         exit 1
     fi
 fi
+export CODENAME PYTHON_PKG
 
 # Fresh staging tree.
 rm -rf "$BUILD_DIR"
@@ -89,7 +114,7 @@ mkdir -p "$BUILD_DIR"
 "$SCRIPT_DIR/bundle_node.sh"
 "$SCRIPT_DIR/assemble_tree.sh"
 
-DEB="$REPO_ROOT/ark-os-${PLATFORM}_${VERSION}_arm64.deb"
+DEB="$REPO_ROOT/ark-os-${PLATFORM}-${CODENAME}_${VERSION}_arm64.deb"
 echo "==> dpkg-deb --build"
 dpkg-deb --build --root-owner-group "$BUILD_DIR" "$DEB"
 

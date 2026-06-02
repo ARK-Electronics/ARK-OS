@@ -44,13 +44,16 @@ Installs MAVSDK, jetson-stats (Jetson only), and ARK-OS on a live device in the
 correct order. Also the supported way to update a live device.
 
 Positional:
-  ARK_OS_DEB                Path to a local ark-os-<platform>_<ver>_arm64.deb. If
+  ARK_OS_DEB                Path to a local ark-os-<platform>-<codename>_<ver>_arm64.deb. If
                             omitted, a single matching deb in the current
                             directory is used, or one is downloaded when
                             --ark-os-version is given.
 
 Options:
   --platform=jetson|pi      Override platform autodetection.
+  --codename=NAME           Override OS-release codename autodetection (bookworm, jammy,
+                            …). Only needed to name a download when /etc/os-release
+                            can't be read.
   --ark-os-version=X.Y.Z    Download this ark-os release when no local deb is given.
   --mavsdk-deb=PATH         Install MAVSDK from a local deb instead of downloading.
   --mavsdk-version=X.Y.Z    Override the MAVSDK version (default from versions.env).
@@ -65,6 +68,7 @@ EOF
 
 # --- Arg parsing ---
 PLATFORM=""
+CODENAME=""
 DEB_ARG=""
 ARK_OS_VERSION=""
 MAVSDK_DEB=""
@@ -75,6 +79,7 @@ OPT_JETSON_STATS_VERSION=""
 for arg in "$@"; do
     case "$arg" in
         --platform=*)            PLATFORM="${arg#*=}" ;;
+        --codename=*)             CODENAME="${arg#*=}" ;;
         --ark-os-version=*)       ARK_OS_VERSION="${arg#*=}" ;;
         --mavsdk-deb=*)           MAVSDK_DEB="${arg#*=}" ;;
         --mavsdk-version=*)       OPT_MAVSDK_VERSION="${arg#*=}" ;;
@@ -100,8 +105,8 @@ JETSON_STATS_VERSION="${OPT_JETSON_STATS_VERSION:-${JETSON_STATS_VERSION:-}}"
 # --- Helpers ---
 platform_from_deb() {
     case "$(basename "$1")" in
-        ark-os-jetson_*) echo jetson ;;
-        ark-os-pi_*)     echo pi ;;
+        ark-os-jetson-*) echo jetson ;;
+        ark-os-pi-*)     echo pi ;;
         *)               return 1 ;;
     esac
 }
@@ -115,6 +120,13 @@ detect_platform() {
             *Raspberry*Pi*)   echo pi;     return ;;
         esac
     fi
+    return 1
+}
+
+detect_codename() {
+    [ -r /etc/os-release ] || return 1
+    local c; c="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+    [ -n "$c" ] && { echo "$c"; return; }
     return 1
 }
 
@@ -153,6 +165,12 @@ fi
 case "$PLATFORM" in jetson|pi) ;; *) die "invalid platform '$PLATFORM' (expected jetson or pi)." ;; esac
 info "Platform: $PLATFORM"
 
+# Codename: explicit flag wins; otherwise read from the device's /etc/os-release.
+# Only required to construct a download URL (--ark-os-version); a local/cwd deb
+# carries its codename in the filename, and the deb's preinst guards a mismatch.
+[ -n "$CODENAME" ] || CODENAME="$(detect_codename || true)"
+[ -n "$CODENAME" ] && info "OS codename: $CODENAME"
+
 # Every ARK-OS service runs as User=$PLATFORM (baked into the unit files). Modern
 # Raspberry Pi OS no longer ships a default 'pi' account, so fail before touching
 # the system rather than letting the deb's postinst abort on a missing user.
@@ -173,7 +191,7 @@ if [ -n "$DEB_ARG" ]; then
     ARK_OS_DEB="$DEB_ARG"
 else
     shopt -s nullglob
-    matches=( "ark-os-${PLATFORM}_"*_arm64.deb )
+    matches=( "ark-os-${PLATFORM}-"*_arm64.deb )
     shopt -u nullglob
     if [ "${#matches[@]}" -eq 1 ]; then
         ARK_OS_DEB="${matches[0]}"
@@ -181,7 +199,8 @@ else
     elif [ "${#matches[@]}" -gt 1 ]; then
         die "multiple ark-os-${PLATFORM} debs in $(pwd); pass the one to install as an argument."
     elif [ -n "$ARK_OS_VERSION" ]; then
-        ARK_OS_DEB="$DL_DIR/ark-os-${PLATFORM}_${ARK_OS_VERSION}_arm64.deb"
+        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|jammy|…>."
+        ARK_OS_DEB="$DL_DIR/ark-os-${PLATFORM}-${CODENAME}_${ARK_OS_VERSION}_arm64.deb"
         fetch "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$(basename "$ARK_OS_DEB")" "$ARK_OS_DEB"
     else
         die "no ark-os deb given: pass a path, place one in $(pwd), or use --ark-os-version=X.Y.Z."

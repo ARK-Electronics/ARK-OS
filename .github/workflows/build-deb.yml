@@ -24,10 +24,12 @@ jobs:
       matrix:
         include:
           - platform: jetson
+            codename: jammy
             runner: ubuntu-22.04-arm
             container: ""
             extra_deps: "libbluetooth-dev"
           - platform: pi
+            codename: bookworm
             runner: ubuntu-22.04-arm
             container: "debian:bookworm"
             extra_deps: ""
@@ -38,7 +40,9 @@ jobs:
     # Bookworm (no system python3.10) and vice-versa.
     #   - jetson: ubuntu-22.04-arm natively   (Jammy / Python 3.10  = JetPack 6 rootfs)
     #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS)
-    # The container runs on the same arm64 host.
+    # The container runs on the same arm64 host. Each leg's `codename` (the host's OS
+    # release) is part of the package name (ark-os-<platform>-<codename>); supporting a
+    # new release is one more leg here plus an entry in build.sh's BASELINES table.
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     # Force bash for inline `run:` steps. The native runner defaults to bash, but the
@@ -110,8 +114,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ark-os-${{ matrix.platform }}_${{ steps.ver.outputs.version }}_arm64
-          path: ark-os-${{ matrix.platform }}_*_arm64.deb
+          name: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_${{ steps.ver.outputs.version }}_arm64
+          path: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
           if-no-files-found: error
 
       # Attach the per-platform .deb to the release for this tag. MAVSDK is NOT
@@ -120,5 +124,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ark-os-${{ matrix.platform }}_*_arm64.deb
+          files: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
           fail_on_unmatched_files: true

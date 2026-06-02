@@ -1,0 +1,26 @@
+#!/bin/sh
+# Refuse to install a package built for one OS release onto another. ARK-OS bundles
+# a venv (created with `python3 -m venv --copies`, so it binds to the system
+# python's stdlib at runtime), natively-compiled binaries, and Node — all ABI-bound
+# to @CODENAME@: the system python version and shared-library sonames differ across
+# Debian/Ubuntu releases, so on the wrong release the services break at runtime. The
+# codename is part of the package name (ark-os-@PLATFORM@-@CODENAME@); this is the
+# matching runtime check for a hand-installed .deb, which apt would otherwise reject
+# only later with a cryptic unmet-dependency error (or not at all).
+set -e
+
+want="@CODENAME@"
+have=""
+[ -r /etc/os-release ] && have="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+
+if [ -n "$have" ] && [ "$have" != "$want" ]; then
+    echo "ERROR: ark-os-@PLATFORM@-$want is built for the '$want' OS release, but this system is '$have'." >&2
+    echo "       Its bundled runtime will not work here — install the ark-os-@PLATFORM@-$have build instead." >&2
+    if [ "${ARK_OS_ALLOW_CODENAME_MISMATCH:-0}" != "1" ]; then
+        echo "       (set ARK_OS_ALLOW_CODENAME_MISMATCH=1 to override, for testing only.)" >&2
+        exit 1
+    fi
+    echo "       Continuing anyway because ARK_OS_ALLOW_CODENAME_MISMATCH=1." >&2
+fi
+
+exit 0
