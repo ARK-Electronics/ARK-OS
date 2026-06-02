@@ -22,6 +22,26 @@ NPROC="$(nproc)"
 # elsewhere and stay external. A shipped /etc/ld.so.conf.d/ark-os.conf + ldconfig
 # (postinst) make these findable, so the stale build-tree RUNPATH is harmless (the
 # loader falls through to the cache). Fail loud if anything is unresolved at build.
+# Install a resolved shared library into LIB_DIR under its soname, failing loud on
+# a name collision: two services may each bundle a private lib with the same
+# basename, and silently overwriting one with a different build would break the
+# loser at load time. An identical duplicate (same bytes) is accepted as a no-op.
+install_bundled_lib() {
+    local src dest
+    src="$(readlink -f "$1")"
+    dest="$LIB_DIR/$(basename "$1")"
+    if [ -e "$dest" ]; then
+        if ! cmp -s "$src" "$dest"; then
+            echo "ERROR: shared-library name collision in $LIB_DIR: $(basename "$1")" >&2
+            echo "       '$src' differs from the copy already bundled — two services" >&2
+            echo "       ship different libraries with the same soname." >&2
+            exit 1
+        fi
+        return 0
+    fi
+    install -m 0644 "$src" "$dest"
+}
+
 bundle_build_tree_libs() {
     local built_bin="$1" ldd_out
     ldd_out="$(ldd "$built_bin")"
@@ -30,11 +50,13 @@ bundle_build_tree_libs() {
         grep 'not found' <<<"$ldd_out" >&2
         exit 1
     fi
-    awk '/=> \// {print $3}' <<<"$ldd_out" | while read -r lib; do
+    # Process substitution (not a pipe) keeps the loop in this shell so a collision
+    # in install_bundled_lib aborts the build, not just a subshell.
+    while read -r lib; do
         case "$lib" in
-            "$REPO_ROOT"/*) install -m 0644 "$(readlink -f "$lib")" "$LIB_DIR/$(basename "$lib")" ;;
+            "$REPO_ROOT"/*) install_bundled_lib "$lib" ;;
         esac
-    done
+    done < <(awk '/=> \// {print $3}' <<<"$ldd_out")
 }
 
 echo "==> mavlink-router (meson + ninja)"
@@ -76,7 +98,7 @@ polaris_extra_libs="$(ldd services/polaris/polaris-client-mavlink/build/polaris-
 [ -n "$polaris_extra_libs" ] \
     || { echo "ERROR: polaris no longer links libglog/libgflags — revisit the bundling list" >&2; exit 1; }
 while read -r lib; do
-    install -m 0644 "$(readlink -f "$lib")" "$LIB_DIR/$(basename "$lib")"
+    install_bundled_lib "$lib"
 done <<<"$polaris_extra_libs"
 
 if [ "$PLATFORM" = "jetson" ]; then

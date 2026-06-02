@@ -153,6 +153,12 @@ fi
 case "$PLATFORM" in jetson|pi) ;; *) die "invalid platform '$PLATFORM' (expected jetson or pi)." ;; esac
 info "Platform: $PLATFORM"
 
+# Every ARK-OS service runs as User=$PLATFORM (baked into the unit files). Modern
+# Raspberry Pi OS no longer ships a default 'pi' account, so fail before touching
+# the system rather than letting the deb's postinst abort on a missing user.
+getent passwd "$PLATFORM" >/dev/null 2>&1 || \
+    die "ARK-OS services run as the user '$PLATFORM', which does not exist on this device. Re-image with the username '$PLATFORM', or create it first: sudo useradd -m -s /bin/bash $PLATFORM && sudo passwd $PLATFORM && sudo usermod -aG sudo $PLATFORM"
+
 [ -n "$MAVSDK_VERSION" ] || die "MAVSDK version unknown (no versions.env and no --mavsdk-version)."
 
 # --- Scratch space for downloads ---

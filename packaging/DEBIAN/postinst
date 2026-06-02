@@ -28,6 +28,23 @@ UID_VAL=$(id -u "$ARK_USER" 2>/dev/null || true)
 MIGRATED=0
 
 # ===========================================================================
+# Required service account. Every ARK-OS unit runs as User=$ARK_USER (baked at
+# build time: 'jetson' or 'pi'). Modern Raspberry Pi OS no longer ships a default
+# 'pi' account — it is chosen at imaging time — so a Pi imaged with a different
+# username has no 'pi' user and every service would fail to start. Fail early with
+# guidance instead of letting the Step 1 usermod abort with a cryptic error.
+# (Jetson chroot provisioning creates the 'jetson' user before this runs.)
+# ===========================================================================
+if ! getent passwd "$ARK_USER" >/dev/null; then
+    echo "ERROR: ARK-OS requires a user named '$ARK_USER', which does not exist on this system." >&2
+    echo "       All ARK-OS services run as User=$ARK_USER. Re-image with the username" >&2
+    echo "       '$ARK_USER', or create the account and reinstall:" >&2
+    echo "         sudo useradd -m -s /bin/bash $ARK_USER && sudo passwd $ARK_USER" >&2
+    echo "         sudo usermod -aG sudo $ARK_USER" >&2
+    exit 1
+fi
+
+# ===========================================================================
 # Sudoers validation. The package ships /etc/sudoers.d/ark-os as a plain file;
 # a syntactically invalid drop-in there makes sudo refuse to run *system-wide*,
 # which could lock the operator out of sudo. Validate the shipped file and, on
@@ -146,6 +163,11 @@ chown -R "$ARK_USER:$ARK_USER" /var/lib/ark-os
 # ===========================================================================
 chgrp -R "$ARK_USER" /etc/ark-os
 chmod 2775 /etc/ark-os
+# TODO(security): these configs are world-readable (0664; dir 2775), so any local
+# user can read secrets entered via the web UI (polaris_api_key, flight-review SMTP
+# password, rid-transmitter serial, ...). Revisit: restrict secret-bearing files to
+# 0640 root:$ARK_USER and drop world-read once every reader (service-manager web UI
+# and each service) is confirmed to run as $ARK_USER or in its group.
 chmod 0664 /etc/ark-os/* 2>/dev/null || true
 
 # ===========================================================================

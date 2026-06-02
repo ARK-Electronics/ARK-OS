@@ -32,7 +32,22 @@ CONFIG_DIR = "/etc/ark-os"
 class ServiceManager:
     
     @staticmethod
+    def is_known_service(service_name):
+        """Only services the package installed a manifest for may be managed.
+
+        Guards the systemctl / journalctl / config operations below against
+        arbitrary unit names from the web UI. The Jetson polkit .pkla grant is not
+        unit-scoped, so without this check a request could reach any system unit.
+        """
+        if not service_name or "/" in service_name or service_name in (".", ".."):
+            return False
+        manifest_file = os.path.join(MANIFEST_DIR, f"{service_name}.manifest.json")
+        return os.path.isfile(manifest_file)
+
+    @staticmethod
     def run_systemctl(operation, service_name):
+        if not ServiceManager.is_known_service(service_name):
+            return False, f"Unknown or unmanaged service: {service_name}"
         try:
             process = subprocess.run(
                 ["systemctl", operation, service_name],
@@ -200,6 +215,9 @@ class ServiceManager:
     def get_logs(service_name, num_lines=50):
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "message": f"Unknown or unmanaged service: {service_name}"}
         
         try:
             process = subprocess.run(
@@ -220,6 +238,9 @@ class ServiceManager:
     def get_config(service_name):
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "data": f"Unknown or unmanaged service: {service_name}"}
         
         config_file = ServiceManager.get_service_config_file(service_name)
         
@@ -239,6 +260,9 @@ class ServiceManager:
     def save_config(service_name, config_data):
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "data": f"Unknown or unmanaged service: {service_name}"}
         
         config_file = ServiceManager.get_service_config_file(service_name)
         
