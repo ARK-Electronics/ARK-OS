@@ -41,6 +41,12 @@ jobs:
     # The container runs on the same arm64 host.
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
+    # Force bash for inline `run:` steps. The native runner defaults to bash, but the
+    # slim debian:bookworm container defaults to sh (dash), which chokes on bashisms
+    # like ${GITHUB_SHA::8} — so without this the pi leg fails where jetson passes.
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Bootstrap container toolchain
         # The minimal debian:bookworm image (pi build) lacks tools the checkout
