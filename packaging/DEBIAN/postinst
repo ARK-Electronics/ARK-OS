@@ -193,6 +193,9 @@ for svc in $ENABLE_SERVICES; do
 done
 # Jetsons typically have no RTC; gate time-dependent services on NTP convergence.
 systemctl enable systemd-time-wait-sync.service 2>/dev/null || true
+# First-boot finalization (default hotspot, flight-review DB, Wi-Fi unblock). Enabled
+# so a chroot-built image runs it on first boot; a live install also kicks it below.
+systemctl enable ark-os-firstboot.service 2>/dev/null || true
 
 # ===========================================================================
 # Step 7: Jetson — disable nvgetty (NVIDIA serial console holds /dev/ttyTHS*,
@@ -239,11 +242,6 @@ if [ -d /run/systemd/system ]; then
         systemctl stop nvgetty.service 2>/dev/null || true
     fi
 
-    if [ "$PLATFORM" = "pi" ]; then
-        # Stock Raspberry Pi OS can ship with the Wi-Fi radio soft-blocked.
-        nmcli radio wifi on 2>/dev/null || true
-    fi
-
     systemctl start ark-os.target 2>/dev/null || true
 
     if nginx -t 2>/dev/null; then
@@ -253,15 +251,10 @@ if [ -d /run/systemd/system ]; then
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
 
-    # Create the default hotspot if none exists (the script self-guards).
-    [ -x /usr/lib/ark-os/scripts/create_hotspot_default.sh ] && \
-        /usr/lib/ark-os/scripts/create_hotspot_default.sh 2>/dev/null || true
-
-    # Initialise the flight-review database once.
-    if [ ! -f /var/lib/ark-os/flight-review/data/logs.sqlite ]; then
-        ( cd /usr/lib/ark-os/flight-review/app && \
-          sudo -u "$ARK_USER" /usr/lib/ark-os/venv/bin/python3 setup_db.py ) 2>/dev/null || true
-    fi
+    # Runtime-only finalization (default hotspot, flight-review DB, Wi-Fi unblock on
+    # pi) lives in ark-os-firstboot.service so a chroot-built image self-finalizes on
+    # first boot. Kick it now for a live install; its sentinel makes it run once.
+    systemctl start ark-os-firstboot.service 2>/dev/null || true
 fi
 
 # ===========================================================================

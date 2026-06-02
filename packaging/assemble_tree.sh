@@ -31,6 +31,7 @@ mkdir -p "$PKG/etc/sudoers.d"
 
 # --- systemd units (platform set) + group target ---
 install -m 0644 packaging/service-files/ark-os.target "$PKG/lib/systemd/system/ark-os.target"
+install -m 0644 packaging/service-files/ark-os-firstboot.service "$PKG/lib/systemd/system/ark-os-firstboot.service"
 for f in packaging/service-files/"$P"/*.service; do
     install -m 0644 "$f" "$PKG/lib/systemd/system/$(basename "$f")"
 done
@@ -55,6 +56,12 @@ done
 # under the bundled venv with nothing to activate -- operators run them by name.
 mkdir -p "$PKG/etc/profile.d"
 install -m 0644 packaging/system-config/ark-os-path.sh "$PKG/etc/profile.d/ark-os.sh"
+
+# --- first-boot finalization script (tokens substituted like the postinst). Runs the
+# runtime-only steps that can't happen in the build chroot; see ark-os-firstboot.service. ---
+sed -e "s/@ARK_USER@/$ARK_USER/g" -e "s/@PLATFORM@/$PLATFORM/g" \
+    packaging/system-config/ark_os_firstboot.sh > "$PKG$ARK/scripts/ark_os_firstboot.sh"
+chmod 0755 "$PKG$ARK/scripts/ark_os_firstboot.sh"
 
 # --- python services ---
 for svc in autopilot_manager connection_manager service_manager system_manager; do
@@ -156,6 +163,8 @@ for p in \
     "$PKG$ARK/ark-ui-backend/index.js" \
     "$PKG/var/www/ark-ui/html" \
     "$PKG$ARK/flight-review/app/serve.py" \
+    "$PKG$ARK/scripts/ark_os_firstboot.sh" \
+    "$PKG/lib/systemd/system/ark-os-firstboot.service" \
     "$PKG/DEBIAN/control"; do
     if [ ! -e "$p" ]; then echo "MISSING: $p" >&2; missing=1; fi
 done
