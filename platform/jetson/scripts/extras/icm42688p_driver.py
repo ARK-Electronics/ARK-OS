@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import spidev
 import time
 # import Jetson.GPIO as GPIO

@@ -1,12 +1,13 @@
 # extras
 
-Standalone convenience scripts for a **developer workstation**. Nothing here is
-invoked by the ARK-OS `.deb` build (`packaging/`) or by the package's install
-scripts — these are not shipped in the package and are safe to ignore for a
-normal install.
+Standalone Jetson dev/diagnostic convenience scripts. They are kept separate
+from the service and operator scripts in `platform/jetson/scripts/`, but the
+`.deb` does install them (Jetson only) to `/usr/lib/ark-os/scripts/extras/`,
+which is on PATH for login shells — so a dev can run them by name on the target.
+Nothing in the build or the running services invokes them automatically.
 
-They are kept in the repo because they encode non-trivial, Jetson-specific build
-flags and sensor register maps that would be expensive to rediscover.
+They encode non-trivial, Jetson-specific build flags and sensor register maps
+that would be expensive to rediscover.
 
 | Script | What it does |
 |---|---|

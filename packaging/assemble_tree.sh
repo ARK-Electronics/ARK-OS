@@ -48,10 +48,20 @@ if [ "$P" = "jetson" ]; then
     install -m 0755 services/jetson-can/stop_can_interface.sh  "$PKG$ARK/scripts/"
 fi
 
-# --- platform + common utility scripts ---
+# --- platform + common utility scripts (top-level files only; subdirs like
+# jetson's extras/ are handled separately below) ---
 for f in platform/"$P"/scripts/* platform/common/scripts/*; do
     [ -f "$f" ] && install -m 0755 "$f" "$PKG$ARK/scripts/$(basename "$f")"
 done
+
+# --- jetson dev/diagnostic extras: kept in their own subdir so they stay
+# logically separate from the service/operator scripts, but still installed
+# onto PATH (via the scripts/extras entry in ark-os-path.sh) for devs. ---
+if [ "$P" = "jetson" ]; then
+    for f in platform/jetson/scripts/extras/*; do
+        [ -f "$f" ] && install -D -m 0755 "$f" "$PKG$ARK/scripts/extras/$(basename "$f")"
+    done
+fi
 
 # --- operator scripts on PATH: a profile.d snippet adds $ARK/scripts to PATH for
 # login shells. The scripts carry #!/usr/lib/ark-os/venv/bin/python3, so they run

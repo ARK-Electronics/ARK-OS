@@ -99,7 +99,8 @@ if [ -n "$ARK_HOME" ]; then
     rm -f "$ARK_HOME"/.local/bin/{vbus_enable.py,vbus_disable.py,get_serial_number.py,reset_fmu_fast.py,reset_fmu_wait_bl.py}
     rm -f "$ARK_HOME"/.local/bin/{flash_firmware.sh,mavlink_shell.py,px4_shell_command.py,px_uploader.py,mavlink_ftp_upload.sh}
     rm -f "$ARK_HOME"/.local/bin/{pcie_set_speed.sh,self_test.sh,set_mac.sh,create_hotspot_default.sh}
-    # example/diagnostic scripts the legacy installer copied wholesale (now in extras/, Task 10)
+    # example/diagnostic scripts the legacy installer copied wholesale (now under
+    # platform/jetson/scripts/extras/, installed to /usr/lib/ark-os/scripts/extras/)
     rm -f "$ARK_HOME"/.local/bin/{i2s_gpio_example.py,icm42688p_driver.py,ina238_test.py,test_jtop.py}
 
     # (e) Remove legacy data dirs (configs were backed up in step a).

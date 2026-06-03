@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from smbus2 import SMBus
 import time
 import math

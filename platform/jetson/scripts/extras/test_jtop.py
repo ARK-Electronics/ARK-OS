@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from jtop import jtop
 
 with jtop() as jetson:

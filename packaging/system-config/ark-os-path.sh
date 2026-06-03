@@ -5,3 +5,9 @@ case ":${PATH}:" in
     *:/usr/lib/ark-os/scripts:*) ;;
     *) PATH="${PATH}:/usr/lib/ark-os/scripts" ;;
 esac
+
+# Dev/diagnostic extras (jetson) live in their own subdir but are still on PATH.
+case ":${PATH}:" in
+    *:/usr/lib/ark-os/scripts/extras:*) ;;
+    *) PATH="${PATH}:/usr/lib/ark-os/scripts/extras" ;;
+esac
