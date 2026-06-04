@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'draft-*'   # publishes a public PRERELEASE deb for pre-release testing
   # Build a downloadable .deb on PR updates to validate the package pre-merge.
   # This is the only pre-merge build path: workflow_dispatch is unavailable until
   # build-deb.yml is on the default branch. No release is published on PR runs
@@ -127,8 +128,11 @@ jobs:
       # Attach the per-platform .deb to the release for this tag. MAVSDK is NOT
       # rebundled — its canonical home is the upstream MAVSDK releases page.
       - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # v* → official release; draft-* → public PRERELEASE (excluded from
+        # "latest", clearly marked) so downstream builds fetch it without auth.
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/draft-')
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/draft-') }}
           files: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
           fail_on_unmatched_files: true
