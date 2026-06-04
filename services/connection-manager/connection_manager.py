@@ -54,11 +54,9 @@ class State:
     last_stats_update = 0
     last_stats_report = 0
 
-    # Use a re-entrant lock so that the same StatsThread may
-    # re-acquire the same lock in get_interface_usage_summary() **and**
-    # method update_interface_stats() that it calls if no interface stats available
-    # on first go-round
-    stats_lock = threading.RLock()  # Thread safety for stats access
+    # Each accessor acquires this exactly once; collection happens outside
+    # the lock (see get_interface_usage_summary), so a plain Lock suffices.
+    stats_lock = threading.Lock()  # Thread safety for stats access
 
     # Websocket clients for real-time updates
     active_stats_clients = set()
@@ -1166,53 +1164,67 @@ class NetworkReporting:
         Get simplified usage summary for active network interfaces.
         Returns a list of interface summaries with essential stats.
         """
+        # Fast path: build directly from already-collected stats.
         with State.stats_lock:
-            summary = []
+            if State.interface_stats:
+                return NetworkReporting._build_summary()
 
-            # Check if we have any stats, if not try to collect them
+        # No stats yet. Collect them WITHOUT holding the lock: collection
+        # shells out to nmcli/ip and takes the lock itself only to store the
+        # result, so holding it here would block other readers across slow
+        # subprocess calls (and is what previously forced a reentrant lock).
+        logger.debug("No interface stats available, collecting now")
+        NetworkStatsProcessor.update_interface_stats()
+
+        with State.stats_lock:
             if not State.interface_stats:
-                logger.debug("No interface stats available, collecting now")
-                NetworkStatsProcessor.update_interface_stats()
-                
-                if not State.interface_stats:
-                    logger.debug("No active network interfaces found")
-                    return []
+                logger.debug("No active network interfaces found")
+                return []
+            return NetworkReporting._build_summary()
 
-            # Process each interface to create a simplified summary
-            for interface, stats in State.interface_stats.items():
-                # Skip loopback interface
-                if interface == 'lo':
-                    continue
+    @staticmethod
+    def _build_summary():
+        """
+        Build the interface summary list from State.interface_stats.
+        The caller must hold State.stats_lock.
+        """
+        summary = []
 
-                # Create a simplified summary with just the essentials
-                interface_summary = {
-                    'name': stats.get('name', interface),
-                    'interface': interface,
-                    'type': stats.get('type', 'other'),
-                    'ipAddress': stats.get('ip_address', ''),
-                    'active': True,
-                    'rxBytes': stats.get('rx_bytes', 0),
-                    'txBytes': stats.get('tx_bytes', 0),
-                    'rxRateMbps': stats.get('rx_rate_mbps', 0),
-                    'txRateMbps': stats.get('tx_rate_mbps', 0),
-                    'rxErrors': stats.get('rx_errors', 0),
-                    'rxDropped': stats.get('rx_dropped', 0),
-                    'txErrors': stats.get('tx_errors', 0),
-                    'txDropped': stats.get('tx_dropped', 0),
-                    'rxPackets': stats.get('rx_packets', 0),
-                    'txPackets': stats.get('tx_packets', 0)
-                }
-                
-                if stats.get('type') == 'wifi':
-                    interface_summary['signal'] = stats.get('signal_strength', 0)
-                
-                summary.append(interface_summary)
+        # Process each interface to create a simplified summary
+        for interface, stats in State.interface_stats.items():
+            # Skip loopback interface
+            if interface == 'lo':
+                continue
 
-            # Sort by total bytes (most traffic first)
-            summary.sort(key=lambda x: -(x.get('rxBytes', 0) + x.get('txBytes', 0)))
-            
-            logger.debug(f"Generated summary for {len(summary)} active interfaces")
-            return summary
+            # Create a simplified summary with just the essentials
+            interface_summary = {
+                'name': stats.get('name', interface),
+                'interface': interface,
+                'type': stats.get('type', 'other'),
+                'ipAddress': stats.get('ip_address', ''),
+                'active': True,
+                'rxBytes': stats.get('rx_bytes', 0),
+                'txBytes': stats.get('tx_bytes', 0),
+                'rxRateMbps': stats.get('rx_rate_mbps', 0),
+                'txRateMbps': stats.get('tx_rate_mbps', 0),
+                'rxErrors': stats.get('rx_errors', 0),
+                'rxDropped': stats.get('rx_dropped', 0),
+                'txErrors': stats.get('tx_errors', 0),
+                'txDropped': stats.get('tx_dropped', 0),
+                'rxPackets': stats.get('rx_packets', 0),
+                'txPackets': stats.get('tx_packets', 0)
+            }
+
+            if stats.get('type') == 'wifi':
+                interface_summary['signal'] = stats.get('signal_strength', 0)
+
+            summary.append(interface_summary)
+
+        # Sort by total bytes (most traffic first)
+        summary.sort(key=lambda x: -(x.get('rxBytes', 0) + x.get('txBytes', 0)))
+
+        logger.debug(f"Generated summary for {len(summary)} active interfaces")
+        return summary
 
 
 class StatsThread:
