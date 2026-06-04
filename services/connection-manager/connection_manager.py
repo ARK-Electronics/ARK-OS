@@ -135,6 +135,11 @@ def _normalize_dns_list(value):
     return ",".join(servers), invalid
 
 
+def _split_nmcli_terse(line):
+    """Split an `nmcli -t` line on ':' separators, honoring '\\:' escapes."""
+    return [field.replace('\\:', ':') for field in re.split(r'(?<!\\):', line)]
+
+
 def _redact_args(args):
     """Render an argv list for logging, masking secret values."""
     rendered = []
@@ -607,47 +612,75 @@ class ConnectionManager:
 
 
 class WiFiNetworkManager:
+    # Monotonic timestamp of the last rescan we asked NetworkManager for.
+    _last_rescan = 0.0
+    _rescan_lock = threading.Lock()
+
     @staticmethod
-    def scan_wifi_networks():
-        networks = []
+    def request_rescan_async(min_interval=10.0):
+        """
+        Ask NetworkManager to rescan, off the request path.
 
-        CommandExecutor.safe_run_command("nmcli device wifi rescan")
+        NetworkManager keeps a continuously-updated scan cache and rate-limits
+        explicit rescans, so we nudge it at most once per min_interval seconds
+        and never block on it: the fresh results land in the cache and are
+        picked up by a subsequent list call (the UI polls).
+        """
+        now = time.monotonic()
+        with WiFiNetworkManager._rescan_lock:
+            if now - WiFiNetworkManager._last_rescan < min_interval:
+                return
+            WiFiNetworkManager._last_rescan = now
 
-        # Wait for scan to complete
-        time.sleep(2)
+        # Fire and forget in a background greenlet; nmcli can block briefly
+        # while the scan runs and we don't want the HTTP response to wait.
+        socketio.start_background_task(
+            CommandExecutor.safe_run_command, "nmcli device wifi rescan", None, 20
+        )
 
-        # Get scan results
-        output = CommandExecutor.safe_run_command("nmcli -f SSID,SIGNAL,SECURITY,CHAN device wifi list")
+    @staticmethod
+    def list_cached_networks():
+        """
+        Return WiFi networks from NetworkManager's scan cache *without*
+        triggering a (blocking) rescan -- `--rescan no` is the key: the default
+        `auto` makes `device wifi list` itself scan when the cache is stale.
+
+        Results are deduplicated by SSID (keeping the strongest signal, since
+        one SSID spans multiple APs/bands), hidden networks are dropped, and
+        the list is sorted strongest-first.
+        """
+        output = CommandExecutor.safe_run_command(
+            "nmcli -t -f SSID,SIGNAL,SECURITY device wifi list --rescan no"
+        )
         if not output:
-            return networks
+            return []
 
-        # Parse WiFi networks
-        lines = output.strip().split('\n')
-        if len(lines) <= 1:  # Only header
-            return networks
-
-        # Process each network
-        for line in lines[1:]:  # Skip header row
-            fields = re.split(r'\s{2,}', line.strip())
-            if len(fields) >= 3:
-                ssid = fields[0]
-                signal = fields[1]
-                security = fields[2]
-
-                # Skip if no SSID
-                if not ssid:
-                    continue
-
-                # Create network entry
-                network = {
+        networks = {}
+        for line in output.strip().split('\n'):
+            if not line:
+                continue
+            fields = _split_nmcli_terse(line)
+            if len(fields) < 3:
+                continue
+            ssid, signal, security = fields[0], fields[1], fields[2]
+            if not ssid:  # hidden network
+                continue
+            signal_val = int(signal) if signal.isdigit() else 0
+            existing = networks.get(ssid)
+            if existing is None or signal_val > existing['signal']:
+                networks[ssid] = {
                     'ssid': ssid,
-                    'signal': int(signal) if signal.isdigit() else 0,
-                    'secured': security != '--',
+                    'signal': signal_val,
+                    'secured': bool(security) and security != '--',
                 }
 
-                networks.append(network)
+        return sorted(networks.values(), key=lambda n: (-n['signal'], n['ssid'].lower()))
 
-        return networks
+    @staticmethod
+    def scan_wifi_networks():
+        """Nudge a background rescan and return the current cached list."""
+        WiFiNetworkManager.request_rescan_async()
+        return WiFiNetworkManager.list_cached_networks()
 
 
 class HostnameManager:
