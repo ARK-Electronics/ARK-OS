@@ -13,8 +13,9 @@ ARK="$PKG_PREFIX"   # /usr/lib/ark-os
 # Platform-specific control Depends. EXTRA_DEPENDS is a suffix inserted after
 # libmavsdk-dev. PYTHON_PKG (the system python the bundled venv binds to) and
 # CODENAME come from build.sh, which resolves them from the build host's release.
-# NOTE: the base Depends in DEBIAN/control use bookworm/jammy package names; revisit
-# them per release when adding one (e.g. Debian 13/trixie renamed several libs *t64).
+# NOTE: the base Depends in DEBIAN/control target the supported releases' lib names.
+# Trixie's time64 transition renamed libssl3 -> libssl3t64, handled in control by the
+# alternative "libssl3t64 | libssl3"; use the same idiom if a future release renames more.
 case "$P" in
     jetson) EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
     pi)     EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;

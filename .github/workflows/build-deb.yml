@@ -33,27 +33,33 @@ jobs:
             runner: ubuntu-22.04-arm
             container: "debian:bookworm"
             extra_deps: ""
+          - platform: pi
+            codename: trixie
+            runner: ubuntu-22.04-arm
+            container: "debian:trixie"
+            extra_deps: ""
     # Build each platform on a host whose OS matches the target so the bundled venv
     # and natively-compiled binaries are ABI-compatible. The venv is created with
     # `python3 -m venv --copies`, which ships the interpreter but resolves the stdlib
     # from the *system* python at runtime — a Jammy (3.10) venv will not run on
     # Bookworm (no system python3.10) and vice-versa.
-    #   - jetson: ubuntu-22.04-arm natively   (Jammy / Python 3.10  = JetPack 6 rootfs)
-    #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS)
+    #   - jetson: ubuntu-22.04-arm natively    (Jammy / Python 3.10  = JetPack 6 rootfs)
+    #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS Bookworm)
+    #   - pi:     a debian:trixie   container  (Debian 13 / Python 3.13 = Raspberry Pi OS Trixie)
     # The container runs on the same arm64 host. Each leg's `codename` (the host's OS
     # release) is part of the package name (ark-os-<platform>-<codename>); supporting a
     # new release is one more leg here plus an entry in build.sh's BASELINES table.
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     # Force bash for inline `run:` steps. The native runner defaults to bash, but the
-    # slim debian:bookworm container defaults to sh (dash), which chokes on bashisms
-    # like ${GITHUB_SHA::8} — so without this the pi leg fails where jetson passes.
+    # slim debian:* containers default to sh (dash), which chokes on bashisms
+    # like ${GITHUB_SHA::8} — so without this the pi legs fail where jetson passes.
     defaults:
       run:
         shell: bash
     steps:
       - name: Bootstrap container toolchain
-        # The minimal debian:bookworm image (pi build) lacks tools the checkout
+        # The minimal debian:* images (pi builds) lack tools the checkout
         # action and later steps assume a GitHub-hosted runner already provides.
         # Install them before checkout. Skipped on the native jetson runner.
         if: ${{ matrix.container != '' }}

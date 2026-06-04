@@ -44,7 +44,7 @@ The script auto-detects Jetson vs Pi (override with `--platform`), skips MAVSDK/
 
 ### Manual install
 
-Install MAVSDK first (ARK-OS depends on it), then ARK-OS. Replace `<mavsdk-ver>`, `<ark-os-ver>`, and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `bookworm` for Raspberry Pi OS (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+Install MAVSDK first (ARK-OS depends on it), then ARK-OS. Replace `<mavsdk-ver>`, `<ark-os-ver>`, and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
 
 #### Jetson
 ```
@@ -59,13 +59,13 @@ sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stat
 ```
 
 #### Raspberry Pi
-Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-bookworm` (no jetson-stats step):
+Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:
 ```
 wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
-wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi-bookworm_<ark-os-ver>_arm64.deb
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi-trixie_<ark-os-ver>_arm64.deb
 
 sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
-sudo apt install ./ark-os-pi-bookworm_<ark-os-ver>_arm64.deb
+sudo apt install ./ark-os-pi-trixie_<ark-os-ver>_arm64.deb
 ```
 
 ### Updating

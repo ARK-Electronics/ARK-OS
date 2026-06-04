@@ -69,7 +69,7 @@ fi
 # (.github/workflows/build-deb.yml).
 case "$PLATFORM" in
     jetson) BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7 (noble = future, untested)
-    pi)     BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 / Debian 13 (trixie = future, untested)
+    pi)     BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 (Pi OS Bookworm) / Debian 13 (Pi OS Trixie)
 esac
 
 HOST_CODENAME=""

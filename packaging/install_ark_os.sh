@@ -51,8 +51,8 @@ Positional:
 
 Options:
   --platform=jetson|pi      Override platform autodetection.
-  --codename=NAME           Override OS-release codename autodetection (bookworm, jammy,
-                            …). Only needed to name a download when /etc/os-release
+  --codename=NAME           Override OS-release codename autodetection (bookworm, trixie,
+                            jammy, …). Only needed to name a download when /etc/os-release
                             can't be read.
   --ark-os-version=X.Y.Z    Download this ark-os release when no local deb is given.
   --mavsdk-deb=PATH         Install MAVSDK from a local deb instead of downloading.
@@ -199,7 +199,7 @@ else
     elif [ "${#matches[@]}" -gt 1 ]; then
         die "multiple ark-os-${PLATFORM} debs in $(pwd); pass the one to install as an argument."
     elif [ -n "$ARK_OS_VERSION" ]; then
-        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|jammy|…>."
+        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|trixie|jammy|…>."
         ARK_OS_DEB="$DL_DIR/ark-os-${PLATFORM}-${CODENAME}_${ARK_OS_VERSION}_arm64.deb"
         fetch "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$(basename "$ARK_OS_DEB")" "$ARK_OS_DEB"
     else
