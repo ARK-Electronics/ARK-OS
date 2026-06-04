@@ -140,6 +140,16 @@ groupadd -f -r gpio
 for grp in dialout i2c netdev systemd-journal; do groupadd -f -r "$grp" 2>/dev/null || true; done
 usermod -a -G dialout,gpio,i2c,netdev,systemd-journal "$ARK_USER"
 
+# jtop's daemon socket (/run/jtop.sock) is group-restricted to 'jtop', and
+# system-manager runs as $ARK_USER; without membership the web UI's Jetson
+# Hardware/Libraries/Power stats read back "Not available". jetson-stats creates
+# the group, but image provisioning installs it AFTER this package, so pre-create
+# it with -f to keep the membership independent of install order.
+if [ "$PLATFORM" = "jetson" ]; then
+    groupadd -f -r jtop
+    usermod -a -G jtop "$ARK_USER"
+fi
+
 # ===========================================================================
 # Step 1b: Refresh the dynamic linker cache so the private C++ libs bundled under
 # /usr/lib/ark-os/lib (shipped with /etc/ld.so.conf.d/ark-os.conf) are found.
