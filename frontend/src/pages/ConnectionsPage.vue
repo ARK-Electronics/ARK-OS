@@ -439,6 +439,14 @@
                   <label for="ethernet-ip">IP Address:</label>
                   <input type="text" id="ethernet-ip" v-model="newConnection.ipAddress" placeholder="192.168.1.100">
                 </div>
+                <div class="form-group">
+                  <label for="ethernet-gateway">Gateway (optional):</label>
+                  <input type="text" id="ethernet-gateway" v-model="newConnection.gateway" placeholder="192.168.1.1">
+                </div>
+                <div class="form-group">
+                  <label for="ethernet-dns">DNS Servers (optional):</label>
+                  <input type="text" id="ethernet-dns" v-model="newConnection.dns" placeholder="8.8.8.8, 1.1.1.1">
+                </div>
               </div>
 
               <div class="form-buttons">
@@ -743,6 +751,8 @@ export default {
         // Ethernet specific
         ipMethod: 'auto', // auto, static
         ipAddress: '',
+        gateway: '',
+        dns: '',
       },
     };
   },
@@ -1181,6 +1191,8 @@ export default {
       } else if (connection.type === 'ethernet') {
         this.newConnection.ipMethod = connection.ipMethod || 'auto';
         this.newConnection.ipAddress = connection.ipAddress || '';
+        this.newConnection.gateway = connection.gateway || '';
+        this.newConnection.dns = connection.dns || '';
       } else if (connection.type === 'lte') {
         // For LTE, fetch the current APN
         this.newConnection.apn = connection.apn || '';
@@ -1249,6 +1261,8 @@ export default {
         // Ethernet specific
         ipMethod: 'auto',
         ipAddress: '',
+        gateway: '',
+        dns: '',
 
         // LTE specific
         apn: '',
@@ -1271,7 +1285,8 @@ export default {
 
       } catch (error) {
         console.error('Failed to save connection:', error);
-        alert('Failed to save connection. Please check your settings and try again.');
+        const serverMsg = error?.response?.data?.error;
+        alert(serverMsg || 'Failed to save connection. Please check your settings and try again.');
       }
     },
     
