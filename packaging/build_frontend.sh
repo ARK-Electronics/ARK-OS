@@ -10,16 +10,19 @@ BACKEND_DIR="$BUILD_DIR$PKG_PREFIX/ark-ui-backend"
 mkdir -p "$HTML_DIR" "$BACKEND_DIR"
 
 echo "==> building Vue frontend (vue-cli-service build -> dist/)"
-( cd frontend/ark-ui/ark-ui
+( cd frontend
   npm install            # no lockfile; pulls @vue/cli-service from devDependencies
   npm run build )
-cp -r frontend/ark-ui/ark-ui/dist/. "$HTML_DIR/"
+cp -r frontend/dist/. "$HTML_DIR/"
 
 echo "==> installing backend production dependencies"
-( cd frontend/ark-ui/backend
+( cd services/ark-ui-backend
   npm install --omit=dev )
-# Ship the backend source + node_modules; the unit runs `node index.js` here.
-cp -r frontend/ark-ui/backend/. "$BACKEND_DIR/"
+# Ship the backend runtime payload + node_modules; the unit runs `node index.js` here.
+# Copy only the runtime files -- NOT the service manifest, which assemble_tree.sh
+# installs separately into manifests/.
+cp -r services/ark-ui-backend/index.js services/ark-ui-backend/package.json \
+      services/ark-ui-backend/node_modules "$BACKEND_DIR/"
 
 echo "==> frontend staged: $HTML_DIR"
 echo "==> backend staged:  $BACKEND_DIR"

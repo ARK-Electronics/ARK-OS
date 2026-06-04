@@ -12,3 +12,9 @@ node-v*-linux-arm64.tar.*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Node.js (Vue frontend build + ark-ui-backend deps; this repo builds without lockfiles)
+node_modules/
+package-lock.json
+frontend/dist/
+*.local
