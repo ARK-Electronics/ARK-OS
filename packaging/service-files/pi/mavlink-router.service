@@ -7,7 +7,7 @@ After=network-online.target
 Type=exec
 User=pi
 Group=pi
-ExecStart=/usr/lib/ark-os/scripts/start_mavlink_router.sh
+ExecStart=/usr/lib/ark-os/libexec/start_mavlink_router.sh
 Restart=on-failure
 RestartSec=5
 

@@ -5,7 +5,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/lib/ark-os/scripts/start_can_interface.sh
+ExecStart=/usr/lib/ark-os/libexec/start_can_interface.sh
 Restart=on-failure
 RestartSec=5
 KillMode=process

@@ -11,7 +11,7 @@ ConditionPathExists=!/var/lib/ark-os/.firstboot-complete
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/lib/ark-os/scripts/ark_os_firstboot.sh
+ExecStart=/usr/lib/ark-os/libexec/ark_os_firstboot.sh
 
 [Install]
 WantedBy=multi-user.target

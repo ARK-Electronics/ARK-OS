@@ -23,7 +23,7 @@ esac
 # --- directory skeleton ---
 mkdir -p "$PKG/DEBIAN"
 mkdir -p "$PKG/lib/systemd/system"
-mkdir -p "$PKG$ARK/bin" "$PKG$ARK/scripts" "$PKG$ARK/python" "$PKG$ARK/manifests"
+mkdir -p "$PKG$ARK/bin" "$PKG$ARK/scripts" "$PKG$ARK/libexec" "$PKG$ARK/python" "$PKG$ARK/manifests"
 mkdir -p "$PKG/etc/ark-os"
 mkdir -p "$PKG/etc/nginx/sites-available"
 mkdir -p "$PKG/etc/polkit-1/rules.d"
@@ -38,14 +38,17 @@ for f in packaging/service-files/"$P"/*.service; do
     install -m 0644 "$f" "$PKG/lib/systemd/system/$(basename "$f")"
 done
 
-# --- start scripts for always-present services ---
-install -m 0755 services/mavlink-router/start_mavlink_router.sh   "$PKG$ARK/scripts/"
-install -m 0755 services/dds-agent/start_dds_agent.sh             "$PKG$ARK/scripts/"
-install -m 0755 services/flight-review/start_flight_review.sh     "$PKG$ARK/scripts/"
-install -m 0755 services/hotspot-updater/update_hotspot_default.sh "$PKG$ARK/scripts/"
+# --- systemd-only service entry points: wrapper scripts invoked solely by a unit's
+# ExecStart/ExecStop. They go in libexec/ (NOT on PATH) so they stay out of the
+# operator command set; the operator/dev tools further down land in scripts/, which
+# the profile.d snippet adds to PATH. ---
+install -m 0755 services/mavlink-router/start_mavlink_router.sh   "$PKG$ARK/libexec/"
+install -m 0755 services/dds-agent/start_dds_agent.sh             "$PKG$ARK/libexec/"
+install -m 0755 services/flight-review/start_flight_review.sh     "$PKG$ARK/libexec/"
+install -m 0755 services/hotspot-updater/update_hotspot_default.sh "$PKG$ARK/libexec/"
 if [ "$P" = "jetson" ]; then
-    install -m 0755 services/jetson-can/start_can_interface.sh "$PKG$ARK/scripts/"
-    install -m 0755 services/jetson-can/stop_can_interface.sh  "$PKG$ARK/scripts/"
+    install -m 0755 services/jetson-can/start_can_interface.sh "$PKG$ARK/libexec/"
+    install -m 0755 services/jetson-can/stop_can_interface.sh  "$PKG$ARK/libexec/"
 fi
 
 # --- platform + common utility scripts (top-level files only; subdirs like
@@ -70,10 +73,11 @@ mkdir -p "$PKG/etc/profile.d"
 install -m 0644 packaging/system-config/ark-os-path.sh "$PKG/etc/profile.d/ark-os.sh"
 
 # --- first-boot finalization script (tokens substituted like the postinst). Runs the
-# runtime-only steps that can't happen in the build chroot; see ark-os-firstboot.service. ---
+# runtime-only steps that can't happen in the build chroot; see ark-os-firstboot.service.
+# systemd-only (oneshot), so it lives in libexec/ alongside the other unit wrappers. ---
 sed -e "s/@ARK_USER@/$ARK_USER/g" -e "s/@PLATFORM@/$PLATFORM/g" \
-    packaging/system-config/ark_os_firstboot.sh > "$PKG$ARK/scripts/ark_os_firstboot.sh"
-chmod 0755 "$PKG$ARK/scripts/ark_os_firstboot.sh"
+    packaging/system-config/ark_os_firstboot.sh > "$PKG$ARK/libexec/ark_os_firstboot.sh"
+chmod 0755 "$PKG$ARK/libexec/ark_os_firstboot.sh"
 
 # --- python services ---
 for svc in autopilot_manager connection_manager service_manager system_manager; do
@@ -92,6 +96,9 @@ done
 # --- flight-review app (verbatim submodule copy) ---
 mkdir -p "$PKG$ARK/flight-review"
 cp -r services/flight-review/flight_review/app "$PKG$ARK/flight-review/"
+# Drop any local CPython bytecode caches the recursive copy may have picked up so
+# stray dev artifacts never ship in the .deb (the bundled venv's caches are kept).
+find "$PKG$ARK/flight-review" -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # --- default configs -> /etc/ark-os ---
 install -m 0644 services/mavlink-router/main.conf "$PKG/etc/ark-os/mavlink-router.conf"
@@ -181,7 +188,7 @@ for p in \
     "$PKG$ARK/ark-ui-backend/index.js" \
     "$PKG/var/www/ark-ui/html" \
     "$PKG$ARK/flight-review/app/serve.py" \
-    "$PKG$ARK/scripts/ark_os_firstboot.sh" \
+    "$PKG$ARK/libexec/ark_os_firstboot.sh" \
     "$PKG/lib/systemd/system/ark-os-firstboot.service" \
     "$PKG/DEBIAN/control"; do
     if [ ! -e "$p" ]; then echo "MISSING: $p" >&2; missing=1; fi
