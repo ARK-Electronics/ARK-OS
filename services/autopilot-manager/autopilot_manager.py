@@ -737,7 +737,7 @@ def parse_arguments():
                         help='Host address to bind (default: 0.0.0.0)')
     parser.add_argument('--port',
                         type=int,
-                        default=3003,
+                        default=int(os.environ.get('PORT', 3003)),
                         help='Port to listen on (default: 3003)')
     parser.add_argument('--source-system',
                         type=int,

@@ -347,7 +347,7 @@ def save_service_config():
 
 if __name__ == '__main__':
     host = '127.0.0.1'
-    port = 3002
+    port = int(os.environ.get("PORT", 3002))
 
     print(f"Starting Service Manager on {host}:{port}")
     app.run(host=host, port=port, threaded=True)

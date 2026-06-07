@@ -1543,7 +1543,7 @@ class ApplicationRunner:
     @staticmethod
     def start_server():
         host = '127.0.0.1'
-        port = 3001
+        port = int(os.environ.get("PORT", 3001))
         debug = False;
 
         logger.info(f"Starting SocketIO server on {host}:{port}")

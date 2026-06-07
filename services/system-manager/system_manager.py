@@ -500,7 +500,7 @@ def update_hostname():
 
 if __name__ == '__main__':
     host = '127.0.0.1'
-    port = 3004
+    port = int(os.environ.get("PORT", 3004))
     print(f"Starting System Manager on {host}:{port}")
     print(f"Device type detection in progress...")
 
