@@ -324,11 +324,18 @@
               <div v-if="newConnection.mode === 'infrastructure' && !isEditingConnection" class="wifi-scan-container">
                 <div class="wifi-scan-header">
                   <h3>Available Networks</h3>
-                  <button type="button" @click="scanWifiFromConnectionForm" class="wifi-scan-button">
+                  <button type="button" @click="fetchWifiNetworks(true)" class="wifi-scan-button">
                     <i class="fas fa-sync-alt" :class="{ 'fa-spin': scanning }"></i>
                     Rescan
                   </button>
                 </div>
+
+                <input
+                  type="text"
+                  class="wifi-filter-input"
+                  v-model="wifiFilter"
+                  placeholder="Filter networks by name…"
+                >
 
                 <div class="wifi-networks-list">
                   <div v-if="scanning && availableWifiNetworks.length === 0" class="scanning-overlay">
@@ -341,8 +348,13 @@
                     <p>No WiFi networks found</p>
                   </div>
 
+                  <div v-else-if="availableWifiNetworks.length > 0 && filteredWifiNetworks.length === 0" class="empty-networks">
+                    <i class="fas fa-wifi"></i>
+                    <p>No networks match "{{ wifiFilter }}"</p>
+                  </div>
+
                   <div
-                    v-for="network in availableWifiNetworks"
+                    v-for="network in filteredWifiNetworks"
                     :key="network.ssid"
                     class="wifi-network-item form-wifi-item"
                     :class="{ 'selected': newConnection.ssid === network.ssid }"
@@ -438,6 +450,14 @@
                 <div class="form-group">
                   <label for="ethernet-ip">IP Address:</label>
                   <input type="text" id="ethernet-ip" v-model="newConnection.ipAddress" placeholder="192.168.1.100">
+                </div>
+                <div class="form-group">
+                  <label for="ethernet-gateway">Gateway (optional):</label>
+                  <input type="text" id="ethernet-gateway" v-model="newConnection.gateway" placeholder="192.168.1.1">
+                </div>
+                <div class="form-group">
+                  <label for="ethernet-dns">DNS Servers (optional):</label>
+                  <input type="text" id="ethernet-dns" v-model="newConnection.dns" placeholder="8.8.8.8, 1.1.1.1">
                 </div>
               </div>
 
@@ -703,6 +723,8 @@ export default {
       refreshingConnections: false,
       scanning: false,
       availableWifiNetworks: [],
+      wifiFilter: '',
+      wifiScanPoll: null,
 
       // Network usage data
       usageData: [],
@@ -743,6 +765,8 @@ export default {
         // Ethernet specific
         ipMethod: 'auto', // auto, static
         ipAddress: '',
+        gateway: '',
+        dns: '',
       },
     };
   },
@@ -784,6 +808,11 @@ export default {
     hasExistingLteConnection() {
       return this.connections.some(connection => connection.type === 'lte');
     },
+    filteredWifiNetworks() {
+      const q = this.wifiFilter.trim().toLowerCase();
+      if (!q) return this.availableWifiNetworks;
+      return this.availableWifiNetworks.filter(n => n.ssid.toLowerCase().includes(q));
+    },
   },
   
   async mounted() {
@@ -801,6 +830,7 @@ export default {
   beforeUnmount() {
     // Make sure socket is disconnected
     this.disconnectUsageSocket();
+    this.stopWifiScanPolling();
   },
 
   watch: {
@@ -872,32 +902,35 @@ export default {
       }, delayMs);
     },
 
-    async scanWifi() {
-      this.scanning = true;
+    // showSpinner is set only for user-initiated loads (selecting WiFi or
+    // clicking Rescan); the background poll refreshes silently so the spinner
+    // doesn't blink every few seconds.
+    async fetchWifiNetworks(showSpinner = false) {
+      if (showSpinner) this.scanning = true;
       try {
         const response = await ConnectionsService.scanWifiNetworks();
-        // Filter out hidden networks (those with -- as the name)
-        this.availableWifiNetworks = response.data.filter(network => network.ssid !== '--');
+        // Backend dedupes/sorts and drops hidden SSIDs; guard defensively.
+        this.availableWifiNetworks = response.data.filter(n => n.ssid && n.ssid !== '--');
       } catch (error) {
         console.error('Failed to scan WiFi networks:', error);
       } finally {
-        this.scanning = false;
+        if (showSpinner) this.scanning = false;
       }
     },
 
-    // Explicitly trigger a WiFi scan from the connection form
-    async scanWifiFromConnectionForm() {
-      // Always show animation when explicitly requested
-      this.scanning = true;
+    // Show the cached list immediately, then keep refreshing while the WiFi
+    // form is open so newly-discovered networks stream in without blocking.
+    startWifiScanPolling() {
+      this.stopWifiScanPolling();
+      this.wifiFilter = '';
+      this.fetchWifiNetworks(true);
+      this.wifiScanPoll = setInterval(() => this.fetchWifiNetworks(), 3000);
+    },
 
-      try {
-        const response = await ConnectionsService.scanWifiNetworks();
-        // Filter out hidden networks (those with -- as the name)
-        this.availableWifiNetworks = response.data.filter(network => network.ssid !== '--');
-      } catch (error) {
-        console.error('Failed to scan WiFi networks:', error);
-      } finally {
-        this.scanning = false;
+    stopWifiScanPolling() {
+      if (this.wifiScanPoll) {
+        clearInterval(this.wifiScanPoll);
+        this.wifiScanPoll = null;
       }
     },
     
@@ -1181,6 +1214,8 @@ export default {
       } else if (connection.type === 'ethernet') {
         this.newConnection.ipMethod = connection.ipMethod || 'auto';
         this.newConnection.ipAddress = connection.ipAddress || '';
+        this.newConnection.gateway = connection.gateway || '';
+        this.newConnection.dns = connection.dns || '';
       } else if (connection.type === 'lte') {
         // For LTE, fetch the current APN
         this.newConnection.apn = connection.apn || '';
@@ -1216,14 +1251,15 @@ export default {
     },
     
     selectConnectionType(type) {
+      this.stopWifiScanPolling();
       this.resetNewConnection();
       this.newConnection.type = type;
-      
+
       // Set default values based on connection type
       if (type === 'wifi') {
         this.newConnection.mode = 'infrastructure';
-        // Trigger a scan immediately when selecting WiFi type
-        this.scanWifiFromConnectionForm();
+        // Show cached networks immediately and keep refreshing while open.
+        this.startWifiScanPolling();
       } else if (type === 'ethernet') {
         this.newConnection.name = 'Ethernet Connection';
       } else if (type === 'lte') {
@@ -1249,6 +1285,8 @@ export default {
         // Ethernet specific
         ipMethod: 'auto',
         ipAddress: '',
+        gateway: '',
+        dns: '',
 
         // LTE specific
         apn: '',
@@ -1271,11 +1309,13 @@ export default {
 
       } catch (error) {
         console.error('Failed to save connection:', error);
-        alert('Failed to save connection. Please check your settings and try again.');
+        const serverMsg = error?.response?.data?.error;
+        alert(serverMsg || 'Failed to save connection. Please check your settings and try again.');
       }
     },
     
     closeConnectionForm() {
+      this.stopWifiScanPolling();
       this.showConnectionForm = false;
       this.isEditingConnection = false;
     },
@@ -1690,6 +1730,16 @@ export default {
   border-radius: 4px;
   font-size: 0.8rem;
   cursor: pointer;
+}
+
+.wifi-filter-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--ark-color-black-shadow);
+  border-radius: 4px;
+  font-size: 0.9rem;
 }
 
 .wifi-networks-list {
