@@ -324,7 +324,7 @@
               <div v-if="newConnection.mode === 'infrastructure' && !isEditingConnection" class="wifi-scan-container">
                 <div class="wifi-scan-header">
                   <h3>Available Networks</h3>
-                  <button type="button" @click="fetchWifiNetworks" class="wifi-scan-button">
+                  <button type="button" @click="fetchWifiNetworks(true)" class="wifi-scan-button">
                     <i class="fas fa-sync-alt" :class="{ 'fa-spin': scanning }"></i>
                     Rescan
                   </button>
@@ -902,8 +902,11 @@ export default {
       }, delayMs);
     },
 
-    async fetchWifiNetworks() {
-      this.scanning = true;
+    // showSpinner is set only for user-initiated loads (selecting WiFi or
+    // clicking Rescan); the background poll refreshes silently so the spinner
+    // doesn't blink every few seconds.
+    async fetchWifiNetworks(showSpinner = false) {
+      if (showSpinner) this.scanning = true;
       try {
         const response = await ConnectionsService.scanWifiNetworks();
         // Backend dedupes/sorts and drops hidden SSIDs; guard defensively.
@@ -911,7 +914,7 @@ export default {
       } catch (error) {
         console.error('Failed to scan WiFi networks:', error);
       } finally {
-        this.scanning = false;
+        if (showSpinner) this.scanning = false;
       }
     },
 
@@ -920,7 +923,7 @@ export default {
     startWifiScanPolling() {
       this.stopWifiScanPolling();
       this.wifiFilter = '';
-      this.fetchWifiNetworks();
+      this.fetchWifiNetworks(true);
       this.wifiScanPoll = setInterval(() => this.fetchWifiNetworks(), 3000);
     },
 
