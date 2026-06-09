@@ -1,0 +1,2 @@
+connection_url = "udp://:14552"
+polaris_api_key = "your_api_key_goes_here"

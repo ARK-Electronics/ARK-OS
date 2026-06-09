@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/lib/ark-os/venv/bin/python3
 
 """
 Open a shell over MAVLink.

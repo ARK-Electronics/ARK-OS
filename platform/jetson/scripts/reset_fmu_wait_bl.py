@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/lib/ark-os/venv/bin/python3
 
 # Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
 # Permission is hereby granted, free of charge, to any person obtaining a

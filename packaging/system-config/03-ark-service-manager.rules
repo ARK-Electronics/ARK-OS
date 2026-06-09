@@ -1,0 +1,48 @@
+// ARK-OS service management for the unprivileged service user (@ARK_USER@).
+//
+// As system services running User=@ARK_USER@ there is no active login session, so
+// polkit cannot authorize interactively. This rule grants the specific actions
+// the managers need: starting/stopping/restarting ARK-OS units, enabling/disabling
+// them, reloading the daemon, and setting the hostname.
+//
+// @ARK_USER@ and the JETSON-ONLY entries are resolved at build time by
+// assemble_tree.sh (the pi package strips the lines marked JETSON-ONLY).
+polkit.addRule(function(action, subject) {
+    var ARK_OS_UNITS = [
+        "mavlink-router.service",
+        "dds-agent.service",
+        "logloader.service",
+        "rtsp-server.service",
+        "polaris.service",
+        "rid-transmitter.service",   // JETSON-ONLY
+        "jetson-can.service",        // JETSON-ONLY
+        "flight-review.service",
+        "ark-ui-backend.service",
+        "autopilot-manager.service",
+        "connection-manager.service",
+        "service-manager.service",
+        "system-manager.service",
+        "hotspot-updater.service"
+    ];
+
+    if (subject.user != "@ARK_USER@") { return; }
+
+    if (action.id == "org.freedesktop.systemd1.reload-daemon") {
+        return polkit.Result.YES;
+    }
+
+    if (action.id == "org.freedesktop.systemd1.manage-units" ||
+        action.id == "org.freedesktop.systemd1.manage-unit-files") {
+        var unit = action.lookup("unit");
+        if (unit && ARK_OS_UNITS.indexOf(unit) !== -1) {
+            return polkit.Result.YES;
+        }
+    }
+
+    // Hostname control for connection-manager / system-manager.
+    if (action.id == "org.freedesktop.hostname1.set-hostname" ||
+        action.id == "org.freedesktop.hostname1.set-static-hostname" ||
+        action.id == "org.freedesktop.hostname1.set-pretty-hostname") {
+        return polkit.Result.YES;
+    }
+});

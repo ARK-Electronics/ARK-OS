@@ -1,0 +1,15 @@
+[Unit]
+Description=Polaris GNSS corrections service client for MAVLink
+Wants=network.target
+After=network-online.target mavlink-router.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+ExecStart=/usr/lib/ark-os/bin/polaris-client-mavlink --config /etc/ark-os/polaris.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

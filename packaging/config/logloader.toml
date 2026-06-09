@@ -1,0 +1,8 @@
+connection_url = "udp://:14551"
+local_server = "http://127.0.0.1:5006"
+remote_server = "https://review.px4.io"
+email = ""
+upload_enabled = false
+public_logs = false
+# Where logloader stages downloaded ulogs (FHS runtime data dir, created by postinst).
+application_directory = "/var/lib/ark-os/logs/"

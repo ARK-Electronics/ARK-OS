@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+# The nginx and flight-review activation symlinks are created by postinst, not
+# shipped as package files, so dpkg won't remove them. Clean them up on remove
+# and purge so a dangling sites-enabled link can't break `nginx -t`.
+case "$1" in
+    remove|purge)
+        rm -f /etc/nginx/sites-enabled/ark-ui
+        rm -f /usr/lib/ark-os/flight-review/app/config_user.ini
+        ;;
+esac
+
+# Configs and runtime data are intentionally not conffiles, so dpkg removes the
+# packaged /etc/ark-os/* files on remove; purge additionally drops the directory
+# and the runtime data under /var/lib/ark-os.
+case "$1" in
+    purge)
+        rm -rf /var/lib/ark-os
+        rm -rf /etc/ark-os
+        rm -f /etc/systemd/journald.conf.d/10-ark-os.conf
+        ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+exit 0

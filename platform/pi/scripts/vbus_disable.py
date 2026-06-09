@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/lib/ark-os/venv/bin/python3
 
 # Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -19,22 +19,23 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-import RPi.GPIO as GPIO
-import time
+# GPIO is driven via the Raspberry Pi `pinctrl` tool (raspi-utils) so the level
+# persists after this process exits and works on both CM4 and CM5. See
+# vbus_enable.py for the full rationale. Pin numbers are BCM.
 
-# Pin Definitions
+import subprocess
+
 vbus_det_pin = 27
 
-def main():
-    # Pin Setup:
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
-    GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    value = GPIO.LOW
-    print("Outputting {} to pin {}".format(value, vbus_det_pin))
-    GPIO.output(vbus_det_pin, value)
+def pinctrl_set(pin, *args):
+    subprocess.run(["pinctrl", "set", str(pin), *args], check=True)
+
+
+def main():
+    print(f"Driving VBUS-detect (GPIO{vbus_det_pin}) low")
+    pinctrl_set(vbus_det_pin, "op", "dl")
+
 
 if __name__ == '__main__':
     main()

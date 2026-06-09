@@ -386,7 +386,7 @@ class AutopilotManager:
         """Check if a systemd service is active"""
         try:
             result = subprocess.run(
-                ["systemctl", "--user", "is-active", service_name],
+                ["systemctl", "is-active", service_name],
                 capture_output=True,
                 text=True
             )
@@ -398,7 +398,7 @@ class AutopilotManager:
     def stop_mavlink_router(self):
         try:
             logger.debug("Stopping mavlink-router service")
-            result = subprocess.run(["systemctl", "--user", "stop", "mavlink-router"],
+            result = subprocess.run(["systemctl", "stop", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -415,7 +415,7 @@ class AutopilotManager:
     def restart_mavlink_router(self):
         try:
             logger.debug("Restarting mavlink-router service")
-            result = subprocess.run(["systemctl", "--user", "restart", "mavlink-router"],
+            result = subprocess.run(["systemctl", "restart", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -438,7 +438,7 @@ class AutopilotManager:
         script = "reset_fmu_wait_bl.py" if mode == "wait_bl" else "reset_fmu_fast.py"
         try:
             logger.debug(f"Resetting FMU using {script}")
-            result = subprocess.run(["python3", os.path.expanduser(f"~/.local/bin/{script}")],
+            result = subprocess.run(["/usr/lib/ark-os/venv/bin/python3", f"/usr/lib/ark-os/scripts/{script}"],
                                    check=False,
                                    capture_output=True,
                                    text=True)
@@ -506,19 +506,34 @@ class AutopilotManager:
             router_was_active = self.is_service_active("mavlink-router")
             if router_was_active:
                 logger.debug("mavlink-router is active, stopping it")
-                self.stop_mavlink_router()
+                if not self.stop_mavlink_router():
+                    error_msg = ("Could not stop mavlink-router; it still holds the autopilot "
+                                 "serial port, so the bootloader erase would stall. This usually "
+                                 "means the service user lacks polkit authorization to run "
+                                 "systemctl (the 99-ark-service-manager.pkla grant is missing).")
+                    logger.error(error_msg)
+                    socket.emit('error', {"message": error_msg}, room=socket_id)
+                    return False
             else:
                 logger.debug("mavlink-router is not active")
 
             # Reset FMU to enter bootloader mode
             logger.debug("Resetting FMU to enter bootloader mode")
-            self.reset_fmu(mode="wait_bl")
+            reset_ok, reset_msg = self.reset_fmu(mode="wait_bl")
+            if not reset_ok:
+                error_msg = f"Failed to reset FMU into bootloader mode: {reset_msg}"
+                logger.error(error_msg)
+                socket.emit('error', {"message": error_msg}, room=socket_id)
+                if router_was_active:
+                    self.restart_mavlink_router()
+                    self.mavlink.connect()
+                return False
 
             # Run px_uploader.py with JSON progress output
             logger.debug(f"Starting firmware upload using px_uploader.py")
             command = [
-                "python3", "-u",
-                os.path.expanduser("~/.local/bin/px_uploader.py"),
+                "/usr/lib/ark-os/venv/bin/python3", "-u",
+                "/usr/lib/ark-os/scripts/px_uploader.py",
                 "--json-progress", "--port", serial_device, firmware_path
             ]
 

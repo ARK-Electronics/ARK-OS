@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/lib/ark-os/venv/bin/python3
 
 # Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -19,22 +19,27 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-import RPi.GPIO as GPIO
-import time
+# GPIO is driven via the Raspberry Pi `pinctrl` tool (raspi-utils) rather than a
+# Python GPIO library. The carrier ships either a CM4 or a CM5: classic RPi.GPIO
+# memory-maps the SoC registers and cannot reach the CM5's RP1 I/O controller,
+# while gpiochip-based libraries release the line (reverting the pin) when the
+# process exits. pinctrl writes the pad register directly and the level PERSISTS
+# after exit on both CM4 and CM5 -- required here, since this helper drives the
+# line and returns while mavlink-router keeps running. Pin numbers are BCM.
 
-# Pin Definitions
+import subprocess
+
 vbus_det_pin = 27
 
-def main():
-    # Pin Setup:
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
-    GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    value = GPIO.HIGH
-    print("Outputting {} to pin {}".format(value, vbus_det_pin))
-    GPIO.output(vbus_det_pin, value)
+def pinctrl_set(pin, *args):
+    subprocess.run(["pinctrl", "set", str(pin), *args], check=True)
+
+
+def main():
+    print(f"Driving VBUS-detect (GPIO{vbus_det_pin}) high")
+    pinctrl_set(vbus_det_pin, "op", "dh")
+
 
 if __name__ == '__main__':
     main()

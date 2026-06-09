@@ -1,0 +1,15 @@
+[Unit]
+Description=RTSP Server
+Wants=network.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+ExecStart=/usr/lib/ark-os/bin/rtsp-server --config /etc/ark-os/rtsp-server.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

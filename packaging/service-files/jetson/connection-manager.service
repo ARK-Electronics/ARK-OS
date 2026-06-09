@@ -1,0 +1,16 @@
+[Unit]
+Description=Manages network connections via NetworkManager using Python and nmcli
+Wants=network.target network-online.target NetworkManager.service
+After=network-online.target NetworkManager.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/connection_manager.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target ark-os.target

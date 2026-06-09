@@ -1,0 +1,15 @@
+[Unit]
+Description=Broadcasts Remote ID data via Bluetooth
+ConditionPathIsDirectory=/sys/class/bluetooth
+Wants=network-online.target
+After=network-online.target bluetooth.target mavlink-router.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+ExecStart=/usr/lib/ark-os/bin/rid-transmitter --config /etc/ark-os/rid-transmitter.toml
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target ark-os.target

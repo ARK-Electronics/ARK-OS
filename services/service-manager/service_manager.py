@@ -23,20 +23,39 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+# The deb is the source of truth for what is installed: manifests are dropped at
+# MANIFEST_DIR (one <svc>.manifest.json per <svc>.service), and the per-service
+# configs the web UI edits live flat under CONFIG_DIR.
+MANIFEST_DIR = "/usr/lib/ark-os/manifests"
+CONFIG_DIR = "/etc/ark-os"
+
 class ServiceManager:
     
     @staticmethod
+    def is_known_service(service_name):
+        """Only services the package installed a manifest for may be managed.
+
+        Guards the systemctl / journalctl / config operations below against
+        arbitrary unit names from the web UI. The Jetson polkit .pkla grant is not
+        unit-scoped, so without this check a request could reach any system unit.
+        """
+        if not service_name or "/" in service_name or service_name in (".", ".."):
+            return False
+        manifest_file = os.path.join(MANIFEST_DIR, f"{service_name}.manifest.json")
+        return os.path.isfile(manifest_file)
+
+    @staticmethod
     def run_systemctl(operation, service_name):
-        command = f"systemctl --user {operation} {service_name}"
+        if not ServiceManager.is_known_service(service_name):
+            return False, f"Unknown or unmanaged service: {service_name}"
         try:
             process = subprocess.run(
-                command,
-                shell=True,
+                ["systemctl", operation, service_name],
                 capture_output=True,
                 text=True,
                 timeout=10
             )
-            
+
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             output = ansi_escape.sub('', process.stdout + process.stderr).strip()
             
@@ -50,12 +69,10 @@ class ServiceManager:
     
     @staticmethod
     def get_service_status(service_name, status_type="active"):
-        command = f"systemctl --user is-{status_type} {service_name}"
         try:
             process = subprocess.run(
-                command, 
-                shell=True,
-                capture_output=True, 
+                ["systemctl", f"is-{status_type}", service_name],
+                capture_output=True,
                 text=True
             )
 
@@ -66,29 +83,23 @@ class ServiceManager:
     
     @staticmethod
     def get_service_config_file(service_name):
-        base_dir = os.path.expanduser("~/.local/share")
-        service_dir = os.path.join(base_dir, service_name)
-        
-        config_file_name = "config.toml"
-        
-        manifest_file = os.path.join(service_dir, f"{service_name}.manifest.json")
+        config_file_name = ""
+
+        manifest_file = os.path.join(MANIFEST_DIR, f"{service_name}.manifest.json")
         if os.path.isfile(manifest_file):
             try:
                 with open(manifest_file, 'r') as f:
                     manifest_data = json.load(f)
-                    manifest_config = manifest_data.get("configFile", "")
-                    if manifest_config:
-                        config_file_name = manifest_config
+                    config_file_name = manifest_data.get("configFile", "") or ""
             except Exception as e:
                 print(f"Error reading manifest file for {service_name}: {e}")
-        
-        return os.path.join(service_dir, config_file_name)
+
+        return os.path.join(CONFIG_DIR, config_file_name)
     
     @staticmethod
     def is_service_visible(service_name):
-        base_dir = os.path.expanduser("~/.local/share")
-        manifest_file = os.path.join(base_dir, service_name, f"{service_name}.manifest.json")
-        
+        manifest_file = os.path.join(MANIFEST_DIR, f"{service_name}.manifest.json")
+
         if os.path.isfile(manifest_file):
             try:
                 with open(manifest_file, 'r') as f:
@@ -102,18 +113,15 @@ class ServiceManager:
     @staticmethod
     def get_service_statuses():
         services = []
-        
-        service_dir = os.path.expanduser("~/.config/systemd/user")
-        base_dir = os.path.expanduser("~/.local/share")
-        
-        if not os.path.isdir(service_dir):
+
+        if not os.path.isdir(MANIFEST_DIR):
             return {"services": []}
-        
-        service_files = [f for f in os.listdir(service_dir) if f.endswith('.service')]
-        
-        for service_file in service_files:
-            service_name = service_file.replace('.service', '')
-            
+
+        manifest_files = [f for f in os.listdir(MANIFEST_DIR) if f.endswith('.manifest.json')]
+
+        for manifest_file in manifest_files:
+            service_name = manifest_file[:-len('.manifest.json')]
+
             enabled_status = ServiceManager.get_service_status(service_name, "enabled")
             active_status = ServiceManager.get_service_status(service_name, "active")
             
@@ -207,12 +215,13 @@ class ServiceManager:
     def get_logs(service_name, num_lines=50):
         if not service_name:
             return {"status": "fail", "message": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "message": f"Unknown or unmanaged service: {service_name}"}
         
         try:
-            command = f"journalctl --user -u {service_name} -n {num_lines} --no-pager -o cat"
             process = subprocess.run(
-                command,
-                shell=True,
+                ["journalctl", "-u", service_name, "-n", str(num_lines), "--no-pager", "-o", "cat"],
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -229,6 +238,9 @@ class ServiceManager:
     def get_config(service_name):
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "data": f"Unknown or unmanaged service: {service_name}"}
         
         config_file = ServiceManager.get_service_config_file(service_name)
         
@@ -248,6 +260,9 @@ class ServiceManager:
     def save_config(service_name, config_data):
         if not service_name:
             return {"status": "fail", "data": "No service name provided"}
+
+        if not ServiceManager.is_known_service(service_name):
+            return {"status": "fail", "data": f"Unknown or unmanaged service: {service_name}"}
         
         config_file = ServiceManager.get_service_config_file(service_name)
         

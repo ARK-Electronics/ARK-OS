@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/lib/ark-os/venv/bin/python3
 
 # Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -19,31 +19,37 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-import RPi.GPIO as GPIO
+# GPIO is driven via the Raspberry Pi `pinctrl` tool (raspi-utils) so the levels
+# persist after this process exits and work on both CM4 and CM5. See
+# vbus_enable.py for the full rationale. Pin numbers are BCM.
+
+import subprocess
 import time
 
-# Pin Definitions
 reset_pin = 25
 vbus_det_pin = 27
 
+
+def pinctrl_set(pin, *args):
+    subprocess.run(["pinctrl", "set", str(pin), *args], check=True)
+
+
 def main():
-    # Pin Setup:
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)  # BCM pin-numbering scheme from Raspberry Pi
-    # set pin as an output pin with optional initial state of HIGH
-    GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
-    GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
+    # Pin setup: both as outputs, initially high.
+    pinctrl_set(reset_pin, "op", "dh")
+    pinctrl_set(vbus_det_pin, "op", "dh")
 
     print("Resetting Flight Controller!")
 
-    GPIO.output(reset_pin, GPIO.HIGH)
+    pinctrl_set(reset_pin, "op", "dh")
     time.sleep(0.1)
-    GPIO.output(reset_pin, GPIO.LOW)
+    pinctrl_set(reset_pin, "op", "dl")
 
     # Enable VBUS immediatly to catch bootloader and wait
-    GPIO.output(vbus_det_pin, GPIO.HIGH)
+    pinctrl_set(vbus_det_pin, "op", "dh")
 
     time.sleep(1)
+
 
 if __name__ == '__main__':
     main()

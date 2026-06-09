@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stop the whole ARK-OS service group before the package files are removed or
+# replaced. One command covers every enabled unit (via ark-os.target).
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl stop ark-os.target 2>/dev/null || true
+fi
+
+exit 0

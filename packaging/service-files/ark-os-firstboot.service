@@ -1,0 +1,17 @@
+[Unit]
+Description=ARK-OS first-boot finalization
+Documentation=https://github.com/ARK-Electronics/ARK-OS
+# Runtime-only setup that cannot run in the image-build chroot (no running systemd /
+# NetworkManager): default hotspot, flight-review DB, Wi-Fi unblock. Runs once,
+# guarded by the sentinel the script writes; the live postinst also starts it.
+Wants=network-online.target
+After=network-online.target NetworkManager.service
+ConditionPathExists=!/var/lib/ark-os/.firstboot-complete
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ark-os/libexec/ark_os_firstboot.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -21,15 +21,76 @@ Connect to your WiFi network using Network Manager
 sudo nmcli dev wifi connect <ssid> password <password>
 ```
 
-Clone this repository on the device
+# Installation
+
+ARK-OS is distributed as a Debian package on the [Releases page](https://github.com/ARK-Electronics/ARK-OS/releases). It depends on the MAVSDK C++ runtime, which has no apt repository — it is downloaded from the [upstream MAVSDK releases](https://github.com/mavlink/MAVSDK/releases). On Jetson, the web UI's system stats additionally need `jetson-stats` (jtop) installed system-wide. The install script below handles all of this; manual steps follow if you prefer.
+
+### Install / update with the script (recommended)
+
+`packaging/install_ark_os.sh` installs MAVSDK, `jetson-stats` (Jetson only), and ARK-OS in the correct order, and is also the supported way to update a live device. Run it from a checkout of this repo on the device:
+
 ```
-git clone --recurse-submodules https://github.com/ARK-Electronics/ARK-OS.git
+git clone https://github.com/ARK-Electronics/ARK-OS.git
+cd ARK-OS
+
+# Download and install a published release (replace X.Y.Z):
+sudo ./packaging/install_ark_os.sh --ark-os-version=X.Y.Z
+
+# ...or install a .deb you already have (built locally or downloaded):
+sudo ./packaging/install_ark_os.sh ./ark-os-jetson-jammy_X.Y.Z_arm64.deb
 ```
-Run the install script on the device. You will be prompted y/n to install the services, you can press enter to skip and use the recommended defaults.
+
+The script auto-detects Jetson vs Pi (override with `--platform`), skips MAVSDK/jtop when they are already at the pinned versions, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
+
+### Manual install
+
+Install MAVSDK first (ARK-OS depends on it), then ARK-OS. Replace `<mavsdk-ver>`, `<ark-os-ver>`, and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+
+#### Jetson
 ```
-./install.sh
+wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
+
+sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
+
+# Recommended: jtop, for Jetson system stats in the web UI
+sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
 ```
-You can skip the interactive prompt by copying the **default.env** file and renaming it **user.env**. You can adjust the options in the **user.env**. This script can be safely run multiple times to update your system.
+
+#### Raspberry Pi
+Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:
+```
+wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi-trixie_<ark-os-ver>_arm64.deb
+
+sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
+sudo apt install ./ark-os-pi-trixie_<ark-os-ver>_arm64.deb
+```
+
+### Updating
+Re-run `install_ark_os.sh` (it upgrades ARK-OS in place and leaves MAVSDK/jtop alone when already current), or manually `sudo apt install ./ark-os-<platform>-<codename>_<ver>_arm64.deb`. **Upgrading resets the per-service configuration under `/etc/ark-os/` to packaged defaults** — reconfigure via the web UI afterward.
+
+### Migrating from a source install
+Installing the package on a device that was set up with the old `install.sh` flow migrates it automatically: the legacy user services and binaries are removed and your previous configs are backed up to `~/.config/ark-os-legacy-backup/`. **Reboot after installing** so no stale user-session services keep holding the autopilot UART / MAVLink ports.
+
+### Building Jetson images
+To install ARK-OS into a Jetson image during an `ark_jetson_kernel --provision` build (chroot), see `packaging/PLAN.md` Task 9.
+
+## Command-line tools
+The package puts its operator scripts on `PATH` via `/etc/profile.d/ark-os.sh`, which adds `/usr/lib/ark-os/scripts`. Each script's shebang points at the bundled venv (`/usr/lib/ark-os/venv/bin/python3`), so there is nothing to source or activate — open a login shell (e.g. SSH in) and run them by name:
+
+```
+mavlink_shell.py              # interactive PX4 NSH shell over MAVLink
+px4_shell_command.py <cmd>    # run a single PX4 console command over MAVLink
+flash_firmware.sh <fw.px4>    # flash FC firmware end to end (defaults to the bundled image)
+px_uploader.py ...            # low-level uploader (bootloader must already be active)
+reset_fmu_fast.py             # reset the FC (boots the application)
+reset_fmu_wait_bl.py          # reset the FC into bootloader mode
+get_serial_number.py          # print the Jetson serial number (Jetson only)
+```
+
+The directory also holds the service start-scripts and other internal helpers; the ones above are the operator-facing tools. The `PATH` entry takes effect on your next login — in the current shell, run `source /etc/profile.d/ark-os.sh` (or invoke a script by its full path under `/usr/lib/ark-os/scripts/`).
 
 ## ARK-UI
 A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
@@ -40,7 +101,7 @@ A web based UI is provided to more easily manage your device. The webpage is hos
 ![alt text](ark-ui4.png)
 
 ## Services
-When running the **install.sh** script you will be prompted to install the below services. The services are installed as [systemd user services](https://www.unixsysadmin.com/systemd-user-services/) and conform to the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/index.html).
+The package installs the services below as system-level [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) running as the unprivileged platform user (`jetson` or `pi`). The always-on services are enabled automatically; the optional services (`dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`) are installed but disabled — enable them from the web UI or with `systemctl enable --now <service>`.
 
 ## Jetson and Pi
 
@@ -75,7 +136,7 @@ This service provides a REST API for autopilot management via the ARK UI.
 This service provides a REST API for connection management via the ARK UI.
 
 **service-manager.service** <br>
-This service provides a REST API for systemd user service management via the ARK UI.
+This service provides a REST API for systemd service management via the ARK UI.
 
 ### Jetson only
 

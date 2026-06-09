@@ -1,0 +1,138 @@
+name: Build .deb packages
+
+# Release builds run on tag push (v*). workflow_dispatch allows a manual build
+# (versioned 0.0.0-<sha>, no release attachment).
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'draft-*'   # publishes a public PRERELEASE deb for pre-release testing
+  # Build a downloadable .deb on PR updates to validate the package pre-merge.
+  # This is the only pre-merge build path: workflow_dispatch is unavailable until
+  # build-deb.yml is on the default branch. No release is published on PR runs
+  # (the "Attach to GitHub Release" step is gated on refs/tags/v). Drop this
+  # before merging #68, or keep it as a deliberate PR check.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create/attach the GitHub Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: jetson
+            codename: jammy
+            runner: ubuntu-22.04-arm
+            container: ""
+            extra_deps: "libbluetooth-dev"
+          - platform: pi
+            codename: bookworm
+            runner: ubuntu-22.04-arm
+            container: "debian:bookworm"
+            extra_deps: ""
+          - platform: pi
+            codename: trixie
+            runner: ubuntu-22.04-arm
+            container: "debian:trixie"
+            extra_deps: ""
+    # Build each platform on a host whose OS matches the target so the bundled venv
+    # and natively-compiled binaries are ABI-compatible. The venv is created with
+    # `python3 -m venv --copies`, which ships the interpreter but resolves the stdlib
+    # from the *system* python at runtime — a Jammy (3.10) venv will not run on
+    # Bookworm (no system python3.10) and vice-versa.
+    #   - jetson: ubuntu-22.04-arm natively    (Jammy / Python 3.10  = JetPack 6 rootfs)
+    #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS Bookworm)
+    #   - pi:     a debian:trixie   container  (Debian 13 / Python 3.13 = Raspberry Pi OS Trixie)
+    # The container runs on the same arm64 host. Each leg's `codename` (the host's OS
+    # release) is part of the package name (ark-os-<platform>-<codename>); supporting a
+    # new release is one more leg here plus an entry in build.sh's BASELINES table.
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    # Force bash for inline `run:` steps. The native runner defaults to bash, but the
+    # slim debian:* containers default to sh (dash), which chokes on bashisms
+    # like ${GITHUB_SHA::8} — so without this the pi legs fail where jetson passes.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Bootstrap container toolchain
+        # The minimal debian:* images (pi builds) lack tools the checkout
+        # action and later steps assume a GitHub-hosted runner already provides.
+        # Install them before checkout. Skipped on the native jetson runner.
+        if: ${{ matrix.container != '' }}
+        run: |
+          apt-get update
+          apt-get install -y sudo git ca-certificates curl xz-utils
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        # The gstreamer *-dev libs are only needed to build/link rtsp-server in
+        # CI; on the Jetson target they ship with nvidia-jetpack. libunwind-dev is
+        # listed explicitly because libgstreamer1.0-dev's transitive dependency on
+        # it is not auto-resolved on the ubuntu-22.04-arm runner image
+        # ("libgstreamer1.0-dev : Depends: libunwind-dev / held broken packages").
+        # astyle is invoked by the service Makefiles' `all` target (make runs the
+        # formatter before cmake), so it is a build-time requirement too.
+        # libgflags/libgoogle-glog/libboost are required by the Polaris SDK that
+        # polaris-client-mavlink fetches and builds at configure time.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake meson ninja-build pkg-config build-essential astyle file \
+            python3-pip python3-venv \
+            libssl-dev libsqlite3-dev libunwind-dev \
+            libgflags-dev libgoogle-glog-dev libboost-all-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
+            lintian ${{ matrix.extra_deps }}
+
+      - name: Install MAVSDK (build-time only, to link libs/mavsdk-examples)
+        run: |
+          . packaging/versions.env
+          DEB="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
+          echo "Installing MAVSDK $MAVSDK_VERSION ($DEB)"
+          curl -fsSLO "https://github.com/mavlink/MAVSDK/releases/download/v${MAVSDK_VERSION}/${DEB}"
+          sudo apt-get install -y "./${DEB}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/v}" ]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build .deb
+        run: ./packaging/build.sh ${{ matrix.platform }} --version=${{ steps.ver.outputs.version }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_${{ steps.ver.outputs.version }}_arm64
+          path: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
+          if-no-files-found: error
+
+      # Attach the per-platform .deb to the release for this tag. MAVSDK is NOT
+      # rebundled — its canonical home is the upstream MAVSDK releases page.
+      - name: Attach to GitHub Release
+        # v* → official release; draft-* → public PRERELEASE (excluded from
+        # "latest", clearly marked) so downstream builds fetch it without auth.
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/draft-')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/draft-') }}
+          files: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
+          fail_on_unmatched_files: true

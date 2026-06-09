@@ -1,0 +1,15 @@
+Package: ark-os-@PLATFORM@-@CODENAME@
+Version: @VERSION@
+Section: embedded
+Priority: optional
+Architecture: arm64
+Depends: nginx, @PYTHON@, @PYTHON@-venv, avahi-daemon, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, libgstrtspserver-1.0-0, gstreamer1.0-plugins-ugly, gstreamer1.0-plugins-bad, gstreamer1.0-tools, gstreamer1.0-gl, gstreamer1.0-rtsp, libssl3t64 | libssl3, libsqlite3-0, libcap2-bin, curl, jq, systemd, network-manager, libmavsdk-dev (>= 3.0)@EXTRA_DEPENDS@
+Provides: ark-os-@PLATFORM@
+Conflicts: ark-os-@PLATFORM@
+Replaces: ark-os-@PLATFORM@
+Maintainer: ARK Electronics <info@arkelectron.com>
+Description: ARK-OS companion computer platform
+ Pre-compiled services, web UI, and system configuration for autonomous vehicles.
+ .
+ The @PLATFORM@ package installs system-level systemd units that run as the
+ default platform user. The Pi package assumes the default "pi" user exists.
