@@ -234,6 +234,20 @@ class CommandExecutor:
             logger.error(f"Error running command: {e}")
             return False, "", str(e)
 
+    @staticmethod
+    def run_argv_output(args, default=None, timeout=30):
+        """
+        Run an argv command (no shell) and return its stdout, or `default`
+        on failure -- the read/stats equivalent of safe_run_command.
+
+        The read and stats paths use this instead of interpolating a
+        connection name or interface into a shell string, so a name created
+        with embedded shell metacharacters can't be executed when it is
+        later read back.
+        """
+        ok, out, _err = CommandExecutor.run_argv(args, timeout)
+        return out if ok else default
+
 
 class NetworkConnectionManager:
     @staticmethod
@@ -273,22 +287,22 @@ class NetworkConnectionManager:
 
                 # Get interface specific properties
                 if type == 'wifi':
-                    connection['mode'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.mode con show \"{name}\"")
-                    connection['ssid'] = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid con show \"{name}\"")
-                    connection['ipAddress'] = CommandExecutor.safe_run_command(f"nmcli -g IP4.ADDRESS con show \"{name}\"")
+                    connection['mode'] = CommandExecutor.run_argv_output(["nmcli", "-g", "802-11-wireless.mode", "connection", "show", "id", name])
+                    connection['ssid'] = CommandExecutor.run_argv_output(["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", "id", name])
+                    connection['ipAddress'] = CommandExecutor.run_argv_output(["nmcli", "-g", "IP4.ADDRESS", "connection", "show", "id", name])
                 elif type == 'ethernet':
                     # Prefer the live address (DHCP-assigned or static) and fall
                     # back to the configured static address, so the list still
                     # shows an IP for a DHCP connection (whose ipv4.addresses is
                     # empty) as well as a configured-but-inactive static one.
-                    live = CommandExecutor.safe_run_command(f"nmcli -g IP4.ADDRESS connection show \"{name}\"")
-                    profile = CommandExecutor.safe_run_command(f"nmcli -g ipv4.addresses connection show \"{name}\"")
+                    live = CommandExecutor.run_argv_output(["nmcli", "-g", "IP4.ADDRESS", "connection", "show", "id", name])
+                    profile = CommandExecutor.run_argv_output(["nmcli", "-g", "ipv4.addresses", "connection", "show", "id", name])
                     connection['ipAddress'] = live or profile or ''
-                    connection['ipMethod'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.method connection show \"{name}\"")
-                    connection['gateway'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.gateway connection show \"{name}\"") or ''
-                    connection['dns'] = CommandExecutor.safe_run_command(f"nmcli -g ipv4.dns connection show \"{name}\"") or ''
+                    connection['ipMethod'] = CommandExecutor.run_argv_output(["nmcli", "-g", "ipv4.method", "connection", "show", "id", name])
+                    connection['gateway'] = CommandExecutor.run_argv_output(["nmcli", "-g", "ipv4.gateway", "connection", "show", "id", name]) or ''
+                    connection['dns'] = CommandExecutor.run_argv_output(["nmcli", "-g", "ipv4.dns", "connection", "show", "id", name]) or ''
                 if type == 'lte':
-                    connection['apn'] = CommandExecutor.safe_run_command(f"nmcli -g gsm.apn con show \"{name}\"")
+                    connection['apn'] = CommandExecutor.run_argv_output(["nmcli", "-g", "gsm.apn", "connection", "show", "id", name])
 
                 connections.append(connection)
 
@@ -332,8 +346,9 @@ class ConnectionManager:
         ok, out, err = CommandExecutor.run_argv(["nmcli", "-t", "-f", "NAME", "connection", "show"])
         if not ok:
             return False, _clean_nmcli_error(err)
-        # In -t (terminal) mode nmcli escapes a literal ':' within a field as '\:'.
-        existing = {line.replace('\\:', ':') for line in out.split('\n') if line}
+        # -f NAME yields one field per line; _split_nmcli_terse un-escapes the
+        # '\:' that nmcli uses for a literal ':' within the name.
+        existing = {_split_nmcli_terse(line)[0] for line in out.split('\n') if line}
         return name in existing, None
 
     @staticmethod
@@ -954,7 +969,7 @@ class NetworkStatsCollector:
                             interface_type = 'other'
 
                         # Get the actual IP interface for this connection
-                        ip_iface = CommandExecutor.safe_run_command(f"nmcli -g GENERAL.IP-IFACE connection show \"{name}\"")
+                        ip_iface = CommandExecutor.run_argv_output(["nmcli", "-g", "GENERAL.IP-IFACE", "connection", "show", "id", name])
 
                         if ip_iface and ip_iface.strip():
                             device = ip_iface.strip()
@@ -973,7 +988,7 @@ class NetworkStatsCollector:
             # Process each active connection to collect statistics
             for device, info in active_connections.items():
                 # Get detailed stats using 'ip -s link show' command
-                stats_output = CommandExecutor.safe_run_command(f"ip -s link show {device}")
+                stats_output = CommandExecutor.run_argv_output(["ip", "-s", "link", "show", device])
                 if not stats_output:
                     logger.warning(f"Failed to get stats for device {device}")
                     continue
@@ -984,10 +999,15 @@ class NetworkStatsCollector:
                     logger.warning(f"Failed to parse stats for device {device}")
                     continue
 
-                # Get IP address
-                ip_output = CommandExecutor.safe_run_command(
-                    f"ip addr show {device} | grep -w inet | head -1 | awk '{{print $2}}' | cut -d/ -f1"
-                )
+                # Get IP address: first IPv4 'inet' line, address without prefix.
+                ip_output = ''
+                addr_out = CommandExecutor.run_argv_output(["ip", "-4", "addr", "show", device])
+                if addr_out:
+                    for addr_line in addr_out.split('\n'):
+                        addr_fields = addr_line.split()
+                        if addr_fields and addr_fields[0] == 'inet':
+                            ip_output = addr_fields[1].split('/')[0]
+                            break
 
                 # Create the stats entry with simplified data
                 device_stats = {
@@ -1011,15 +1031,17 @@ class NetworkStatsCollector:
 
                 # Add connection-type specific information
                 if info['type'] == 'wifi':
-                    # Get signal strength for WiFi
-                    signal_output = CommandExecutor.safe_run_command(
-                        f"nmcli -f SIGNAL device wifi list ifname {device} | grep -v SIGNAL | head -1 | awk '{{print $1}}'"
+                    # Get signal strength for WiFi: first row of the terse list
+                    # (strongest network on this interface).
+                    signal_out = CommandExecutor.run_argv_output(
+                        ["nmcli", "-t", "-f", "SIGNAL", "device", "wifi", "list", "ifname", device]
                     )
+                    signal_output = next((l.strip() for l in (signal_out or '').split('\n') if l.strip()), '')
                     if signal_output and signal_output.isdigit():
                         device_stats['signal_strength'] = int(signal_output)
 
                     # Get SSID for WiFi
-                    ssid_output = CommandExecutor.safe_run_command(f"nmcli -g 802-11-wireless.ssid connection show '{info['name']}'")
+                    ssid_output = CommandExecutor.run_argv_output(["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", "id", info['name']])
                     if ssid_output:
                         device_stats['ssid'] = ssid_output
 
