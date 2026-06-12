@@ -204,7 +204,7 @@ class JtopManager:
         self._lock = threading.Lock()
         self._jetson = None
         self._available = None  # None=unknown, True/False=determined
-        self._last_attempt = 0
+        self._last_attempt = 0.0
 
     def _start_instance(self):
         try:
@@ -633,4 +633,5 @@ if __name__ == '__main__':
     else:
         print("Detected: Generic Linux System")
 
-    uvicorn.run(app, host=host, port=port)
+    # access_log off: the UI polls /info.
+    uvicorn.run(app, host=host, port=port, access_log=False)

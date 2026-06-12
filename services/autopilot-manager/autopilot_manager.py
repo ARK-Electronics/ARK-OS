@@ -23,7 +23,6 @@ import time
 import argparse
 import logging
 import asyncio
-import queue
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
@@ -31,7 +30,7 @@ import socket
 
 from fastapi import FastAPI, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import uvicorn
 import pymavlink.mavutil as mavutil
 from pymavlink.dialects.v20 import common as mavlink
@@ -79,8 +78,8 @@ class UploadResponse(BaseModel):
 
 
 class FlashProgress(BaseModel):
-    """Payload of the SSE 'progress' event. px_uploader.py emits the same shape
-    (its --json-progress lines are forwarded verbatim)."""
+    """Payload of the SSE 'progress' event. px_uploader.py's --json-progress
+    lines are validated against this model before they are published."""
     status: str
     message: str | None = None
     percent: float
@@ -94,32 +93,41 @@ class FlashMessage(BaseModel):
 app = FastAPI(title="ARK-OS Autopilot Manager", version="1.0.0")
 
 
+FlashEvent = tuple[str, dict[str, Any]]
+
+
 class ProgressBroker:
     """Fans firmware-flash events out to the SSE subscribers.
 
-    The flash runs in a worker thread while each subscriber is an async
-    generator, so handoff goes through per-subscriber thread-safe queues.
+    The flash runs in a worker thread while each subscriber awaits an
+    asyncio.Queue on the event loop, so publish hops onto that loop via
+    call_soon_threadsafe — subscribers block on get() instead of polling.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._subscribers: set[queue.Queue] = set()
+        self._subscribers: dict[asyncio.Queue[FlashEvent], asyncio.AbstractEventLoop] = {}
 
-    def subscribe(self) -> queue.Queue:
-        q: queue.Queue = queue.Queue()
+    def subscribe(self) -> asyncio.Queue[FlashEvent]:
+        """Must be called from the event loop (it captures the running loop)."""
+        q: asyncio.Queue[FlashEvent] = asyncio.Queue()
         with self._lock:
-            self._subscribers.add(q)
+            self._subscribers[q] = asyncio.get_running_loop()
         return q
 
-    def unsubscribe(self, q: queue.Queue) -> None:
+    def unsubscribe(self, q: asyncio.Queue[FlashEvent]) -> None:
         with self._lock:
-            self._subscribers.discard(q)
+            self._subscribers.pop(q, None)
 
     def publish(self, event: str, data: dict[str, Any]) -> None:
         with self._lock:
-            subscribers = list(self._subscribers)
-        for q in subscribers:
-            q.put((event, data))
+            subscribers = list(self._subscribers.items())
+        for q, loop in subscribers:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, (event, data))
+            except RuntimeError:
+                # Subscriber's loop already shut down.
+                pass
 
 
 broker = ProgressBroker()
@@ -289,9 +297,9 @@ class MAVLinkConnection:
         """Process incoming MAVLink messages in a loop"""
         self.running = True
         connection_attempts = 0
-        last_version_request_time = 0
-        last_system_time_update_time = 0
-        last_device_check_time = 0
+        last_version_request_time = 0.0
+        last_system_time_update_time = 0.0
+        last_device_check_time = 0.0
         waiting_for_heartbeat = True
 
         while self.running:
@@ -557,18 +565,25 @@ class AutopilotManager:
             logger.error(f"Error resetting FMU with {script}: {e}")
             return False, f"Reset error: {str(e)}"
 
-    def flash_firmware(self, firmware_path):
-        """Flash firmware to the autopilot, publishing progress to SSE subscribers"""
+    def try_claim_flash(self) -> bool:
+        """Claim the single flash slot, so a concurrent upload can be rejected
+        in the HTTP response instead of broadcasting a failure to every SSE
+        subscriber (which would also reach the client whose flash is running).
+        Released by flash_firmware when the flash finishes."""
         with self._flash_lock:
             if self._flashing:
-                broker.publish('progress', FlashProgress(
-                    status="failed",
-                    message="Firmware flash already in progress",
-                    percent=0,
-                ).model_dump(exclude_none=True))
                 return False
             self._flashing = True
+            return True
 
+    def release_flash(self) -> None:
+        with self._flash_lock:
+            self._flashing = False
+
+    def flash_firmware(self, firmware_path: str) -> bool:
+        """Flash firmware to the autopilot, publishing progress to SSE
+        subscribers. The caller must hold the flash slot (try_claim_flash);
+        it is released here when the flash finishes."""
         logger.info(f"Starting firmware flash process for {firmware_path}")
 
         try:
@@ -576,8 +591,7 @@ class AutopilotManager:
             if not os.path.isfile(firmware_path):
                 error_msg = "Firmware file does not exist"
                 logger.error(f"Error: {error_msg}")
-                broker.publish('progress', FlashProgress(
-                    status="failed", message=error_msg, percent=0).model_dump(exclude_none=True))
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                 return False
 
             # Find the ARKV6X device
@@ -586,8 +600,7 @@ class AutopilotManager:
             if not serial_device:
                 error_msg = "ARKV6X not found"
                 logger.error(f"Error: {error_msg}")
-                broker.publish('progress', FlashProgress(
-                    status="failed", message=error_msg, percent=0).model_dump(exclude_none=True))
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                 return False
             logger.debug(f"Found ARKV6X device at {serial_device}")
 
@@ -648,12 +661,12 @@ class AutopilotManager:
                     logger.debug(f"Uploader output: {line.strip()}")
                     if line is not None:
                         try:
-                            # Try to parse as JSON for progress updates
-                            progress_data = json.loads(line.strip())
-                            broker.publish('progress', progress_data)
-                        except json.JSONDecodeError:
-                            # Not JSON, could be other output
-                            logger.debug(f"Non-JSON output: {line.strip()}")
+                            # Only lines matching the contract reach subscribers;
+                            # anything else is uploader chatter.
+                            progress = FlashProgress.model_validate(json.loads(line.strip()))
+                            broker.publish('progress', progress.model_dump(exclude_none=True))
+                        except (json.JSONDecodeError, ValidationError):
+                            logger.debug(f"Non-progress output: {line.strip()}")
 
                 # Wait for process to complete
                 return_code = process.wait()
@@ -712,8 +725,7 @@ class AutopilotManager:
 
                 return False
         finally:
-            with self._flash_lock:
-                self._flashing = False
+            self.release_flash()
             # Clean up temp firmware file
             try:
                 if os.path.isfile(firmware_path):
@@ -759,19 +771,30 @@ def upload_firmware(firmware: UploadFile, response: Response) -> UploadResponse:
             message=f"Invalid file type. Only {', '.join(allowed_extensions)} files are allowed.",
         )
 
-    # Save the firmware to a temporary file
-    temp_path = os.path.join('/tmp', filename)
-    with open(temp_path, 'wb') as f:
-        while chunk := firmware.file.read(1024 * 1024):
-            f.write(chunk)
-    logger.info(f"Firmware file saved to {temp_path}")
+    # Claim the flash slot before touching the temp file: a concurrent upload
+    # is rejected here, and can't overwrite a file the running flash is reading.
+    if not get_manager().try_claim_flash():
+        logger.warning("Rejected firmware upload: flash already in progress")
+        response.status_code = 409
+        return UploadResponse(status="fail", message="Firmware flash already in progress")
 
-    # Start the flashing process in a background thread
-    threading.Thread(
-        target=get_manager().flash_firmware,
-        args=(temp_path,),
-        daemon=True,
-    ).start()
+    try:
+        # Save the firmware to a temporary file
+        temp_path = os.path.join('/tmp', filename)
+        with open(temp_path, 'wb') as f:
+            while chunk := firmware.file.read(1024 * 1024):
+                f.write(chunk)
+        logger.info(f"Firmware file saved to {temp_path}")
+
+        # Start the flashing process in a background thread
+        threading.Thread(
+            target=get_manager().flash_firmware,
+            args=(temp_path,),
+            daemon=True,
+        ).start()
+    except Exception:
+        get_manager().release_flash()
+        raise
 
     return UploadResponse(status="success", message="Firmware upload started")
 
@@ -789,20 +812,15 @@ async def firmware_upload_stream() -> StreamingResponse:
         q = broker.subscribe()
         try:
             yield ": connected\n\n"
-            last_activity = time.monotonic()
             while True:
                 try:
-                    event, data = q.get_nowait()
-                except queue.Empty:
+                    event, data = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
                     # Periodic comment keeps intermediate proxies from timing
                     # out the connection while no flash is running.
-                    if time.monotonic() - last_activity > 15:
-                        yield ": keepalive\n\n"
-                        last_activity = time.monotonic()
-                    await asyncio.sleep(0.2)
+                    yield ": keepalive\n\n"
                     continue
                 yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
-                last_activity = time.monotonic()
         finally:
             broker.unsubscribe(q)
 

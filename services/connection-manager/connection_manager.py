@@ -206,8 +206,8 @@ class State:
     interface_stats: dict[str, dict[str, Any]] = {}  # Latest stats per interface
     last_stats_update: float = 0
 
-    # Each accessor acquires this exactly once; collection happens outside
-    # the lock (see get_interface_usage_summary), so a plain Lock suffices.
+    # Never acquired reentrantly and never held across collection (slow
+    # subprocess work happens outside it), so a plain Lock suffices.
     stats_lock = threading.Lock()  # Thread safety for stats access
 
 
@@ -1180,12 +1180,16 @@ class NetworkStatsProcessor:
         """
         current_time = time.time()
 
-        # Check if enough time has passed since the last update
-        if (State.interface_stats and
-            current_time - State.last_stats_update < 1.0):
-            # Not enough time has passed since last update
-            logger.debug("Skipping stats update - not enough time elapsed")
-            return State.interface_stats
+        with State.stats_lock:
+            # Check if enough time has passed since the last update
+            if (State.interface_stats and
+                current_time - State.last_stats_update < 1.0):
+                logger.debug("Skipping stats update - not enough time elapsed")
+                return State.interface_stats
+            # Claim the slot before collecting (outside the lock), so
+            # concurrent SSE subscribers don't duplicate the subprocess work
+            # or compute rates over sub-second windows.
+            State.last_stats_update = current_time
 
         # Get current stats for active network interfaces
         current_stats = NetworkStatsCollector.collect_interface_stats()
@@ -1200,7 +1204,6 @@ class NetworkStatsProcessor:
 
             # Update our stored stats with the new values
             State.interface_stats = current_stats
-            State.last_stats_update = current_time
 
         return State.interface_stats
 
@@ -1470,4 +1473,5 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 3001))
 
     logger.info(f"Starting Connection Manager on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    # access_log off: the UI polls /wifi/scan while the WiFi tab is open.
+    uvicorn.run(app, host=host, port=port, access_log=False)

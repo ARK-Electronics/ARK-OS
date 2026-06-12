@@ -555,7 +555,7 @@ export default {
         this.uploadError = false;
       } catch (error) {
         console.error('Upload failed', error.response ? error.response.data : error);
-        this.statusMessage = `Upload failed: ${error.response ? error.response.data : error.message}`;
+        this.statusMessage = `Upload failed: ${error.response?.data?.message || error.message}`;
         this.isUploading = false;
         this.uploadError = true;
       }

@@ -367,4 +367,5 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 3002))
 
     print(f"Starting Service Manager on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    # access_log off: the UI polls /statuses.
+    uvicorn.run(app, host=host, port=port, access_log=False)
