@@ -15,20 +15,42 @@ find_existing_ap() {
     echo ""
 }
 
-# Get the first wireless interface
-INTERFACE=$(iw dev | grep Interface | awk '{print $2}' | head -1)
+# Wi-Fi firmware can come up well after network-online.target, so poll. Boards
+# without an adapter (some Jetson carriers, CM4/CM5 variants) never produce an
+# interface — the caller no-ops in that case.
+wait_for_wireless_interface() {
+    local max_attempts=30
+    local attempt=0
 
-if [ -z "$INTERFACE" ]; then
-    echo "No wireless interface found"
-    exit 1
+    while [ $attempt -lt $max_attempts ]; do
+        INTERFACE=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1)
+
+        if [ -n "$INTERFACE" ]; then
+            return 0
+        fi
+
+        attempt=$((attempt + 1))
+        echo "Waiting for wireless interface... (attempt $attempt/$max_attempts)"
+        sleep 2
+    done
+
+    return 1
+}
+
+if ! wait_for_wireless_interface; then
+    echo "No wireless interface found. Skipping hotspot creation."
+    exit 0
 fi
+
+echo "Wireless interface found: $INTERFACE"
 
 # Check if an AP connection already exists
 AP_SSID="$(find_existing_ap)"
 
 if [ -z "$AP_SSID" ]; then
-    # Hot spot does not exist, create it. Note: the hotspot-updater.service will rename to <hostname>-<serial>
-    AP_SSID="hotspot-default"
+    # device-tree strings are NUL-terminated
+    SERIAL=$(cat /proc/device-tree/serial-number 2>/dev/null | tr -d '\0')
+    AP_SSID="$(hostname)-${SERIAL:-unknown}"
     AP_PASSWORD="password"
 
     echo "Creating new hotspot: $AP_SSID"

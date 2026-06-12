@@ -47,7 +47,6 @@ done
 install -m 0755 services/mavlink-router/start_mavlink_router.sh   "$PKG$ARK/libexec/"
 install -m 0755 services/dds-agent/start_dds_agent.sh             "$PKG$ARK/libexec/"
 install -m 0755 services/flight-review/start_flight_review.sh     "$PKG$ARK/libexec/"
-install -m 0755 services/hotspot-updater/update_hotspot_default.sh "$PKG$ARK/libexec/"
 if [ "$P" = "jetson" ]; then
     install -m 0755 services/jetson-can/start_can_interface.sh "$PKG$ARK/libexec/"
     install -m 0755 services/jetson-can/stop_can_interface.sh  "$PKG$ARK/libexec/"
