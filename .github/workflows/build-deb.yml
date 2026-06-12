@@ -83,17 +83,21 @@ jobs:
         # formatter before cmake), so it is a build-time requirement too.
         # libgflags/libgoogle-glog/libboost are required by the Polaris SDK that
         # polaris-client-mavlink fetches and builds at configure time.
+        # patchelf pins the RUNPATH of the MAVSDK-linking binaries to the SDK
+        # bundled under /usr/lib/ark-os/mavsdk (build_binaries.sh; see issue #74).
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake meson ninja-build pkg-config build-essential astyle file \
+            cmake meson ninja-build pkg-config build-essential astyle file patchelf \
             python3-pip python3-venv \
             libssl-dev libsqlite3-dev libunwind-dev \
             libgflags-dev libgoogle-glog-dev libboost-all-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
             lintian ${{ matrix.extra_deps }}
 
-      - name: Install MAVSDK (build-time only, to link libs/mavsdk-examples)
+      - name: Install MAVSDK (build-time link dep; its deb is also staged into the .deb)
+        # The deb stays in the workspace root: build_binaries.sh stages this
+        # exact file into the package, so what we link is what we ship.
         run: |
           . packaging/versions.env
           DEB="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
@@ -125,8 +129,9 @@ jobs:
           path: ark-os-${{ matrix.platform }}-${{ matrix.codename }}_*_arm64.deb
           if-no-files-found: error
 
-      # Attach the per-platform .deb to the release for this tag. MAVSDK is NOT
-      # rebundled — its canonical home is the upstream MAVSDK releases page.
+      # Attach the per-platform .deb to the release for this tag. The .deb
+      # bundles its own MAVSDK SDK, so there is no separate MAVSDK asset to
+      # publish or install.
       - name: Attach to GitHub Release
         # v* → official release; draft-* → public PRERELEASE (excluded from
         # "latest", clearly marked) so downstream builds fetch it without auth.
