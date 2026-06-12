@@ -21,8 +21,7 @@ polkit.addRule(function(action, subject) {
         "autopilot-manager.service",
         "connection-manager.service",
         "service-manager.service",
-        "system-manager.service",
-        "hotspot-updater.service"
+        "system-manager.service"
     ];
 
     if (subject.user != "@ARK_USER@") { return; }
