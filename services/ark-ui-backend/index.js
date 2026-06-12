@@ -30,40 +30,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Create an array to keep track of all websocket proxies
-const wsProxies = [];
-
-const createWsProxy = (path, target) => {
-  const proxy = createProxyMiddleware({
-    target: target,
-    changeOrigin: true,
-    ws: true,
-    logLevel: 'debug',
-    onError: (err, req, res) => {
-      console.error(`WebSocket proxy error on ${path}: ${err.message}`);
-      if (res.writeHead) {
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'WebSocket service unavailable' }));
-      }
-    }
-  });
-
-  app.use(path, proxy);
-  wsProxies.push({ path, proxy });
-};
-
-// Create websocket proxies
-createWsProxy('/socket.io/network-stats', NETWORK_SERVICE_URL);
-
-server.on('upgrade', (req, socket, head) => {
-  const matchingProxy = wsProxies.find(({ path }) => req.url.startsWith(path));
-  if (matchingProxy) {
-    matchingProxy.proxy.upgrade(req, socket, head);
-  } else {
-    socket.destroy();
-  }
-});
-
 // Service proxy
 app.use('/api/service', createProxyMiddleware({
   target: SERVICE_MANAGER_URL,

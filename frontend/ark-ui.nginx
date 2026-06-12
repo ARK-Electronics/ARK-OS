@@ -20,17 +20,6 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
-    # Unified WebSocket handling for all Socket.IO connections
-    location /socket.io/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-
     location /flight-review {
         rewrite ^/flight-review$ /flight-review/browse redirect;
         rewrite ^/flight-review/(.*)$ /$1 break;
