@@ -54,7 +54,6 @@ const createWsProxy = (path, target) => {
 
 // Create websocket proxies
 createWsProxy('/socket.io/network-stats', NETWORK_SERVICE_URL);
-createWsProxy('/socket.io/autopilot-firmware-upload', AUTOPILOT_SERVICE_URL);
 
 server.on('upgrade', (req, socket, head) => {
   const matchingProxy = wsProxies.find(({ path }) => req.url.startsWith(path));

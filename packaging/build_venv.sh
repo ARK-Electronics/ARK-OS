@@ -17,7 +17,7 @@ rm -rf "$VENV"
 python3 -m venv --copies "$VENV"
 "$VENV/bin/pip" install --upgrade pip
 "$VENV/bin/pip" install \
-    pymavlink dronecan flask fastapi uvicorn psutil toml eventlet \
+    pymavlink dronecan flask fastapi uvicorn python-multipart psutil toml eventlet \
     flask-cors flask-socketio python-socketio pyserial
 
 echo "==> flight-review requirements"
