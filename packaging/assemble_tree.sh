@@ -10,9 +10,10 @@ PKG="$BUILD_DIR"
 P="$PLATFORM"
 ARK="$PKG_PREFIX"   # /usr/lib/ark-os
 
-# Platform-specific control Depends. EXTRA_DEPENDS is a suffix inserted after
-# libmavsdk-dev. PYTHON_PKG (the system python the bundled venv binds to) and
-# CODENAME come from build.sh, which resolves them from the build host's release.
+# Platform-specific control Depends. EXTRA_DEPENDS is a suffix appended to the end
+# of the base Depends list (after network-manager). PYTHON_PKG (the system python
+# the bundled venv binds to) and CODENAME come from build.sh, which resolves them
+# from the build host's release.
 # NOTE: the base Depends in DEBIAN/control target the supported releases' lib names.
 # Trixie's time64 transition renamed libssl3 -> libssl3t64, handled in control by the
 # alternative "libssl3t64 | libssl3"; use the same idiom if a future release renames more.
@@ -151,9 +152,10 @@ fi
 install -m 0644 packaging/system-config/10-ark-os.conf \
     "$PKG/etc/systemd/journald.conf.d/10-ark-os.conf"
 
-# --- ld.so.conf for the private C++ libs (polaris SDK + Micro-XRCE-DDS agent and
-# its FastDDS chain) that build_binaries.sh bundles under $ARK/lib. ldconfig in the
-# postinst builds the cache so the loader finds them on-device. ---
+# --- ld.so.conf for the private C++ libs bundled under $ARK/lib (postinst runs
+# ldconfig). $ARK/mavsdk/lib is deliberately absent: conf.d dirs beat /usr/lib
+# and /usr/local/lib in cache order, so listing it would shadow a user-installed
+# MAVSDK; ark-os binaries use RUNPATH instead (build_binaries.sh). ---
 mkdir -p "$PKG/etc/ld.so.conf.d"
 printf '%s\n' "$ARK/lib" > "$PKG/etc/ld.so.conf.d/ark-os.conf"
 chmod 0644 "$PKG/etc/ld.so.conf.d/ark-os.conf"

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Compile the C++ submodules natively and stage their binaries into the package
 # tree at $PKG_PREFIX/bin. Invoked by build.sh (PLATFORM, BUILD_DIR, REPO_ROOT,
-# PKG_PREFIX in the environment). Requires MAVSDK already installed on the
-# system (the CI workflow installs libmavsdk-dev before this runs) so that
-# libs/mavsdk-examples can link.
+# PKG_PREFIX, MAVSDK_VERSION, CODENAME in the environment). Linking needs a
+# system-installed MAVSDK; the .deb ships its own copy (MAVSDK step below).
 set -euo pipefail
 
 cd "$REPO_ROOT"
@@ -12,20 +11,15 @@ LIB_DIR="$BUILD_DIR$PKG_PREFIX/lib"
 mkdir -p "$BIN_DIR" "$LIB_DIR"
 NPROC="$(nproc)"
 
-# Bundle a freshly-built binary's private (build-tree) shared-library deps into
-# LIB_DIR. The polaris SDK (libpolaris_cpp_client) and the Micro-XRCE-DDS agent +
-# its FastDDS/FastCDR chain are FetchContent/temp_install libs that exist only in
-# the submodule build trees, so `install`-ing just the executable leaves them
-# missing on-device (loader error 127). ldd is run while the binary's build-tree
-# RUNPATH still resolves; only libs resolving inside $REPO_ROOT are copied — system
-# libs and apt Depends (libmavsdk, gstreamer, bluez, openssl, sqlite) resolve
-# elsewhere and stay external. A shipped /etc/ld.so.conf.d/ark-os.conf + ldconfig
-# (postinst) make these findable, so the stale build-tree RUNPATH is harmless (the
-# loader falls through to the cache). Fail loud if anything is unresolved at build.
-# Install a resolved shared library into LIB_DIR under its soname, failing loud on
-# a name collision: two services may each bundle a private lib with the same
-# basename, and silently overwriting one with a different build would break the
-# loser at load time. An identical duplicate (same bytes) is accepted as a no-op.
+# Bundle a binary's build-tree-only shared libs (polaris SDK, Micro-XRCE-DDS +
+# FastDDS chain — FetchContent libs that exist nowhere on-device) into LIB_DIR,
+# found via ldd while the build-tree RUNPATH still resolves. Only paths inside
+# $REPO_ROOT are copied: system libs and apt Depends stay external, which also
+# skips the system-installed MAVSDK (staged separately below). On-device they
+# resolve via /etc/ld.so.conf.d/ark-os.conf + postinst ldconfig, so the stale
+# build-tree RUNPATH is harmless. A same-name lib with different bytes aborts:
+# silently overwriting one service's private lib with another's would break the
+# loser at load time.
 install_bundled_lib() {
     local src dest
     src="$(readlink -f "$1")"
@@ -87,12 +81,8 @@ echo "==> polaris-client-mavlink (make -> cmake)"
 ( cd services/polaris/polaris-client-mavlink && make )
 install -m 0755 services/polaris/polaris-client-mavlink/build/polaris-client-mavlink "$BIN_DIR/"
 bundle_build_tree_libs services/polaris/polaris-client-mavlink/build/polaris-client-mavlink
-# The Polaris SDK also links libglog (and, where glog links it, libgflags), which
-# are installed on the build runner (see the CI build-deps step) but ship on
-# neither the Jetson nor the Pi rootfs and are not apt Depends. Their package names
-# differ across releases (libgoogle-glog0v5 / 0v6t64 / Debian's own), so a single
-# shared Depends would be wrong on one target — bundle the libs instead. ldd
-# resolves them (recursively, so glog's gflags dep is included) to system paths.
+# glog/gflags ship on neither rootfs, and their package names differ across
+# releases (libgoogle-glog0v5 / 0v6t64 / …) so no single Depends fits — bundle.
 polaris_extra_libs="$(ldd services/polaris/polaris-client-mavlink/build/polaris-client-mavlink \
     | awk '/=> \// {print $3}' | grep -E '/lib(glog|gflags)\.so' || true)"
 [ -n "$polaris_extra_libs" ] \
@@ -111,23 +101,124 @@ echo "==> mavsdk-examples (cmake)"
 ( cd libs/mavsdk-examples
   cmake -B build -DCMAKE_BUILD_TYPE=Release
   cmake --build build -j"$NPROC" )
-# Each example builds to build/<subdir>/<output_name>. Collect every ELF
-# executable except CMake's own compiler-probe artifacts under CMakeFiles/.
+# Collect every built ELF executable, skipping CMake's compiler probes.
 find libs/mavsdk-examples/build -type f -perm -u+x -not -path '*/CMakeFiles/*' | while read -r f; do
     if file -b "$f" | grep -q 'ELF .* executable'; then
         install -m 0755 "$f" "$BIN_DIR/"
     fi
 done
 
-# Fail loud if the private libs the FetchContent/cmake services need did not get
-# bundled (e.g. an ldd / path-filter regression) — shipping the binaries without
-# them reproduces the on-device "cannot open shared object" crash.
+# --- MAVSDK: stage the pinned upstream deb's full SDK under $PKG_PREFIX/mavsdk ---
+# MAVSDK is on no apt repo, so it cannot be a Depends (issue #74). Bundle the
+# deb the build linked against (link == ship), headers and CMake config included
+# so users can build against it (README). The directory is deliberately absent
+# from ld.so.conf.d: a globally visible libmavsdk.so.3 would shadow a
+# user-installed MAVSDK. ark-os binaries reach it via RUNPATH instead (below).
+echo "==> MAVSDK SDK ($MAVSDK_VERSION)"
+MAVSDK_DEB_NAME="libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
+# Prefer the deb CI's "Install MAVSDK" step left in the workspace root, then a
+# cached download under build/.
+MAVSDK_DEB=""
+for cand in "$REPO_ROOT/$MAVSDK_DEB_NAME" "$REPO_ROOT/build/$MAVSDK_DEB_NAME"; do
+    if [ -f "$cand" ]; then MAVSDK_DEB="$cand"; break; fi
+done
+if [ -z "$MAVSDK_DEB" ]; then
+    MAVSDK_DEB="$REPO_ROOT/build/$MAVSDK_DEB_NAME"
+    echo "    downloading $MAVSDK_DEB_NAME"
+    curl -fsSL -o "$MAVSDK_DEB.partial" \
+        "https://github.com/mavlink/MAVSDK/releases/download/v${MAVSDK_VERSION}/${MAVSDK_DEB_NAME}"
+    mv "$MAVSDK_DEB.partial" "$MAVSDK_DEB"
+fi
+
+MAVSDK_STAGE="$BUILD_DIR$PKG_PREFIX/mavsdk"
+echo "    staging $(basename "$MAVSDK_DEB") -> $MAVSDK_STAGE"
+mavsdk_extract="$(mktemp -d)"
+dpkg-deb -x "$MAVSDK_DEB" "$mavsdk_extract"
+mkdir -p "$MAVSDK_STAGE"
+# usr/{include,lib} is the whole SDK (usr/share is just a changelog); the
+# CMake config is relocatable.
+cp -a "$mavsdk_extract/usr/include" "$mavsdk_extract/usr/lib" "$MAVSDK_STAGE/"
+rm -rf "$mavsdk_extract"
+
+# Upstream ships only the versioned file, relying on ldconfig for the soname
+# symlink — which never runs for this off-loader-path dir, so ship the chain:
+# RUNPATH lookup is by soname filename, and the dev symlink lets -lmavsdk link.
+mavsdk_so=""
+for f in "$MAVSDK_STAGE"/lib/libmavsdk.so.*; do
+    [ -e "$f" ] || continue
+    [ -z "$mavsdk_so" ] || { echo "ERROR: multiple libmavsdk.so.* in $MAVSDK_DEB_NAME" >&2; exit 1; }
+    mavsdk_so="$f"
+done
+[ -n "$mavsdk_so" ] || { echo "ERROR: no libmavsdk.so.* found in $MAVSDK_DEB_NAME" >&2; exit 1; }
+mavsdk_soname="$(readelf -d "$mavsdk_so" | sed -n 's/.*(SONAME).*\[\(.*\)\]$/\1/p')"
+[ -n "$mavsdk_soname" ] || { echo "ERROR: could not read SONAME from $mavsdk_so" >&2; exit 1; }
+if [ "$(basename "$mavsdk_so")" != "$mavsdk_soname" ]; then
+    ln -snf "$(basename "$mavsdk_so")" "$MAVSDK_STAGE/lib/$mavsdk_soname"
+fi
+ln -snf "$mavsdk_soname" "$MAVSDK_STAGE/lib/libmavsdk.so"
+
+# mavsdk.pc ships with upstream's CI build prefix baked in; fix it. Drop
+# Requires.private: those deps are static inside libmavsdk, and their missing
+# .pc files would fail every on-device pkg-config query.
+sed -i \
+    -e "s|^prefix=.*|prefix=$PKG_PREFIX/mavsdk|" \
+    -e 's|^exec_prefix=.*|exec_prefix=${prefix}|' \
+    -e 's|^libdir=.*|libdir=${prefix}/lib|' \
+    -e 's|^includedir=.*|includedir=${prefix}/include|' \
+    -e '/^Requires\.private:/d' \
+    "$MAVSDK_STAGE/lib/pkgconfig/mavsdk.pc"
+
+# The .so is upstream's debian12 build: verify the glibc/libstdc++ symbol
+# versions it needs exist on this host (== target codename, per build.sh), else
+# it fails on-device with "version not found". Likely trip: a MAVSDK_VERSION bump.
+max_symver() {  # highest <FAMILY>_x[.y...] referenced/provided by an ELF
+    readelf -V "$1" 2>/dev/null | grep -oE "${2}_[0-9]+(\.[0-9]+)+" | sort -uV | tail -1 || true
+}
+for fam_provider in GLIBC:libc.so.6 GLIBCXX:libstdc++.so.6 CXXABI:libstdc++.so.6; do
+    fam="${fam_provider%%:*}"
+    req="$(max_symver "$mavsdk_so" "$fam")"
+    [ -n "$req" ] || continue
+    # no early exit in awk: SIGPIPE on ldconfig would trip pipefail
+    provider="$(ldconfig -p | awk -v so="${fam_provider#*:}" '$1 == so && !found {print $NF; found=1}')"
+    [ -n "$provider" ] || { echo "ERROR: ${fam_provider#*:} not found on the build host" >&2; exit 1; }
+    prov="$(max_symver "$provider" "$fam")"
+    if [ -z "$prov" ] || [ "$(printf '%s\n%s\n' "$req" "$prov" | sort -V | tail -1)" != "$prov" ]; then
+        echo "ERROR: bundled MAVSDK needs $fam $req; the $CODENAME build host (= target rootfs) provides ${prov:-none}." >&2
+        echo "       It would fail on-device with a 'version not found' load error. Pin a" >&2
+        echo "       MAVSDK_VERSION / deb variant compatible with $CODENAME in versions.env." >&2
+        exit 1
+    fi
+    echo "    ABI: $fam $req required <= $prov provided (ok)"
+done
+
+# RUNPATH beats the loader cache, pinning every libmavsdk-linking binary to the
+# bundled copy even if a system libmavsdk appears later; ../lib stays on it for
+# the other bundled private libs.
+command -v patchelf >/dev/null \
+    || { echo "ERROR: patchelf not found — required to pin the bundled-MAVSDK RUNPATH" >&2; exit 1; }
+mavsdk_linkers=0
+while read -r bin; do
+    readelf -d "$bin" 2>/dev/null | grep -q 'NEEDED.*\[libmavsdk\.so' || continue
+    patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../mavsdk/lib' "$bin"
+    mavsdk_linkers=$((mavsdk_linkers + 1))
+done < <(find "$BIN_DIR" -maxdepth 1 -type f -perm -u+x)
+[ "$mavsdk_linkers" -gt 0 ] \
+    || { echo "ERROR: no staged binary links libmavsdk — MAVSDK bundling found nothing to pin" >&2; exit 1; }
+
+# A missed bundle (ldd/path-filter regression) crashes on-device at load — fail here instead.
 for must in 'libpolaris_cpp_client.so*' 'libmicroxrcedds_agent.so*' 'libglog.so*'; do
     compgen -G "$LIB_DIR/$must" >/dev/null \
         || { echo "ERROR: no library matching '$must' was bundled into $LIB_DIR" >&2; exit 1; }
+done
+for must in "lib/$mavsdk_soname" lib/libmavsdk.so lib/cmake/MAVSDK/MAVSDKConfig.cmake \
+            lib/pkgconfig/mavsdk.pc include/mavsdk/mavsdk.h; do
+    [ -e "$MAVSDK_STAGE/$must" ] \
+        || { echo "ERROR: staged MAVSDK SDK is missing $must" >&2; exit 1; }
 done
 
 echo "==> binaries staged in $BIN_DIR:"
 ls -1 "$BIN_DIR"
 echo "==> libraries bundled in $LIB_DIR:"
 ls -1 "$LIB_DIR"
+echo "==> MAVSDK SDK staged in $MAVSDK_STAGE:"
+ls -1 "$MAVSDK_STAGE/lib"

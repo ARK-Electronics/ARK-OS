@@ -5,18 +5,19 @@
 # bakes the same packages into a Jetson image at build time (--provision). It
 # performs the installs a plain `apt install ./ark-os-*.deb` does NOT do itself:
 #
-#   1. libmavsdk-dev  — a hard Depends of ark-os that lives on no apt repo, so
-#                       apt cannot auto-resolve it; it must be installed first.
-#   2. jetson-stats   — the jtop client system-manager uses for the web UI's
+#   1. jetson-stats   — the jtop client system-manager uses for the web UI's
 #      (Jetson only)    Jetson stats. Not an apt Depends and not in the bundled
 #                       venv (the venv imports it via system-site-packages).
-#   3. ark-os-<plat>  — the package itself; its postinst does the rest. apt pulls
+#   2. ark-os-<plat>  — the package itself; its postinst does the rest. apt pulls
 #                       the remaining Depends (nginx, gstreamer, bluez, …) from
 #                       the device's normal Ubuntu repos.
 #
-# Re-running is safe: MAVSDK and jetson-stats are skipped when already at the
-# pinned version, and re-installing the ark-os deb upgrades it in place — so this
-# is also the supported way to update a live device.
+# MAVSDK is not installed here: the ark-os .deb bundles its own SDK under
+# /usr/lib/ark-os/mavsdk (issue #74), independent of any system MAVSDK.
+#
+# Re-running is safe: jetson-stats is skipped when already at the pinned version,
+# and re-installing the ark-os deb upgrades it in place — so this is also the
+# supported way to update a live device.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -29,7 +30,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=packaging/versions.env
 [ -f "$SCRIPT_DIR/versions.env" ] && source "$SCRIPT_DIR/versions.env"
 
-MAVSDK_REPO="https://github.com/mavlink/MAVSDK"
 ARK_OS_REPO="https://github.com/ARK-Electronics/ARK-OS"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
@@ -40,8 +40,9 @@ usage() {
     cat >&2 <<'EOF'
 Usage: sudo ./install_ark_os.sh [options] [ARK_OS_DEB]
 
-Installs MAVSDK, jetson-stats (Jetson only), and ARK-OS on a live device in the
-correct order. Also the supported way to update a live device.
+Installs jetson-stats (Jetson only) and ARK-OS on a live device in the correct
+order. Also the supported way to update a live device. (MAVSDK is bundled inside
+the ark-os package and is no longer installed separately.)
 
 Positional:
   ARK_OS_DEB                Path to a local ark-os-<platform>-<codename>_<ver>_arm64.deb. If
@@ -55,14 +56,12 @@ Options:
                             jammy, …). Only needed to name a download when /etc/os-release
                             can't be read.
   --ark-os-version=X.Y.Z    Download this ark-os release when no local deb is given.
-  --mavsdk-deb=PATH         Install MAVSDK from a local deb instead of downloading.
-  --mavsdk-version=X.Y.Z    Override the MAVSDK version (default from versions.env).
   --jetson-stats-version=X  Override the jetson-stats version (default from versions.env).
   --skip-jtop               Do not install jetson-stats (Jetson only).
   -h, --help                Show this help.
 
-Versions default to packaging/versions.env. MAVSDK has no apt repo; jetson-stats
-is installed system-wide via pip so the web UI can report Jetson stats.
+Versions default to packaging/versions.env. jetson-stats is installed system-wide
+via pip so the web UI can report Jetson stats.
 EOF
 }
 
@@ -71,9 +70,7 @@ PLATFORM=""
 CODENAME=""
 DEB_ARG=""
 ARK_OS_VERSION=""
-MAVSDK_DEB=""
 SKIP_JTOP=0
-OPT_MAVSDK_VERSION=""
 OPT_JETSON_STATS_VERSION=""
 
 for arg in "$@"; do
@@ -81,8 +78,6 @@ for arg in "$@"; do
         --platform=*)            PLATFORM="${arg#*=}" ;;
         --codename=*)             CODENAME="${arg#*=}" ;;
         --ark-os-version=*)       ARK_OS_VERSION="${arg#*=}" ;;
-        --mavsdk-deb=*)           MAVSDK_DEB="${arg#*=}" ;;
-        --mavsdk-version=*)       OPT_MAVSDK_VERSION="${arg#*=}" ;;
         --jetson-stats-version=*) OPT_JETSON_STATS_VERSION="${arg#*=}" ;;
         --skip-jtop)              SKIP_JTOP=1 ;;
         -h|--help)                usage; exit 0 ;;
@@ -94,7 +89,6 @@ for arg in "$@"; do
 done
 
 # Flags/env override versions.env.
-MAVSDK_VERSION="${OPT_MAVSDK_VERSION:-${MAVSDK_VERSION:-}}"
 JETSON_STATS_VERSION="${OPT_JETSON_STATS_VERSION:-${JETSON_STATS_VERSION:-}}"
 
 # --- Preconditions ---
@@ -177,8 +171,6 @@ info "Platform: $PLATFORM"
 getent passwd "$PLATFORM" >/dev/null 2>&1 || \
     die "ARK-OS services run as the user '$PLATFORM', which does not exist on this device. Re-image with the username '$PLATFORM', or create it first: sudo useradd -m -s /bin/bash $PLATFORM && sudo passwd $PLATFORM && sudo usermod -aG sudo $PLATFORM"
 
-[ -n "$MAVSDK_VERSION" ] || die "MAVSDK version unknown (no versions.env and no --mavsdk-version)."
-
 # --- Scratch space for downloads ---
 DL_DIR="$(mktemp -d)"
 trap 'rm -rf "$DL_DIR"' EXIT
@@ -212,26 +204,7 @@ info "Refreshing apt package indices"
 apt-get update || warn "apt-get update failed; continuing with existing indices."
 
 # ===========================================================================
-# 1. MAVSDK — hard Depends of ark-os, not in any apt repo. Install first.
-# ===========================================================================
-installed_mavsdk="$(dpkg-query -W -f='${Version}' libmavsdk-dev 2>/dev/null || true)"
-if [ "$installed_mavsdk" = "$MAVSDK_VERSION" ]; then
-    info "libmavsdk-dev $MAVSDK_VERSION already installed — skipping."
-else
-    if [ -n "$MAVSDK_DEB" ]; then
-        [ -f "$MAVSDK_DEB" ] || die "MAVSDK deb not found: $MAVSDK_DEB"
-    else
-        # Upstream ships no ubuntu22.04_arm64 asset; debian12_arm64 is glibc-
-        # compatible with the JetPack 6 / Jammy rootfs in practice.
-        MAVSDK_DEB="$DL_DIR/libmavsdk-dev_${MAVSDK_VERSION}_debian12_arm64.deb"
-        fetch "$MAVSDK_REPO/releases/download/v${MAVSDK_VERSION}/$(basename "$MAVSDK_DEB")" "$MAVSDK_DEB"
-    fi
-    info "Installing MAVSDK $MAVSDK_VERSION"
-    apt_install_deb "$MAVSDK_DEB"
-fi
-
-# ===========================================================================
-# 2. jetson-stats (jtop) — Jetson only. Optional: system-manager degrades
+# 1. jetson-stats (jtop) — Jetson only. Optional: system-manager degrades
 #    gracefully without it, so a failure here warns but does not abort.
 #    Installed before ark-os so jtop.service is up when system-manager starts.
 # ===========================================================================
@@ -252,7 +225,7 @@ if [ "$PLATFORM" = "jetson" ] && [ "$SKIP_JTOP" -eq 0 ]; then
 fi
 
 # ===========================================================================
-# 3. ark-os — its postinst configures users/groups/services and (on a running
+# 2. ark-os — its postinst configures users/groups/services and (on a running
 #    system) starts everything.
 # ===========================================================================
 info "Installing $(basename "$ARK_OS_DEB")"

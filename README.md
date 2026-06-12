@@ -23,11 +23,11 @@ sudo nmcli dev wifi connect <ssid> password <password>
 
 # Installation
 
-ARK-OS is distributed as a Debian package on the [Releases page](https://github.com/ARK-Electronics/ARK-OS/releases). It depends on the MAVSDK C++ runtime, which has no apt repository — it is downloaded from the [upstream MAVSDK releases](https://github.com/mavlink/MAVSDK/releases). On Jetson, the web UI's system stats additionally need `jetson-stats` (jtop) installed system-wide. The install script below handles all of this; manual steps follow if you prefer.
+ARK-OS is distributed as a Debian package on the [Releases page](https://github.com/ARK-Electronics/ARK-OS/releases). The MAVSDK C++ SDK is bundled inside the package (see [MAVSDK](#mavsdk-bundled-usable-replaceable) below), so there is nothing to install separately and you are free to install your own MAVSDK system-wide without disturbing ARK-OS. On Jetson, the web UI's system stats additionally need `jetson-stats` (jtop) installed system-wide. The install script below handles all of this; manual steps follow if you prefer.
 
 ### Install / update with the script (recommended)
 
-`packaging/install_ark_os.sh` installs MAVSDK, `jetson-stats` (Jetson only), and ARK-OS in the correct order, and is also the supported way to update a live device. Run it from a checkout of this repo on the device:
+`packaging/install_ark_os.sh` installs `jetson-stats` (Jetson only) and ARK-OS in the correct order, and is also the supported way to update a live device. Run it from a checkout of this repo on the device:
 
 ```
 git clone https://github.com/ARK-Electronics/ARK-OS.git
@@ -40,18 +40,16 @@ sudo ./packaging/install_ark_os.sh --ark-os-version=X.Y.Z
 sudo ./packaging/install_ark_os.sh ./ark-os-jetson-jammy_X.Y.Z_arm64.deb
 ```
 
-The script auto-detects Jetson vs Pi (override with `--platform`), skips MAVSDK/jtop when they are already at the pinned versions, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
+The script auto-detects Jetson vs Pi (override with `--platform`), skips jtop when it is already at the pinned version, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
 
 ### Manual install
 
-Install MAVSDK first (ARK-OS depends on it), then ARK-OS. Replace `<mavsdk-ver>`, `<ark-os-ver>`, and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
 
 #### Jetson
 ```
-wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 
-sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 
 # Recommended: jtop, for Jetson system stats in the web UI
@@ -61,15 +59,30 @@ sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stat
 #### Raspberry Pi
 Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:
 ```
-wget https://github.com/mavlink/MAVSDK/releases/download/v<mavsdk-ver>/libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi-trixie_<ark-os-ver>_arm64.deb
 
-sudo apt install ./libmavsdk-dev_<mavsdk-ver>_debian12_arm64.deb
 sudo apt install ./ark-os-pi-trixie_<ark-os-ver>_arm64.deb
 ```
 
+### MAVSDK: bundled, usable, replaceable
+
+ARK-OS ships its own MAVSDK — runtime library, headers, and CMake config — under `/usr/lib/ark-os/mavsdk`, and its binaries load that copy via RUNPATH. The bundled copy is deliberately kept **off** the system linker path, so it is invisible to every other program on the device: you can `apt install`/`apt remove` a system `libmavsdk-dev`, or `make install` your own build to `/usr/local`, and neither ARK-OS nor your own MAVSDK programs are affected — the two copies coexist.
+
+You can also build your own programs against the bundled SDK instead of installing MAVSDK yourself:
+
+```cmake
+find_package(MAVSDK REQUIRED)
+target_link_libraries(your_app MAVSDK::mavsdk)
+```
+
+```
+cmake -DCMAKE_PREFIX_PATH=/usr/lib/ark-os/mavsdk -B build && cmake --build build
+```
+
+Binaries run straight from the build tree work as-is (CMake's build RPATH covers them). If you `install` your program, set `CMAKE_INSTALL_RPATH=/usr/lib/ark-os/mavsdk/lib` so it finds the library at runtime. `pkg-config mavsdk` works too, via `PKG_CONFIG_PATH=/usr/lib/ark-os/mavsdk/lib/pkgconfig`. One caveat: the bundled MAVSDK tracks ARK-OS releases, so an ARK-OS upgrade may bump it under your program — if you need to pin your own MAVSDK version, install your own copy instead.
+
 ### Updating
-Re-run `install_ark_os.sh` (it upgrades ARK-OS in place and leaves MAVSDK/jtop alone when already current), or manually `sudo apt install ./ark-os-<platform>-<codename>_<ver>_arm64.deb`. **Upgrading resets the per-service configuration under `/etc/ark-os/` to packaged defaults** — reconfigure via the web UI afterward.
+Re-run `install_ark_os.sh` (it upgrades ARK-OS in place and leaves jtop alone when already current), or manually `sudo apt install ./ark-os-<platform>-<codename>_<ver>_arm64.deb`. **Upgrading resets the per-service configuration under `/etc/ark-os/` to packaged defaults** — reconfigure via the web UI afterward.
 
 ### Migrating from a source install
 Installing the package on a device that was set up with the old `install.sh` flow migrates it automatically: the legacy user services and binaries are removed and your previous configs are backed up to `~/.config/ark-os-legacy-backup/`. **Reboot after installing** so no stale user-session services keep holding the autopilot UART / MAVLink ports.
