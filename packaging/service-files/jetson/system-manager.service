@@ -11,6 +11,7 @@ ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/system_manager
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=PORT=3004
 
 [Install]
 WantedBy=multi-user.target ark-os.target

@@ -1,4 +1,17 @@
-from flask import Flask, jsonify, request
+#!/usr/bin/env python3
+"""ARK-OS System Manager — FastAPI service exposing device system information.
+
+The HTTP contract is the pydantic models below (SystemInfo, HostnameRequest, ...).
+get_system_info() CONSTRUCTS a SystemInfo, so the type checker (`mypy`, run from
+the CLI or CI) rejects any drift between the producer and the contract before the
+service ever runs on a device. FastAPI generates the OpenAPI spec from the same
+models (served at /openapi.json, Swagger UI at /docs).
+"""
+
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Response
+from pydantic import BaseModel, Field
 import platform
 import os
 import psutil
@@ -8,16 +21,101 @@ import socket
 import threading
 import atexit
 import time
+import uvicorn
 
-app = Flask(__name__)
+
+# ── HTTP contract: the single source of truth ────────────────────────────────
+
+class Hardware(BaseModel):
+    model: str
+    module: str
+    serial_number: str
+    l4t: str
+    jetpack: str
+    type: str | None = None  # only populated on Jetson
+
+
+class Platform(BaseModel):
+    distribution: str
+    release: str
+    kernel: str
+    python: str
+    architecture: str
+
+
+class Libraries(BaseModel):
+    cuda: str
+    opencv: str
+    opencv_cuda: bool
+    cudnn: str
+    tensorrt: str
+    vpi: str
+    vulkan: str
+
+
+class Power(BaseModel):
+    nvpmodel: str
+    jetson_clocks: str | None
+    total: float
+    temperature: dict[str, float] = Field(default_factory=dict)
+
+
+class Usage(BaseModel):
+    total: float
+    used: float
+    available: float
+    percent: float
+
+
+class Resources(BaseModel):
+    memory: Usage
+    disk: Usage
+    cpu_count: int
+
+
+class Network(BaseModel):
+    hostname: str
+    interfaces: dict[str, str] = Field(default_factory=dict)
+
+
+class SystemInfo(BaseModel):
+    device_type: str
+    hardware: Hardware
+    platform: Platform
+    libraries: Libraries
+    power: Power
+    resources: Resources
+    network: Network
+    temperature: dict[str, float] = Field(default_factory=dict)
+    interfaces: Network  # backward-compat alias for `network`
+
+
+class HostnameRequest(BaseModel):
+    # The acceptable input is enforced by the type itself: a malformed hostname
+    # is rejected at the boundary (422) before any handler code runs.
+    hostname: str = Field(
+        max_length=63,
+        pattern=r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+    )
+
+
+class MessageResponse(BaseModel):
+    success: bool
+    message: str
+
+
+app = FastAPI(title="ARK-OS System Manager", version="1.0.0")
+
+
+# ── System information collectors (loose dicts in, typed model out) ───────────
 
 class SystemInfoCollector:
     """Base class for system information collection"""
 
     @staticmethod
-    def get_common_info():
+    def get_common_info() -> dict[str, Any]:
         """Get system information common to all devices"""
-        info = {
+        info: dict[str, Any] = {
             "hostname": platform.node(),
             "python_version": platform.python_version(),
             "platform": platform.platform(),
@@ -48,7 +146,7 @@ class SystemInfoCollector:
         # Get distribution info
         try:
             with open('/etc/os-release', 'r') as f:
-                os_info = {}
+                os_info: dict[str, str] = {}
                 for line in f:
                     if '=' in line:
                         key, value = line.strip().split('=', 1)
@@ -65,9 +163,9 @@ class SystemInfoCollector:
         return info
 
     @staticmethod
-    def get_temperature_info():
+    def get_temperature_info() -> dict[str, Any]:
         """Try to get CPU temperature from various sources"""
-        temp_info = {}
+        temp_info: dict[str, Any] = {}
 
         # Try thermal zone (common on ARM devices)
         try:
@@ -106,7 +204,7 @@ class JtopManager:
         self._lock = threading.Lock()
         self._jetson = None
         self._available = None  # None=unknown, True/False=determined
-        self._last_attempt = 0
+        self._last_attempt = 0.0
 
     def _start_instance(self):
         try:
@@ -164,7 +262,7 @@ class JetsonCollector(SystemInfoCollector):
     """Collector for NVIDIA Jetson devices"""
 
     @staticmethod
-    def is_jetson():
+    def is_jetson() -> bool:
         """Check if running on a Jetson device"""
         try:
             with open('/proc/device-tree/model', 'r') as f:
@@ -174,7 +272,7 @@ class JetsonCollector(SystemInfoCollector):
             return False
 
     @staticmethod
-    def get_jetson_info():
+    def get_jetson_info() -> dict[str, Any] | None:
         """Get Jetson-specific information using jtop"""
         try:
             jetson = _jtop_manager.get_instance()
@@ -185,7 +283,7 @@ class JetsonCollector(SystemInfoCollector):
                 return None
 
             # Collect all temperature data
-            temperatures = {}
+            temperatures: dict[str, Any] = {}
             if hasattr(jetson, 'temperature') and jetson.temperature:
                 for sensor_name, sensor_data in jetson.temperature.items():
                     # Only include online sensors with valid temperatures
@@ -237,7 +335,7 @@ class RaspberryPiCollector(SystemInfoCollector):
     """Collector for Raspberry Pi devices"""
 
     @staticmethod
-    def is_raspberry_pi():
+    def is_raspberry_pi() -> bool:
         """Check if running on a Raspberry Pi"""
         try:
             with open('/proc/device-tree/model', 'r') as f:
@@ -247,9 +345,9 @@ class RaspberryPiCollector(SystemInfoCollector):
             return False
 
     @staticmethod
-    def get_pi_info():
+    def get_pi_info() -> dict[str, Any]:
         """Get Raspberry Pi specific information"""
-        info = {}
+        info: dict[str, Any] = {}
 
         # Get Pi model
         try:
@@ -314,9 +412,9 @@ class GenericLinuxCollector(SystemInfoCollector):
     """Collector for generic Linux systems"""
 
     @staticmethod
-    def get_info():
+    def get_info() -> dict[str, Any]:
         """Get generic Linux system information"""
-        info = {
+        info: dict[str, Any] = {
             "type": "generic",
             "kernel_version": platform.release(),
             "processor": platform.processor() or "Unknown"
@@ -335,95 +433,133 @@ class GenericLinuxCollector(SystemInfoCollector):
         return info
 
 
-def get_system_info():
-    """Main function to collect all system information with unified structure"""
-    # Start with common info
-    system_info = SystemInfoCollector.get_common_info()
+def get_system_info() -> SystemInfo:
+    """Collect all system information as a validated SystemInfo model.
 
-    # Get temperature info
+    The collectors above return loose dicts (device probes via psutil/jtop);
+    this function is the typed boundary — it builds the SystemInfo explicitly,
+    so the type checker verifies every field against the contract.
+    """
+    common = SystemInfoCollector.get_common_info()
     temp_info = SystemInfoCollector.get_temperature_info()
 
-    # Initialize with default structure
-    result = {
-        "device_type": "unknown",
-        "hardware": {
-            "model": "Not available",
-            "module": "Not available",
-            "serial_number": "Not available",
-            "l4t": "Not available",
-            "jetpack": "Not available"
-        },
-        "platform": {
-            "distribution": system_info["distribution"],
-            "release": system_info["codename"],
-            "kernel": platform.release(),
-            "python": system_info["python_version"],
-            "architecture": system_info["architecture"]
-        },
-        "libraries": {
-            "cuda": "Not available",
-            "opencv": "Not available",
-            "opencv_cuda": False,
-            "cudnn": "Not available",
-            "tensorrt": "Not available",
-            "vpi": "Not available",
-            "vulkan": "Not available"
-        },
-        "power": {
-            "nvpmodel": "Not available",
-            "jetson_clocks": "Not available",
-            "total": 0,
-            "temperature": {}
-        },
-        "resources": {
-            "memory": system_info["memory"],
-            "disk": system_info["disk"],
-            "cpu_count": system_info["cpu_count"]
-        },
-        "network": {
-            "hostname": system_info["hostname"],
-            "interfaces": system_info["network_interfaces"]
-        },
-        "temperature": temp_info if temp_info else {}
-    }
+    # Device-agnostic defaults; device detection overrides these below.
+    hardware = Hardware(
+        model="Not available",
+        module="Not available",
+        serial_number="Not available",
+        l4t="Not available",
+        jetpack="Not available",
+    )
+    libraries = Libraries(
+        cuda="Not available",
+        opencv="Not available",
+        opencv_cuda=False,
+        cudnn="Not available",
+        tensorrt="Not available",
+        vpi="Not available",
+        vulkan="Not available",
+    )
+    power = Power(
+        nvpmodel="Not available",
+        jetson_clocks="Not available",
+        total=0,
+        temperature={},
+    )
 
-    # Detect device type and update specific fields
     if JetsonCollector.is_jetson():
-        result["device_type"] = "jetson"
+        device_type = "jetson"
         jetson_data = JetsonCollector.get_jetson_info()
         if jetson_data:
-            # Update with Jetson-specific data
-            if "hardware" in jetson_data:
-                result["hardware"].update(jetson_data["hardware"])
-            if "libraries" in jetson_data:
-                result["libraries"] = jetson_data["libraries"]
-            if "power" in jetson_data:
-                result["power"] = jetson_data["power"]
-                # Merge temperatures
-                if "temperature" in jetson_data["power"]:
-                    result["temperature"].update(jetson_data["power"]["temperature"])
-
+            hw = jetson_data.get("hardware", {})
+            hardware = Hardware(
+                type=hw.get("type", "jetson"),
+                model=hw.get("model", "Not available"),
+                module=hw.get("module", "Not available"),
+                serial_number=hw.get("serial_number", "Not available"),
+                l4t=hw.get("l4t", "Not available"),
+                jetpack=hw.get("jetpack", "Not available"),
+            )
+            libs = jetson_data.get("libraries")
+            if libs:
+                libraries = Libraries(
+                    cuda=libs.get("cuda", "Not available"),
+                    opencv=libs.get("opencv", "Not available"),
+                    opencv_cuda=libs.get("opencv_cuda", False),
+                    cudnn=libs.get("cudnn", "Not available"),
+                    tensorrt=libs.get("tensorrt", "Not available"),
+                    vpi=libs.get("vpi", "Not available"),
+                    vulkan=libs.get("vulkan", "Not available"),
+                )
+            pw = jetson_data.get("power")
+            if pw:
+                power = Power(
+                    nvpmodel=pw.get("nvpmodel", "Unknown"),
+                    jetson_clocks=pw.get("jetson_clocks"),
+                    total=pw.get("total", 0),
+                    temperature=pw.get("temperature", {}),
+                )
     elif RaspberryPiCollector.is_raspberry_pi():
-        result["device_type"] = "pi"
+        device_type = "pi"
         pi_info = RaspberryPiCollector.get_pi_info()
-        result["hardware"]["model"] = pi_info.get("model", "Raspberry Pi")
-        result["hardware"]["serial_number"] = pi_info.get("serial_number", "Unknown")
-
+        hardware = Hardware(
+            model=pi_info.get("model", "Raspberry Pi"),
+            module="Not available",
+            serial_number=pi_info.get("serial_number", "Unknown"),
+            l4t="Not available",
+            jetpack="Not available",
+        )
     else:
-        result["device_type"] = "generic"
+        device_type = "generic"
         generic_info = GenericLinuxCollector.get_info()
-        result["hardware"]["model"] = generic_info.get("cpu_model", "Generic Linux System")
+        hardware = Hardware(
+            model=generic_info.get("cpu_model", "Generic Linux System"),
+            module="Not available",
+            serial_number="Not available",
+            l4t="Not available",
+            jetpack="Not available",
+        )
 
-    # Backward compatibility
-    result["interfaces"] = result["network"]
+    network = Network(
+        hostname=common["hostname"],
+        interfaces=common["network_interfaces"],
+    )
 
-    return result
+    return SystemInfo(
+        device_type=device_type,
+        hardware=hardware,
+        platform=Platform(
+            distribution=common["distribution"],
+            release=common["codename"],
+            kernel=platform.release(),
+            python=common["python_version"],
+            architecture=common["architecture"],
+        ),
+        libraries=libraries,
+        power=power,
+        resources=Resources(
+            memory=Usage(
+                total=common["memory"]["total"],
+                used=common["memory"]["used"],
+                available=common["memory"]["available"],
+                percent=common["memory"]["percent"],
+            ),
+            disk=Usage(
+                total=common["disk"]["total"],
+                used=common["disk"]["used"],
+                available=common["disk"]["available"],
+                percent=common["disk"]["percent"],
+            ),
+            cpu_count=common["cpu_count"],
+        ),
+        network=network,
+        temperature=temp_info or {},
+        interfaces=network,
+    )
 
 
-def is_valid_hostname(hostname):
-    """
-    Validate hostname format according to RFC 1123 and RFC 952
-    """
+def is_valid_hostname(hostname: str) -> bool:
+    """Validate hostname format according to RFC 1123 and RFC 952"""
     if not hostname or len(hostname) > 63:
         return False
 
@@ -431,7 +567,7 @@ def is_valid_hostname(hostname):
     return bool(re.match(pattern, hostname))
 
 
-def set_hostname(new_hostname):
+def set_hostname(new_hostname: str) -> dict[str, Any]:
     """Set system hostname"""
     try:
         if not is_valid_hostname(new_hostname):
@@ -464,45 +600,30 @@ def set_hostname(new_hostname):
         }
 
 
-@app.route('/info', methods=['GET'])
-def system_info():
-    """Get system information endpoint"""
+@app.get("/info")
+def system_info() -> SystemInfo:
+    """Get system information. The return type IS the response contract."""
     try:
-        data = get_system_info()
-        return jsonify(data)
+        return get_system_info()
     except Exception as e:
-        return jsonify({"error": str(e), "message": "Failed to collect system information"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to collect system information: {e}")
 
 
-@app.route('/hostname', methods=['POST'])
-def update_hostname():
-    """Update hostname endpoint"""
-    try:
-        data = request.get_json()
-
-        if not data or 'hostname' not in data:
-            return jsonify({
-                "success": False,
-                "message": "Missing hostname parameter"
-            }), 400
-
-        new_hostname = data['hostname']
-        result = set_hostname(new_hostname)
-
-        return jsonify(result), 200 if result['success'] else 400
-
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"Error: {str(e)}"
-        }), 500
+@app.post("/hostname")
+def update_hostname(body: HostnameRequest, response: Response) -> MessageResponse:
+    """Set the system hostname. `body` is validated against HostnameRequest
+    before this runs, so an invalid hostname never reaches here."""
+    result = set_hostname(body.hostname)
+    if not result["success"]:
+        response.status_code = 400
+    return MessageResponse(success=result["success"], message=result["message"])
 
 
 if __name__ == '__main__':
     host = '127.0.0.1'
-    port = 3004
+    port = int(os.environ.get("PORT", 3004))
     print(f"Starting System Manager on {host}:{port}")
-    print(f"Device type detection in progress...")
+    print("Device type detection in progress...")
 
     # Quick device detection for startup message
     if JetsonCollector.is_jetson():
@@ -512,4 +633,5 @@ if __name__ == '__main__':
     else:
         print("Detected: Generic Linux System")
 
-    app.run(host=host, port=port, threaded=True)
+    # access_log off: the UI polls /info.
+    uvicorn.run(app, host=host, port=port, access_log=False)

@@ -382,7 +382,6 @@
 </template>
 
 <script>
-import io from 'socket.io-client';
 import AutopilotService from '../services/AutopilotService';
 
 export default {
@@ -407,7 +406,7 @@ export default {
       progress: 0,
       statusMessage: '',
       uploadError: false,
-      socket: null,
+      progressSource: null,
       isUploading: false,
       pollingInterval: null,
       showResetConfirmation: false,
@@ -453,39 +452,33 @@ export default {
     }
   },
   mounted() {
-    this.connectSocket();
+    this.connectProgressStream();
     this.fetchAutopilotData();
     this.startPolling();
   },
   beforeUnmount() {
     this.stopPolling();
-    if (this.socket) {
-      this.socket.disconnect();
+    if (this.progressSource) {
+      this.progressSource.close();
     }
   },
   methods: {
-    connectSocket() {
-      // Connect to the firmware update socket
-      this.socket = io(process.env.VUE_APP_SOCKET_URL || window.location.origin, {
-        path: '/socket.io/autopilot-firmware-upload',
-        transports: ['websocket'],
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000
-      });
+    connectProgressStream() {
+      // Firmware flash progress arrives as Server-Sent Events; EventSource
+      // reconnects automatically if the stream drops.
+      this.progressSource = new EventSource('/api/autopilot/firmware-upload/stream');
 
-      this.socket.on('connect', () => {
-        console.log(`Connected to firmware update socket with ID: ${this.socket.id}`);
-      });
-
-      this.socket.on('progress', data => {
+      this.progressSource.addEventListener('progress', event => {
+        const data = JSON.parse(event.data);
         this.progress = data.percent;
         this.statusMessage = `${data.status} ${data.percent.toFixed(2)}%`;
         this.isUploading = true;
         this.uploadError = false;
       });
 
-      this.socket.on('completed', message => {
-        this.statusMessage = message.message;
+      this.progressSource.addEventListener('completed', event => {
+        const data = JSON.parse(event.data);
+        this.statusMessage = data.message;
         this.isUploading = false;
         this.uploadError = false;
 
@@ -493,12 +486,18 @@ export default {
         setTimeout(() => this.fetchAutopilotData(), 3000);
       });
 
-      this.socket.on('error', error => {
-        this.statusMessage = `Error: ${error.message || error}`;
-        console.error('Error:', error);
+      this.progressSource.addEventListener('failed', event => {
+        const data = JSON.parse(event.data);
+        this.statusMessage = `Error: ${data.message}`;
+        console.error('Error:', data.message);
         this.isUploading = false;
         this.uploadError = true;
       });
+
+      this.progressSource.onerror = error => {
+        // Connection-level errors only; EventSource retries on its own
+        console.error('Firmware progress stream error:', error);
+      };
     },
     startPolling() {
       this.pollingInterval = setInterval(() => {
@@ -549,7 +548,6 @@ export default {
 
       const formData = new FormData();
       formData.append('firmware', this.file);
-      formData.append('socketId', this.socket.id);
 
       try {
         const response = await AutopilotService.uploadFirmware(formData);
@@ -557,7 +555,7 @@ export default {
         this.uploadError = false;
       } catch (error) {
         console.error('Upload failed', error.response ? error.response.data : error);
-        this.statusMessage = `Upload failed: ${error.response ? error.response.data : error.message}`;
+        this.statusMessage = `Upload failed: ${error.response?.data?.message || error.message}`;
         this.isUploading = false;
         this.uploadError = true;
       }

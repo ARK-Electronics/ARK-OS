@@ -714,7 +714,6 @@
 
 <script>
 import ConnectionsService from '../services/ConnectionsService';
-import io from 'socket.io-client';
 
 export default {
   data() {
@@ -730,7 +729,7 @@ export default {
       usageData: [],
       expandedInterfaces: [],  // Track expanded/collapsed state of each interface
       socketError: null,
-      statsSocket: null,
+      statsSource: null,
       isLoadingUsageData: true,
       
       // Connection form
@@ -821,29 +820,29 @@ export default {
     // Also fetch LTE status to determine if we should show LTE options
     await this.fetchLteStatus();
     
-    // Connect to socket if starting on usage tab
+    // Connect to the stats stream if starting on usage tab
     if (this.activeSection === 'usage') {
-      this.connectUsageSocket();
+      this.connectUsageStream();
     }
   },
-  
+
   beforeUnmount() {
-    // Make sure socket is disconnected
-    this.disconnectUsageSocket();
+    // Make sure the stats stream is closed
+    this.disconnectUsageStream();
     this.stopWifiScanPolling();
   },
 
   watch: {
-    // Watch section changes for socket connections
+    // Watch section changes for the stats stream
     activeSection(newSection, oldSection) {
       if (newSection === 'usage') {
         this.isLoadingUsageData = true;
-        // Connect socket when viewing usage tab
+        // Connect the stream when viewing usage tab
         this.socketError = null;  // Clear any previous errors
-        this.connectUsageSocket();
+        this.connectUsageStream();
       } else if (oldSection === 'usage') {
-        // Disconnect socket when leaving usage tab
-        this.disconnectUsageSocket();
+        // Close the stream when leaving usage tab
+        this.disconnectUsageStream();
         this.socketError = null;  // Clear errors when leaving tab
       }
 
@@ -862,8 +861,8 @@ export default {
           this.fetchConnections();
           break;
         case 'usage':
-          // For usage tab, we only need to connect to WebSocket
-          // No REST API call needed - data comes via WebSocket
+          // For usage tab, we only need the SSE stream
+          // No REST API call needed - data arrives as events
           break;
         case 'lte':
           this.fetchLteStatus();
@@ -953,28 +952,25 @@ export default {
       }
     },
 
-    connectUsageSocket() {
+    connectUsageStream() {
       try {
         // Close existing connection if any
-        this.disconnectUsageSocket();
+        this.disconnectUsageStream();
 
-        this.statsSocket = io(process.env.VUE_APP_SOCKET_URL, {
-          path: '/socket.io/network-stats',
-          transports: ['websocket'],
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000
-        });
+        // Network stats arrive as Server-Sent Events; EventSource reconnects
+        // automatically if the stream drops.
+        this.statsSource = new EventSource('/api/network/stats/stream');
 
-        // Handle connection events
-        this.statsSocket.on('connect', () => {
-          console.log('Network stats Socket.IO connection established!', this.statsSocket.id);
+        this.statsSource.onopen = () => {
+          console.log('Network stats stream established!');
 
           // Clear any previous error
           this.socketError = null;
-        });
+        };
 
         // Handle real-time data updates
-        this.statsSocket.on('network_stats_update', (data) => {
+        this.statsSource.addEventListener('network_stats_update', (event) => {
+          const data = JSON.parse(event.data);
           console.log(`Received network stats update with ${data ? data.length : 0} interfaces`);
 
           if (!data || !Array.isArray(data)) {
@@ -986,40 +982,24 @@ export default {
           this.processNetworkStatsData(data);
         });
 
-        // Handle connection errors
-        this.statsSocket.on('connect_error', (error) => {
-          console.error('Socket connection error:', error);
-          this.socketError = `Connection error: ${error.message}`;
-        });
-
-        this.statsSocket.on('disconnect', (reason) => {
-          console.log('Socket disconnected:', reason);
+        // Handle connection errors; EventSource retries on its own
+        this.statsSource.onerror = (error) => {
+          console.error('Network stats stream error:', error);
           if (this.activeSection === 'usage') {
-            this.socketError = `WebSocket disconnected. Reconnecting...`;
+            this.socketError = `Stream disconnected. Reconnecting...`;
           }
-        });
+        };
       } catch (error) {
-        console.error('Error in connectUsageSocket:', error);
-        this.socketError = `WebSocket error: ${error.message}`;
+        console.error('Error in connectUsageStream:', error);
+        this.socketError = `Stream error: ${error.message}`;
       }
     },
 
-    disconnectUsageSocket() {
-      if (this.statsSocket) {
-        console.log('Disconnecting from network stats socket:', this.statsSocket.id);
-
-        // Remove all event listeners to prevent memory leaks
-        this.statsSocket.off('connect');
-        this.statsSocket.off('disconnect');
-        this.statsSocket.off('connect_error');
-        this.statsSocket.off('network_stats_update');
-
-        // Disconnect the socket
-        this.statsSocket.disconnect();
-
-        // Clear the reference
-        this.statsSocket = null;
-        console.log('Socket disconnected and reference cleared');
+    disconnectUsageStream() {
+      if (this.statsSource) {
+        console.log('Closing network stats stream');
+        this.statsSource.close();
+        this.statsSource = null;
       }
     },
 

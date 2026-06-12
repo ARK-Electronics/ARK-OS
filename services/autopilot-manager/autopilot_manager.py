@@ -1,3 +1,19 @@
+"""ARK-OS Autopilot Manager — FastAPI service for autopilot MAVLink interactions.
+
+The HTTP contract is the pydantic models below (AutopilotDetails, FlashProgress, ...).
+get_autopilot_details() CONSTRUCTS an AutopilotDetails, so the type checker (`mypy`,
+run from the CLI or CI) rejects any drift between the producer and the contract
+before the service ever runs on a device. FastAPI generates the OpenAPI spec from
+the same models (served at /openapi.json, Swagger UI at /docs).
+
+Firmware-flash progress is a one-way server→client stream, served as Server-Sent
+Events at /firmware-upload/stream (events: progress, completed, failed). The flash
+itself runs in a worker thread; ProgressBroker fans its events out to subscribers.
+The pymavlink message loop stays on its own daemon thread; handlers are plain `def`
+so FastAPI runs them in a threadpool and blocking subprocess calls never stall the
+event loop.
+"""
+
 import os
 import json
 import subprocess
@@ -6,13 +22,19 @@ import threading
 import time
 import argparse
 import logging
+import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime
+from typing import Any
 import socket
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from flask_socketio import SocketIO
+
+from fastapi import FastAPI, Response, UploadFile
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ValidationError
+import uvicorn
 import pymavlink.mavutil as mavutil
 from pymavlink.dialects.v20 import common as mavlink
+
 
 def setup_logging():
     """Setup logging configuration that outputs to stdout"""
@@ -21,18 +43,94 @@ def setup_logging():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler()]
     )
-    # Suppress werkzeug request logging (spams on every polled endpoint)
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)
-
     return logging.getLogger('autopilot-manager')
+
 
 # Initialize logger
 logger = setup_logging()
 
-# Explicitly set async_mode to threading to avoid eventlet issues
-app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", path='/socket.io/autopilot-firmware-upload', async_mode='threading')
+
+# ── HTTP contract: the single source of truth ────────────────────────────────
+
+class AutopilotDetails(BaseModel):
+    autopilot_type: str
+    version: str
+    git_hash: str
+    voltage: float
+    current: float
+    remaining: int
+    mavlink_connected: bool
+    device_connected: bool
+    in_bootloader: bool
+    device_name: str | None
+    last_heartbeat: str | None
+    timestamp: str
+
+
+class MessageResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class UploadResponse(BaseModel):
+    status: str  # "success" | "fail"
+    message: str
+
+
+class FlashProgress(BaseModel):
+    """Payload of the SSE 'progress' event. px_uploader.py's --json-progress
+    lines are validated against this model before they are published."""
+    status: str
+    message: str | None = None
+    percent: float
+
+
+class FlashMessage(BaseModel):
+    """Payload of the SSE 'completed' and 'failed' events."""
+    message: str
+
+
+app = FastAPI(title="ARK-OS Autopilot Manager", version="1.0.0")
+
+
+FlashEvent = tuple[str, dict[str, Any]]
+
+
+class ProgressBroker:
+    """Fans firmware-flash events out to the SSE subscribers.
+
+    The flash runs in a worker thread while each subscriber awaits an
+    asyncio.Queue on the event loop, so publish hops onto that loop via
+    call_soon_threadsafe — subscribers block on get() instead of polling.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._subscribers: dict[asyncio.Queue[FlashEvent], asyncio.AbstractEventLoop] = {}
+
+    def subscribe(self) -> asyncio.Queue[FlashEvent]:
+        """Must be called from the event loop (it captures the running loop)."""
+        q: asyncio.Queue[FlashEvent] = asyncio.Queue()
+        with self._lock:
+            self._subscribers[q] = asyncio.get_running_loop()
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue[FlashEvent]) -> None:
+        with self._lock:
+            self._subscribers.pop(q, None)
+
+    def publish(self, event: str, data: dict[str, Any]) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers.items())
+        for q, loop in subscribers:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, (event, data))
+            except RuntimeError:
+                # Subscriber's loop already shut down.
+                pass
+
+
+broker = ProgressBroker()
 
 
 class DeviceDetector:
@@ -69,7 +167,7 @@ class MAVLinkConnection:
         self._lock = threading.Lock()
 
         # Store the latest autopilot data
-        self.autopilot_data = {
+        self.autopilot_data: dict[str, Any] = {
             "autopilot_type": "Unknown",
             "version": "Unknown",
             "git_hash": "Unknown",
@@ -199,9 +297,9 @@ class MAVLinkConnection:
         """Process incoming MAVLink messages in a loop"""
         self.running = True
         connection_attempts = 0
-        last_version_request_time = 0
-        last_system_time_update_time = 0
-        last_device_check_time = 0
+        last_version_request_time = 0.0
+        last_system_time_update_time = 0.0
+        last_device_check_time = 0.0
         waiting_for_heartbeat = True
 
         while self.running:
@@ -349,11 +447,26 @@ class MAVLinkConnection:
         self.thread.start()
         logger.info("MAVLink message processing thread started")
 
-    def get_autopilot_details(self):
+    def get_autopilot_details(self) -> AutopilotDetails:
+        """The typed boundary: the message loop fills a loose dict; this builds
+        the AutopilotDetails explicitly, so the type checker verifies every
+        field against the contract."""
         with self._lock:
-            details = dict(self.autopilot_data)
-        details["timestamp"] = datetime.now().isoformat()
-        return details
+            data = dict(self.autopilot_data)
+        return AutopilotDetails(
+            autopilot_type=data["autopilot_type"],
+            version=data["version"],
+            git_hash=data["git_hash"],
+            voltage=data["voltage"],
+            current=data["current"],
+            remaining=data["remaining"],
+            mavlink_connected=data["mavlink_connected"],
+            device_connected=data["device_connected"],
+            in_bootloader=data["in_bootloader"],
+            device_name=data["device_name"],
+            last_heartbeat=data["last_heartbeat"],
+            timestamp=datetime.now().isoformat(),
+        )
 
 
 class AutopilotManager:
@@ -365,7 +478,7 @@ class AutopilotManager:
         self.mavlink.connect()
         # The message loop is started automatically in connect()
 
-    def get_autopilot_details(self):
+    def get_autopilot_details(self) -> AutopilotDetails:
         """Get details about the connected autopilot via MAVLink"""
         # This is now non-blocking as connection management happens in the background
         return self.mavlink.get_autopilot_details()
@@ -429,7 +542,7 @@ class AutopilotManager:
             logger.error(f"Error restarting mavlink-router: {e}")
             return False
 
-    def reset_fmu(self, mode="wait_bl"):
+    def reset_fmu(self, mode="wait_bl") -> tuple[bool, str]:
         """Reset the flight management unit
 
         Args:
@@ -452,21 +565,25 @@ class AutopilotManager:
             logger.error(f"Error resetting FMU with {script}: {e}")
             return False, f"Reset error: {str(e)}"
 
-    def flash_firmware(self, firmware_path, socket_id):
-        """Flash firmware to the autopilot"""
-        socket = socketio.server
-
+    def try_claim_flash(self) -> bool:
+        """Claim the single flash slot, so a concurrent upload can be rejected
+        in the HTTP response instead of broadcasting a failure to every SSE
+        subscriber (which would also reach the client whose flash is running).
+        Released by flash_firmware when the flash finishes."""
         with self._flash_lock:
             if self._flashing:
-                error_data = {
-                    "status": "failed",
-                    "message": "Firmware flash already in progress",
-                    "percent": 0
-                }
-                socket.emit('progress', error_data, room=socket_id)
                 return False
             self._flashing = True
+            return True
 
+    def release_flash(self) -> None:
+        with self._flash_lock:
+            self._flashing = False
+
+    def flash_firmware(self, firmware_path: str) -> bool:
+        """Flash firmware to the autopilot, publishing progress to SSE
+        subscribers. The caller must hold the flash slot (try_claim_flash);
+        it is released here when the flash finishes."""
         logger.info(f"Starting firmware flash process for {firmware_path}")
 
         try:
@@ -474,12 +591,7 @@ class AutopilotManager:
             if not os.path.isfile(firmware_path):
                 error_msg = "Firmware file does not exist"
                 logger.error(f"Error: {error_msg}")
-                error_data = {
-                    "status": "failed",
-                    "message": error_msg,
-                    "percent": 0
-                }
-                socket.emit('progress', error_data, room=socket_id)
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                 return False
 
             # Find the ARKV6X device
@@ -488,12 +600,7 @@ class AutopilotManager:
             if not serial_device:
                 error_msg = "ARKV6X not found"
                 logger.error(f"Error: {error_msg}")
-                error_data = {
-                    "status": "failed",
-                    "message": error_msg,
-                    "percent": 0
-                }
-                socket.emit('progress', error_data, room=socket_id)
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                 return False
             logger.debug(f"Found ARKV6X device at {serial_device}")
 
@@ -512,7 +619,7 @@ class AutopilotManager:
                                  "means the service user lacks polkit authorization to run "
                                  "systemctl (the 99-ark-service-manager.pkla grant is missing).")
                     logger.error(error_msg)
-                    socket.emit('error', {"message": error_msg}, room=socket_id)
+                    broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                     return False
             else:
                 logger.debug("mavlink-router is not active")
@@ -523,14 +630,14 @@ class AutopilotManager:
             if not reset_ok:
                 error_msg = f"Failed to reset FMU into bootloader mode: {reset_msg}"
                 logger.error(error_msg)
-                socket.emit('error', {"message": error_msg}, room=socket_id)
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                 if router_was_active:
                     self.restart_mavlink_router()
                     self.mavlink.connect()
                 return False
 
             # Run px_uploader.py with JSON progress output
-            logger.debug(f"Starting firmware upload using px_uploader.py")
+            logger.debug("Starting firmware upload using px_uploader.py")
             command = [
                 "/usr/lib/ark-os/venv/bin/python3", "-u",
                 "/usr/lib/ark-os/scripts/px_uploader.py",
@@ -549,16 +656,17 @@ class AutopilotManager:
                 logger.debug(f"Started upload process with PID: {process.pid}")
 
                 # Process output line by line to capture JSON progress updates
+                assert process.stdout is not None
                 for line in process.stdout:
                     logger.debug(f"Uploader output: {line.strip()}")
                     if line is not None:
                         try:
-                            # Try to parse as JSON for progress updates
-                            progress_data = json.loads(line.strip())
-                            socket.emit('progress', progress_data, room=socket_id)
-                        except json.JSONDecodeError:
-                            # Not JSON, could be other output
-                            logger.debug(f"Non-JSON output: {line.strip()}")
+                            # Only lines matching the contract reach subscribers;
+                            # anything else is uploader chatter.
+                            progress = FlashProgress.model_validate(json.loads(line.strip()))
+                            broker.publish('progress', progress.model_dump(exclude_none=True))
+                        except (json.JSONDecodeError, ValidationError):
+                            logger.debug(f"Non-progress output: {line.strip()}")
 
                 # Wait for process to complete
                 return_code = process.wait()
@@ -567,6 +675,7 @@ class AutopilotManager:
                 # Get stderr output if there was an error
                 stderr_output = ""
                 if return_code != 0:
+                    assert process.stderr is not None
                     stderr_output = process.stderr.read()
                     logger.error(f"Error output from uploader: {stderr_output}")
 
@@ -594,18 +703,18 @@ class AutopilotManager:
                 if return_code == 0:
                     success_msg = "Firmware update completed successfully."
                     logger.info(success_msg)
-                    socket.emit('completed', {"message": success_msg}, room=socket_id)
+                    broker.publish('completed', FlashMessage(message=success_msg).model_dump())
                     return True
                 else:
                     error_msg = f"Firmware update failed with code {return_code}: {stderr_output}"
                     logger.error(error_msg)
-                    socket.emit('error', {"message": error_msg}, room=socket_id)
+                    broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                     return False
 
             except Exception as e:
                 error_msg = f"Exception during firmware update: {str(e)}"
                 logger.error(error_msg)
-                socket.emit('error', {"message": error_msg}, room=socket_id)
+                broker.publish('failed', FlashMessage(message=error_msg).model_dump())
 
                 # Try to restart mavlink-router if it was active
                 if router_was_active:
@@ -616,8 +725,7 @@ class AutopilotManager:
 
                 return False
         finally:
-            with self._flash_lock:
-                self._flashing = False
+            self.release_flash()
             # Clean up temp firmware file
             try:
                 if os.path.isfile(firmware_path):
@@ -626,104 +734,123 @@ class AutopilotManager:
                 pass
 
 
-# Store autopilot_manager as Flask app context
-app.autopilot_manager = None
+# Set in __main__ before uvicorn starts.
+autopilot_manager: AutopilotManager | None = None
 
 
-# API endpoints
-@app.route('/details', methods=['GET'])
-def get_autopilot_details():
+def get_manager() -> AutopilotManager:
+    assert autopilot_manager is not None
+    return autopilot_manager
+
+
+# ── API endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/details")
+def get_autopilot_details() -> AutopilotDetails:
     """Get details about the connected autopilot"""
     logger.debug("GET /details called")
-    details = app.autopilot_manager.get_autopilot_details()
-    return jsonify(details)
+    return get_manager().get_autopilot_details()
 
 
-@app.route('/firmware-upload', methods=['POST'])
-def upload_firmware():
-    """Upload and flash firmware to the autopilot"""
+@app.post("/firmware-upload")
+def upload_firmware(firmware: UploadFile, response: Response) -> UploadResponse:
+    """Upload firmware and start flashing in the background. Progress is
+    streamed to /firmware-upload/stream subscribers."""
     logger.info("POST /firmware-upload called")
-
-    if 'firmware' not in request.files:
-        logger.warning("No firmware file provided in request")
-        return jsonify({"status": "fail", "message": "No firmware file provided"}), 400
-
-    firmware_file = request.files['firmware']
-    socket_id = request.form.get('socketId')
-
-    if not socket_id:
-        logger.warning("No socket ID provided in request")
-        return jsonify({"status": "fail", "message": "No socket ID provided"}), 400
 
     # Check if the file has an allowed extension
     allowed_extensions = ['.px4', '.apj']
-    filename = firmware_file.filename
+    filename = os.path.basename(firmware.filename or "")
     file_ext = os.path.splitext(filename)[1].lower()
 
     if file_ext not in allowed_extensions:
         logger.warning(f"Invalid file type: {file_ext}")
-        return jsonify({
-            "status": "fail",
-            "message": f"Invalid file type. Only {', '.join(allowed_extensions)} files are allowed."
-        }), 400
+        response.status_code = 400
+        return UploadResponse(
+            status="fail",
+            message=f"Invalid file type. Only {', '.join(allowed_extensions)} files are allowed.",
+        )
 
-    # Create a temporary file for the firmware
-    temp_path = os.path.join('/tmp', filename)
-    firmware_file.save(temp_path)
-    logger.info(f"Firmware file saved to {temp_path}")
+    # Claim the flash slot before touching the temp file: a concurrent upload
+    # is rejected here, and can't overwrite a file the running flash is reading.
+    if not get_manager().try_claim_flash():
+        logger.warning("Rejected firmware upload: flash already in progress")
+        response.status_code = 409
+        return UploadResponse(status="fail", message="Firmware flash already in progress")
 
-    # Start the flashing process in a background thread
-    socketio.start_background_task(
-        app.autopilot_manager.flash_firmware,
-        temp_path,
-        socket_id
+    try:
+        # Save the firmware to a temporary file
+        temp_path = os.path.join('/tmp', filename)
+        with open(temp_path, 'wb') as f:
+            while chunk := firmware.file.read(1024 * 1024):
+                f.write(chunk)
+        logger.info(f"Firmware file saved to {temp_path}")
+
+        # Start the flashing process in a background thread
+        threading.Thread(
+            target=get_manager().flash_firmware,
+            args=(temp_path,),
+            daemon=True,
+        ).start()
+    except Exception:
+        get_manager().release_flash()
+        raise
+
+    return UploadResponse(status="success", message="Firmware upload started")
+
+
+@app.get("/firmware-upload/stream")
+async def firmware_upload_stream() -> StreamingResponse:
+    """Server-Sent Events stream of firmware-flash progress.
+
+    Events: 'progress' (FlashProgress), 'completed' / 'failed' (FlashMessage).
+    One-way server→client push, so SSE rides the same /api HTTP proxy chain as
+    the REST endpoints — no websocket layer involved.
+    """
+
+    async def event_stream() -> AsyncIterator[str]:
+        q = broker.subscribe()
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    event, data = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    # Periodic comment keeps intermediate proxies from timing
+                    # out the connection while no flash is running.
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+        finally:
+            broker.unsubscribe(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
-    return jsonify({"status": "success", "message": "Firmware upload started"})
 
-
-@app.route('/reset-fmu', methods=['POST'])
-def reset_fmu():
+@app.post("/reset-fmu")
+def reset_fmu(response: Response) -> MessageResponse:
     """Reset the flight controller"""
     logger.info("POST /reset-fmu called")
 
-    success, message = app.autopilot_manager.reset_fmu(mode="fast")
-
-    if success:
-        return jsonify({"success": True, "message": message})
-    else:
-        return jsonify({"success": False, "message": message}), 500
+    success, message = get_manager().reset_fmu(mode="fast")
+    if not success:
+        response.status_code = 500
+    return MessageResponse(success=success, message=message)
 
 
-@app.route('/reset-fmu-bootloader', methods=['POST'])
-def reset_fmu_bootloader():
+@app.post("/reset-fmu-bootloader")
+def reset_fmu_bootloader(response: Response) -> MessageResponse:
     """Reset the flight controller into bootloader mode"""
     logger.info("POST /reset-fmu-bootloader called")
 
-    success, message = app.autopilot_manager.reset_fmu(mode="wait_bl")
-
-    if success:
-        return jsonify({"success": True, "message": message})
-    else:
-        return jsonify({"success": False, "message": message}), 500
-
-
-@socketio.on('connect')
-def test_connect():
-    client_id = request.sid
-    logger.info(f'Client connected: {client_id}')
-    return {'status': 'connected'}
-
-
-@socketio.on('disconnect')
-def test_disconnect():
-    logger.info('Client disconnected')
-
-
-# Error handler for SocketIO
-@socketio.on_error_default
-def default_error_handler(e):
-    logger.error(f'SocketIO error: {str(e)}')
+    success, message = get_manager().reset_fmu(mode="wait_bl")
+    if not success:
+        response.status_code = 500
+    return MessageResponse(success=success, message=message)
 
 
 def parse_arguments():
@@ -737,7 +864,7 @@ def parse_arguments():
                         help='Host address to bind (default: 0.0.0.0)')
     parser.add_argument('--port',
                         type=int,
-                        default=3003,
+                        default=int(os.environ.get('PORT', 3003)),
                         help='Port to listen on (default: 3003)')
     parser.add_argument('--source-system',
                         type=int,
@@ -759,15 +886,12 @@ if __name__ == '__main__':
     logger.info(f"Log level set to {args.log_level.upper()}")
 
     # Create the AutopilotManager instance with command line arguments
-    app.autopilot_manager = AutopilotManager(
+    autopilot_manager = AutopilotManager(
         connection_string=args.connection_string,
         source_system=args.source_system
     )
 
     logger.info(f"Starting Autopilot Manager on {args.host}:{args.port}")
-    try:
-        # For newer versions of Flask-SocketIO
-        socketio.run(app, host=args.host, port=args.port, debug=False, allow_unsafe_werkzeug=True)
-    except TypeError:
-        # For older versions that don't have allow_unsafe_werkzeug parameter
-        socketio.run(app, host=args.host, port=args.port, debug=False)
+    # access_log off: /details is polled at 1 Hz by the UI (this replaces the
+    # werkzeug log suppression the Flask version used).
+    uvicorn.run(app, host=args.host, port=args.port, access_log=False)
