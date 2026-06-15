@@ -7,29 +7,28 @@
            class="service-box"
            :class="{
             'active-glow': service.active === 'active',
-            'inactive-glow': service.active === 'inactive',
-            'deactivating-glow': service.active === 'deactivating'}">
+            'inactive-glow': service.active === 'inactive' || service.active === 'failed',
+            'transitioning-glow': service.active === 'activating' || service.active === 'deactivating'}">
 
         <p class="service-name"><strong>{{ service.name }}</strong></p>
         <div class="service-actions">
-          <template v-if="service.active === 'deactivating'">
-            <i class="fas fa-spinner fa-spin"></i> <!-- This will show a spinning wheel -->
-          </template>
-          <template v-else>
-            <button v-if="service.active === 'active'" @click="stopService(service.name)" title="Stop service">
-              <i class="fas fa-stop"></i>
-            </button>
-            <button v-if="service.active !== 'active'" @click="startService(service.name)" title="Start service">
-              <i class="fas fa-play"></i>
-            </button>
-            <button @click="openLogViewer(service.name)" title="View journal logs">
-              <i class="fas fa-book"></i>
-            </button>
-            <button v-if="service.config_file !== ''" @click="openConfigEditor(service.name)" title="Edit config file">
-              <i class="fas fa-pencil-alt"></i>
-            </button>
-            <div v-else class="placeholder"></div>
-          </template>
+          <!-- action slot: spinner while transitioning, otherwise start/stop -->
+          <i v-if="service.active === 'activating' || service.active === 'deactivating'"
+             class="fas fa-spinner fa-spin" title="Working..."></i>
+          <button v-else-if="service.active === 'active'" @click="stopService(service.name)" title="Stop service">
+            <i class="fas fa-stop"></i>
+          </button>
+          <button v-else @click="startService(service.name)" title="Start service">
+            <i class="fas fa-play"></i>
+          </button>
+          <!-- logs and config stay reachable even while transitioning or failed -->
+          <button @click="openLogViewer(service.name)" title="View journal logs">
+            <i class="fas fa-book"></i>
+          </button>
+          <button v-if="service.config_file !== ''" @click="openConfigEditor(service.name)" title="Edit config file">
+            <i class="fas fa-pencil-alt"></i>
+          </button>
+          <div v-else class="placeholder"></div>
         </div>
         <div class="status-row">
           <label class="switch">
@@ -129,32 +128,16 @@ export default {
         .finally(() => this.fetchServiceStatuses());
     },
     startService(serviceName) {
+      // Fire and let polling reflect the outcome; if it fails, the card turns red
+      // and the reason is in the log viewer (no blocking wait, no toast).
       axios.post(`/api/service/start?serviceName=${serviceName}`)
-        .then(response => {
-          if (response.status === 200) {
-            console.log(`Service ${serviceName} started successfully`);
-            this.fetchServiceStatuses();
-          } else {
-            console.error(`Failed to start service ${serviceName}`);
-          }
-        })
-        .catch(error => {
-          console.error('Error starting service:', error);
-        });
+        .catch(error => console.error('Error starting service:', error))
+        .finally(() => this.fetchServiceStatuses());
     },
     stopService(serviceName) {
       axios.post(`/api/service/stop?serviceName=${serviceName}`)
-        .then(response => {
-          if (response.status === 200) {
-            console.log(`Service ${serviceName} stopped successfully`);
-            this.fetchServiceStatuses();
-          } else {
-            console.error(`Failed to stop service ${serviceName}`);
-          }
-        })
-        .catch(error => {
-          console.error('Error stopping service:', error);
-        });
+        .catch(error => console.error('Error stopping service:', error))
+        .finally(() => this.fetchServiceStatuses());
     },
     openConfigEditor(serviceName) {
       this.stopPolling();
@@ -262,7 +245,7 @@ h1, h2 {
   box-shadow: 0px 0px 8px var(--ark-color-red);
 }
 
-.deactivating-glow {
+.transitioning-glow {
   box-shadow: 0px 0px 8px var(--ark-color-orange);
 }
 
