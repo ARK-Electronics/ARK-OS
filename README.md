@@ -4,6 +4,7 @@ ARK-OS is a collection of software services and tools for drones. These services
 #### Supported targets
 - **ARK Jetson Carrier** <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
+- **ARK Just a Pi** <br> https://arkelectron.com/product/ark-just-a-pi/
 
 # Getting started
 If you haven't set up an internet connection on your device, ssh in and connect to your wifi network.
