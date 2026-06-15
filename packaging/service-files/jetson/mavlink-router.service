@@ -2,6 +2,10 @@
 Description=Mavlink Router
 Wants=network.target
 After=network-online.target
+# Cap the no-FC crash-loop: 5 failed starts within 60s fail the unit permanently
+# (until reset-failed/reboot); a re-plug within the window still recovers in ~5s.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=exec
