@@ -274,6 +274,19 @@ if [ -d /run/systemd/system ]; then
 
     systemctl start ark-os.target 2>/dev/null || true
 
+    # On upgrade ($2 = previously-configured version), restart the already-running
+    # ARK-OS services so the new package's code replaces the running processes.
+    # `systemctl start ark-os.target` above does NOT achieve this: the units are
+    # WantedBy= (not PartOf=) the target, so starting/stopping/restarting the
+    # target never propagates to a unit that is already active — it just stays up
+    # on the old code. try-restart only touches currently-active units, so a
+    # failed (e.g. mavlink-router with no FC) or operator-stopped service is
+    # left as-is rather than force-started.
+    if [ -n "$2" ]; then
+        RESTART_SERVICES="$ENABLE_SERVICES dds-agent logloader polaris flight-review rid-transmitter"
+        systemctl try-restart $RESTART_SERVICES 2>/dev/null || true
+    fi
+
     if nginx -t 2>/dev/null; then
         systemctl reload nginx 2>/dev/null || true
     fi
