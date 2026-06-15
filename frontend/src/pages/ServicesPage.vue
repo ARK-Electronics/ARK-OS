@@ -115,20 +115,18 @@ export default {
       const newStatus = service.enabled === 'enabled' ? 'disable' : 'enable';
       axios.post(`/api/service/${newStatus}?serviceName=${service.name}`)
         .then(response => {
-          if (response.status === 200) {
-            console.log(`Service ${service.name} ${newStatus}d successfully`);
-            service.enabled = newStatus === 'enable' ? 'enabled' : 'disabled';
-          } else {
-            console.error(`Failed to ${newStatus} service ${service.name}`);
-            alert(`Failed to ${newStatus} service ${service.name}`);
+          // Action results are always HTTP 200; the real outcome is in the body.
+          if (response.data.status !== 'success') {
+            console.error(`Failed to ${newStatus} service ${service.name}: ${response.data.message}`);
+            alert(`Failed to ${newStatus} ${service.name}: ${response.data.message}`);
           }
         })
         .catch(error => {
           console.error(`Error ${newStatus} service:`, error);
-          alert(`Error ${newStatus} service`);
-          // Revert the toggle if there was an error
-          service.enabled = service.enabled === 'enabled' ? 'disabled' : 'enabled';
-        });
+          alert(`Error ${newStatus} ${service.name}`);
+        })
+        // Re-sync the toggle from the server instead of guessing the new state.
+        .finally(() => this.fetchServiceStatuses());
     },
     startService(serviceName) {
       axios.post(`/api/service/start?serviceName=${serviceName}`)
