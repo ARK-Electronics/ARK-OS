@@ -115,6 +115,10 @@ class SystemInfoCollector:
     @staticmethod
     def get_common_info() -> dict[str, Any]:
         """Get system information common to all devices"""
+        # Sample each source once; virtual_memory()/disk_usage() each shell into
+        # the kernel, so calling them per-field was four redundant probes apiece.
+        vm = psutil.virtual_memory()
+        du = psutil.disk_usage('/')
         info: dict[str, Any] = {
             "hostname": platform.node(),
             "python_version": platform.python_version(),
@@ -122,16 +126,16 @@ class SystemInfoCollector:
             "architecture": platform.machine(),
             "cpu_count": psutil.cpu_count(),
             "memory": {
-                "total": psutil.virtual_memory().total / (1024**3),  # GB
-                "used": psutil.virtual_memory().used / (1024**3),
-                "available": psutil.virtual_memory().available / (1024**3),
-                "percent": psutil.virtual_memory().percent
+                "total": vm.total / (1024**3),  # GB
+                "used": vm.used / (1024**3),
+                "available": vm.available / (1024**3),
+                "percent": vm.percent
             },
             "disk": {
-                "total": psutil.disk_usage('/').total / (1024**3),
-                "used": psutil.disk_usage('/').used / (1024**3),
-                "available": psutil.disk_usage('/').free / (1024**3),
-                "percent": psutil.disk_usage('/').percent
+                "total": du.total / (1024**3),
+                "used": du.used / (1024**3),
+                "available": du.free / (1024**3),
+                "percent": du.percent
             },
             "network_interfaces": {}
         }

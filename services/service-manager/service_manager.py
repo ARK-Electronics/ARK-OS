@@ -19,10 +19,24 @@ import os
 import json
 import subprocess
 import re
+import logging
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
+
+
+def setup_logging():
+    """Setup simple logging that will be captured by journald via stdout"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+    return logging.getLogger('service-manager')
+
+
+logger = setup_logging()
 
 
 # ── HTTP contract: the single source of truth ────────────────────────────────
@@ -139,7 +153,7 @@ class ServiceManager:
                     manifest_data = json.load(f)
                     config_file_name = manifest_data.get("configFile", "") or ""
             except Exception as e:
-                print(f"Error reading manifest file for {service_name}: {e}")
+                logger.error(f"Error reading manifest file for {service_name}: {e}")
 
         return os.path.join(CONFIG_DIR, config_file_name)
 
@@ -158,6 +172,47 @@ class ServiceManager:
         return True
 
     @staticmethod
+    def _query_unit_states(service_names: list[str]) -> dict[str, tuple[str, str]]:
+        """Return {service: (enabled_state, active_state)} for many units in a
+        single `systemctl show` call.
+
+        Replaces two `systemctl` spawns *per service*: with the UI polling
+        /statuses at up to 1 Hz, that was ~2xN subprocess launches every second.
+        UnitFileState/ActiveState carry the same vocabulary as is-enabled/
+        is-active, so the values the UI sees are unchanged.
+        """
+        states: dict[str, tuple[str, str]] = {}
+        if not service_names:
+            return states
+
+        units = [f"{name}.service" for name in service_names]
+        try:
+            process = subprocess.run(
+                ["systemctl", "show", "-p", "Id", "-p", "UnitFileState", "-p", "ActiveState", *units],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except Exception as e:
+            logger.error(f"Error querying unit states: {e}")
+            return states
+
+        # One blank-line-separated block per unit, each a set of Key=Value lines.
+        for block in process.stdout.strip().split("\n\n"):
+            props: dict[str, str] = {}
+            for line in block.splitlines():
+                key, _, value = line.partition("=")
+                props[key] = value
+            unit_id = props.get("Id", "")
+            if unit_id.endswith(".service"):
+                name = unit_id[: -len(".service")]
+                states[name] = (
+                    props.get("UnitFileState") or "unknown",
+                    props.get("ActiveState") or "unknown",
+                )
+        return states
+
+    @staticmethod
     def get_service_statuses() -> ServiceList:
         services = []
 
@@ -165,12 +220,13 @@ class ServiceManager:
             return ServiceList(services=[])
 
         manifest_files = [f for f in os.listdir(MANIFEST_DIR) if f.endswith('.manifest.json')]
+        service_names = [f[:-len('.manifest.json')] for f in manifest_files]
 
-        for manifest_file in manifest_files:
-            service_name = manifest_file[:-len('.manifest.json')]
+        # One batched systemctl call for all units instead of two spawns each.
+        unit_states = ServiceManager._query_unit_states(service_names)
 
-            enabled_status = ServiceManager.get_service_status(service_name, "enabled")
-            active_status = ServiceManager.get_service_status(service_name, "active")
+        for service_name in service_names:
+            enabled_status, active_status = unit_states.get(service_name, ("unknown", "unknown"))
 
             config_file = ServiceManager.get_service_config_file(service_name)
             config_file_name = os.path.basename(config_file) if os.path.isfile(config_file) else ""
@@ -309,55 +365,55 @@ class ServiceManager:
 
 @app.get("/statuses")
 def get_service_statuses() -> ServiceList:
-    print("GET /statuses called")
+    logger.debug("GET /statuses called")
     return ServiceManager.get_service_statuses()
 
 
 @app.post("/start", response_model_exclude_none=True)
 def start_service(serviceName: str) -> ActionResponse:
-    print(f"POST /start called for {serviceName}")
+    logger.info(f"POST /start called for {serviceName}")
     return ServiceManager.start_service(serviceName)
 
 
 @app.post("/stop", response_model_exclude_none=True)
 def stop_service(serviceName: str) -> ActionResponse:
-    print(f"POST /stop called for {serviceName}")
+    logger.info(f"POST /stop called for {serviceName}")
     return ServiceManager.stop_service(serviceName)
 
 
 @app.post("/restart", response_model_exclude_none=True)
 def restart_service(serviceName: str) -> ActionResponse:
-    print(f"POST /restart called for {serviceName}")
+    logger.info(f"POST /restart called for {serviceName}")
     return ServiceManager.restart_service(serviceName)
 
 
 @app.post("/enable", response_model_exclude_none=True)
 def enable_service(serviceName: str) -> ActionResponse:
-    print(f"POST /enable called for {serviceName}")
+    logger.info(f"POST /enable called for {serviceName}")
     return ServiceManager.enable_service(serviceName)
 
 
 @app.post("/disable", response_model_exclude_none=True)
 def disable_service(serviceName: str) -> ActionResponse:
-    print(f"POST /disable called for {serviceName}")
+    logger.info(f"POST /disable called for {serviceName}")
     return ServiceManager.disable_service(serviceName)
 
 
 @app.get("/logs", response_model_exclude_none=True)
 def get_service_logs(serviceName: str) -> LogsResponse:
-    print(f"GET /logs called for {serviceName}")
+    logger.debug(f"GET /logs called for {serviceName}")
     return ServiceManager.get_logs(serviceName)
 
 
 @app.get("/config")
 def get_service_config(serviceName: str) -> ConfigResponse:
-    print(f"GET /config called for {serviceName}")
+    logger.info(f"GET /config called for {serviceName}")
     return ServiceManager.get_config(serviceName)
 
 
 @app.post("/config")
 def save_service_config(serviceName: str, body: SaveConfigRequest) -> ConfigResponse:
-    print(f"POST /config called for {serviceName}")
+    logger.info(f"POST /config called for {serviceName}")
 
     if not body.config:
         return ConfigResponse(status="fail", data="No configuration data provided")
@@ -369,6 +425,6 @@ if __name__ == '__main__':
     host = '127.0.0.1'
     port = int(os.environ.get("PORT", 3002))
 
-    print(f"Starting Service Manager on {host}:{port}")
+    logger.info(f"Starting Service Manager on {host}:{port}")
     # access_log off: the UI polls /statuses.
     uvicorn.run(app, host=host, port=port, access_log=False)
