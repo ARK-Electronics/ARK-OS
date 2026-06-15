@@ -12,8 +12,10 @@ const PORT = process.env.PORT || 3000;
 // Set HOST=0.0.0.0 only if a direct, non-nginx consumer truly needs the gateway.
 const HOST = process.env.HOST || '127.0.0.1';
 
-// Apply middleware that doesn't interfere with request body
-app.use(morgan('dev')); // Logging for HTTP requests
+// Apply middleware that doesn't interfere with request body.
+// Behind nginx (which already logs requests), only surface problems here so the
+// UI's 1 Hz polling doesn't flood the journal — log 4xx/5xx responses only.
+app.use(morgan('tiny', { skip: (req, res) => res.statusCode < 400 }));
 app.use(cors());
 
 // Configuration for our microservices (with default values)
@@ -28,16 +30,11 @@ console.log(`- SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}`);
 console.log(`- AUTOPILOT_SERVICE_URL: ${AUTOPILOT_SERVICE_URL}`);
 console.log(`- SYSTEM_SERVICE_URL: ${SYSTEM_SERVICE_URL}`);
 
-app.use((req, res, next) => {
-  console.log(`[${req.method}] ${req.originalUrl}`);
-  next();
-});
-
 // Service proxy
 app.use('/api/service', createProxyMiddleware({
   target: SERVICE_MANAGER_URL,
   changeOrigin: true,
-  logLevel: 'debug',
+  logLevel: 'warn',
   onError: (err, req, res) => {
     console.error(`Service proxy error: ${err.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -49,7 +46,7 @@ app.use('/api/service', createProxyMiddleware({
 app.use('/api/network', createProxyMiddleware({
   target: NETWORK_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'debug',
+  logLevel: 'warn',
   onError: (err, req, res) => {
     console.error(`Network proxy error: ${err.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -61,7 +58,7 @@ app.use('/api/network', createProxyMiddleware({
 app.use('/api/autopilot', createProxyMiddleware({
   target: AUTOPILOT_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'debug',
+  logLevel: 'warn',
   onError: (err, req, res) => {
     console.error(`Autopilot service proxy error: ${err.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -73,7 +70,7 @@ app.use('/api/autopilot', createProxyMiddleware({
 app.use('/api/system', createProxyMiddleware({
   target: SYSTEM_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'debug',
+  logLevel: 'warn',
   onError: (err, req, res) => {
     console.error(`System service proxy error: ${err.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -83,14 +80,6 @@ app.use('/api/system', createProxyMiddleware({
 
 // NOW add body parsing middleware AFTER all proxies
 app.use(express.json());
-
-// Add body logging middleware after body parser
-app.use((req, res, next) => {
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log(`Request body:`, req.body);
-  }
-  next();
-});
 
 // Health check endpoint and other non-proxy endpoints
 app.get('/health', (req, res) => {
