@@ -187,6 +187,9 @@ class ServiceManager:
 
     @staticmethod
     def start_service(service_name: str) -> ActionResponse:
+        # Clear any failed / start-limit-hit state first, so a unit that gave up
+        # (e.g. mavlink-router hitting its StartLimit with no FC) starts from the UI.
+        ServiceManager.run_systemctl("reset-failed", service_name)
         success, message = ServiceManager.run_systemctl("start", service_name)
 
         if success:
