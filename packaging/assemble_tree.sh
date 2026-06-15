@@ -101,14 +101,21 @@ cp -r services/flight-review/flight_review/app "$PKG$ARK/flight-review/"
 # stray dev artifacts never ship in the .deb (the bundled venv's caches are kept).
 find "$PKG$ARK/flight-review" -type d -name __pycache__ -prune -exec rm -rf {} +
 
-# --- default configs -> /etc/ark-os ---
-install -m 0644 services/mavlink-router/main.conf "$PKG/etc/ark-os/mavlink-router.conf"
+# --- default config templates -> /usr/lib/ark-os/config-defaults ---
+# Shipped as templates rather than into /etc/ark-os so a dpkg upgrade never clobbers the
+# user's live configs; postinst's merge_configs.py reconciles them into /etc/ark-os (seed
+# on first install, value-preserving merge on upgrade). The empty /etc/ark-os dir created
+# above is the merge target.
+DEFAULTS="$PKG$ARK/config-defaults"
+mkdir -p "$DEFAULTS"
+install -m 0644 services/mavlink-router/main.conf "$DEFAULTS/mavlink-router.conf"
 for f in packaging/config/*; do
     base=$(basename "$f")
     # rid-transmitter is jetson-only; skip its config on pi.
     [ "$P" = "pi" ] && [ "$base" = "rid-transmitter.toml" ] && continue
-    install -m 0644 "$f" "$PKG/etc/ark-os/$base"
+    install -m 0644 "$f" "$DEFAULTS/$base"
 done
+install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
 
 # --- nginx site ---
 install -m 0644 frontend/ark-ui.nginx "$PKG/etc/nginx/sites-available/ark-ui"

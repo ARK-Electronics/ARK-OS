@@ -170,10 +170,26 @@ mkdir -p /var/lib/ark-os/logs /var/lib/ark-os/flight-review/data
 chown -R "$ARK_USER:$ARK_USER" /var/lib/ark-os
 
 # ===========================================================================
+# Step 2b: Reconcile config templates into /etc/ark-os. Defaults ship under
+# config-defaults/ (not /etc/ark-os) so a dpkg upgrade never clobbers live
+# configs; this seeds them on first install and merges them on upgrade — new
+# fields added, removed scalar fields dropped, user values (and user-added
+# sections) kept. preinst snapshots the pre-upgrade configs to .config-backup,
+# which the helper prefers over the live file. Runs under the bundled venv for
+# the `toml` lib; a no-op-safe seed in the build chroot (empty /etc/ark-os).
+# ===========================================================================
+mkdir -p /etc/ark-os
+if [ -x /usr/lib/ark-os/venv/bin/python3 ] && [ -d /usr/lib/ark-os/config-defaults ]; then
+    /usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/libexec/merge_configs.py \
+        /usr/lib/ark-os/config-defaults /var/lib/ark-os/.config-backup /etc/ark-os || true
+fi
+rm -rf /var/lib/ark-os/.config-backup
+
+# ===========================================================================
 # Step 3: Make /etc/ark-os group-writable by the service user so the web UI
 # (service-manager, running as $ARK_USER) can rewrite configs. Setgid on the
 # dir makes new files inherit the group. Re-applied on every install/upgrade
-# because the configs are plain package files, not conffiles.
+# because /etc/ark-os is populated by merge_configs.py, not the data tree.
 # ===========================================================================
 chgrp -R "$ARK_USER" /etc/ark-os
 chmod 2775 /etc/ark-os
