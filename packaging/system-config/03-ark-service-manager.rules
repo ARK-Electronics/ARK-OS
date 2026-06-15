@@ -30,12 +30,21 @@ polkit.addRule(function(action, subject) {
         return polkit.Result.YES;
     }
 
-    if (action.id == "org.freedesktop.systemd1.manage-units" ||
-        action.id == "org.freedesktop.systemd1.manage-unit-files") {
+    // start/stop/restart (manage-units) carry the target unit as a polkit detail,
+    // so scope these to ARK-OS units.
+    if (action.id == "org.freedesktop.systemd1.manage-units") {
         var unit = action.lookup("unit");
         if (unit && ARK_OS_UNITS.indexOf(unit) !== -1) {
             return polkit.Result.YES;
         }
+    }
+
+    // enable/disable (manage-unit-files) act on a list of files, so systemd passes
+    // no "unit" detail — action.lookup("unit") is null and per-unit scoping is
+    // impossible. Grant it to the service user, matching the blanket grant the
+    // .pkla already gives on Jetson; without it the autostart toggle is denied.
+    if (action.id == "org.freedesktop.systemd1.manage-unit-files") {
+        return polkit.Result.YES;
     }
 
     // Hostname control for connection-manager / system-manager.
