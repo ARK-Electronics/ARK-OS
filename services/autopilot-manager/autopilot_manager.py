@@ -155,6 +155,12 @@ class DeviceDetector:
 
 
 class MAVLinkConnection:
+    # Reconnect backoff bounds (seconds) for when the autopilot heartbeat is
+    # absent: rebuild the link on a growing delay instead of churning the socket
+    # every few seconds on a board with no flight controller.
+    _INITIAL_RESET_BACKOFF = 1.0
+    _MAX_RESET_BACKOFF = 30.0
+
     def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
         self.connection_string = connection_string
         self.source_system = source_system
@@ -229,6 +235,16 @@ class MAVLinkConnection:
             autoreconnect=True,
             source_system=self.source_system)
 
+    def _reconnect_helps(self) -> bool:
+        """Whether rebuilding the connection can actually recover the link.
+
+        A udpin/udp listener has no peer to dial, so recreating its socket while
+        the FC is gone only churns it — the existing socket still receives a
+        returning autopilot. Client/serial links (udpout, tcp, serial) do
+        benefit from a rebuild.
+        """
+        return not self.connection_string.startswith(('udpin:', 'udp:'))
+
     def update_heartbeat_time(self):
         """Update the last heartbeat timestamp"""
         self.last_heartbeat = datetime.now()
@@ -296,11 +312,16 @@ class MAVLinkConnection:
     def process_messages(self):
         """Process incoming MAVLink messages in a loop"""
         self.running = True
-        connection_attempts = 0
         last_version_request_time = 0.0
         last_system_time_update_time = 0.0
         last_device_check_time = 0.0
-        waiting_for_heartbeat = True
+        last_probe_time = 0.0
+        # Reconnect/episode state: back off rebuilding the link, and log the
+        # disconnect only once per episode (not every loop) so an FC-less board
+        # doesn't churn the socket or flood the journal.
+        reset_backoff = self._INITIAL_RESET_BACKOFF
+        next_reset_time = 0.0
+        disconnect_logged = False
 
         while self.running:
             try:
@@ -324,9 +345,6 @@ class MAVLinkConnection:
                     if msg.get_srcComponent() != mavlink.MAV_COMP_ID_AUTOPILOT1:
                         continue
 
-                    # We received a message, connection is working
-                    waiting_for_heartbeat = False
-
                     # Process different message types
                     if msg.get_type() == 'HEARTBEAT':
                         self.update_heartbeat_time()
@@ -334,8 +352,13 @@ class MAVLinkConnection:
                             self.autopilot_data["autopilot_type"] = self.get_autopilot_type(msg.autopilot)
                             self.autopilot_data["mavlink_connected"] = True
 
-                        # Reset connection attempts on successful heartbeat
-                        connection_attempts = 0
+                        # Recovered: log once and reset the backoff so the next
+                        # drop is reported promptly and probed without delay.
+                        if disconnect_logged:
+                            logger.info("Autopilot heartbeat received; MAVLink connected")
+                            disconnect_logged = False
+                        reset_backoff = self._INITIAL_RESET_BACKOFF
+                        next_reset_time = 0.0
 
                         # Periodically request version information if needed
                         if current_time - last_version_request_time > 5:
@@ -380,35 +403,44 @@ class MAVLinkConnection:
                             if hasattr(msg, 'battery_remaining'):
                                 self.autopilot_data["remaining"] = msg.battery_remaining
 
-                # If no message or heartbeat timeout occurred, check connection status
+                # No message, and the autopilot heartbeat is missing or stale.
                 elif (self.last_heartbeat is None or
                       (datetime.now() - self.last_heartbeat).total_seconds() > 5):
 
                     with self._lock:
                         self.autopilot_data["mavlink_connected"] = False
 
-                    # No recent heartbeat, try to send one to elicit a response
-                    if waiting_for_heartbeat and connection_attempts < 5:
+                    # Log the disconnect once per episode, not every cycle — a
+                    # board with no FC would otherwise WARN every few seconds.
+                    if not disconnect_logged:
+                        logger.warning("No autopilot heartbeat; probing and reconnecting in the background")
+                        disconnect_logged = True
+
+                    # Probe with a GCS heartbeat at ~1 Hz to elicit a response.
+                    if current_time - last_probe_time >= 1.0:
                         try:
-                            logger.debug(f"Sending heartbeat attempt {connection_attempts+1}/5")
                             self.mav_connection.mav.heartbeat_send(
                                 mavlink.MAV_TYPE_GCS,
                                 mavlink.MAV_AUTOPILOT_INVALID,
                                 0, 0, 0)
-                            connection_attempts += 1
                         except Exception as e:
                             logger.error(f"Error sending heartbeat: {e}")
-                    # If we've tried several times, reset the connection
-                    elif connection_attempts >= 5:
-                        try:
-                            logger.warning("Connection issues detected, attempting to reset MAVLink connection")
-                            self._reset_connection()
-                            waiting_for_heartbeat = True
-                            connection_attempts = 0
-                        except Exception as reset_error:
-                            logger.error(f"Error resetting MAVLink connection: {reset_error}")
-                            self.mav_connection = None
-                            time.sleep(1)
+                        last_probe_time = current_time
+
+                    # Rebuild the link on a capped exponential backoff so a
+                    # permanently absent FC can't churn the socket (or journal)
+                    # every few seconds. Skipped entirely for a udpin listener,
+                    # which has no peer to reconnect to.
+                    if current_time >= next_reset_time:
+                        if self._reconnect_helps():
+                            try:
+                                self._reset_connection()
+                            except Exception as reset_error:
+                                logger.error(f"Error resetting MAVLink connection: {reset_error}")
+                                self.mav_connection = None
+                                time.sleep(1)
+                        next_reset_time = current_time + reset_backoff
+                        reset_backoff = min(reset_backoff * 2, self._MAX_RESET_BACKOFF)
 
             except socket.timeout:
                 # This is expected when using blocking mode with timeout
@@ -420,8 +452,8 @@ class MAVLinkConnection:
                 time.sleep(1)
                 try:
                     self._reset_connection()
-                    waiting_for_heartbeat = True
-                    connection_attempts = 0
+                    reset_backoff = self._INITIAL_RESET_BACKOFF
+                    next_reset_time = current_time + reset_backoff
                 except Exception as reset_error:
                     logger.error(f"Error resetting MAVLink connection: {reset_error}")
                     self.mav_connection = None
