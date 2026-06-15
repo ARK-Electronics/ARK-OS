@@ -19,7 +19,7 @@
             <button v-if="service.active === 'active'" @click="stopService(service.name)" title="Stop service">
               <i class="fas fa-stop"></i>
             </button>
-            <button v-if="service.active === 'inactive'" @click="startService(service.name)" title="Start service">
+            <button v-if="service.active !== 'active'" @click="startService(service.name)" title="Start service">
               <i class="fas fa-play"></i>
             </button>
             <button @click="openLogViewer(service.name)" title="View journal logs">
