@@ -23,4 +23,14 @@ if [ -n "$have" ] && [ "$have" != "$want" ]; then
     echo "       Continuing anyway because ARK_OS_ALLOW_CODENAME_MISMATCH=1." >&2
 fi
 
+# On upgrade, snapshot the live configs before dpkg unpacks. The new package ships its
+# defaults under /usr/lib/ark-os/config-defaults (not /etc/ark-os), so dpkg removes the
+# old package's /etc/ark-os/* as obsolete during unpack; postinst's merge_configs.py
+# reads this snapshot to carry the user's values forward.
+if [ "$1" = "upgrade" ] && [ -d /etc/ark-os ]; then
+    rm -rf /var/lib/ark-os/.config-backup
+    mkdir -p /var/lib/ark-os/.config-backup
+    cp -a /etc/ark-os/. /var/lib/ark-os/.config-backup/ 2>/dev/null || true
+fi
+
 exit 0
