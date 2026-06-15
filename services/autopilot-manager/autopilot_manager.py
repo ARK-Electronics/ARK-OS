@@ -860,8 +860,10 @@ def parse_arguments():
                         default='udpin:localhost:14571',
                         help='MAVLink connection string (default: udpin:localhost:14571)')
     parser.add_argument('--host',
-                        default='0.0.0.0',
-                        help='Host address to bind (default: 0.0.0.0)')
+                        # localhost only: reached via the nginx gateway (localhost:3003),
+                        # never a public surface — matches the other managers.
+                        default='127.0.0.1',
+                        help='Host address to bind (default: 127.0.0.1)')
     parser.add_argument('--port',
                         type=int,
                         default=int(os.environ.get('PORT', 3003)),

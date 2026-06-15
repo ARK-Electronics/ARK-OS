@@ -8,6 +8,9 @@ const http = require('http');
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+// Bind localhost: the public surface is nginx :80, which proxies /api/* here.
+// Set HOST=0.0.0.0 only if a direct, non-nginx consumer truly needs the gateway.
+const HOST = process.env.HOST || '127.0.0.1';
 
 // Apply middleware that doesn't interfere with request body
 app.use(morgan('dev')); // Logging for HTTP requests
@@ -120,8 +123,8 @@ app.use((err, req, res, next) => {
 });
 
 // Start the server
-server.listen(PORT, () => {
-  console.log(`API Gateway running on port ${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`API Gateway running on ${HOST}:${PORT}`);
 });
 
 module.exports = { app, server };
