@@ -1,10 +1,26 @@
 #!/bin/sh
-# Stop the whole ARK-OS service group before the package files are removed or
-# replaced. One command covers every enabled unit (via ark-os.target).
+# Stop the ARK-OS services on package removal.
+#
+# The previous `systemctl stop ark-os.target` was a no-op for the services: they
+# are WantedBy= the target, not PartOf=, so stopping the target never propagates
+# to its members — `apt remove` left every service running with its files deleted
+# out from under it. Stop the units explicitly instead.
+#
+# On *upgrade* we deliberately do NOT stop here: postinst try-restarts the
+# services after the new files are unpacked, which keeps the web UI / MAVLink
+# routing up during the unpack rather than down for its whole duration.
 set -e
 
-if [ -d /run/systemd/system ]; then
-    systemctl stop ark-os.target 2>/dev/null || true
-fi
+# Platform-specific units (jetson-can, rid-transmitter) are simply not loaded on
+# the other platform, so stopping them there is a harmless no-op.
+ARK_SERVICES="mavlink-router rtsp-server ark-ui-backend autopilot-manager connection-manager service-manager system-manager dds-agent logloader polaris flight-review rid-transmitter jetson-can"
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop $ARK_SERVICES ark-os.target 2>/dev/null || true
+        fi
+        ;;
+esac
 
 exit 0
