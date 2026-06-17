@@ -297,6 +297,19 @@ class MAVLinkConnection:
             logger.error(f"Error sending system time: {e}")
             return False
 
+    def _clock_is_synchronized(self):
+        # Kernel NTP-sync flag via timedatectl — works regardless of the time daemon
+        # (timesyncd on Jetson/Pi, or chrony/ntpd), unlike timesyncd's /run flag file.
+        try:
+            result = subprocess.run(
+                ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+                capture_output=True, text=True, timeout=2,
+            )
+            return result.stdout.strip() == "yes"
+        except Exception as e:
+            logger.debug(f"Could not query clock sync status: {e}")
+            return False
+
     def update_device_status(self):
         """Update device connection status via USB detection"""
         device_status = self.device_detector.check_device_status()
@@ -314,6 +327,7 @@ class MAVLinkConnection:
         self.running = True
         last_version_request_time = 0.0
         last_system_time_update_time = 0.0
+        system_time_synced = False
         last_device_check_time = 0.0
         last_probe_time = 0.0
         # Reconnect/episode state: back off rebuilding the link, and log the
@@ -368,10 +382,16 @@ class MAVLinkConnection:
                                 self.request_autopilot_version()
                                 last_version_request_time = current_time
 
-                        # Periodically send system time
+                        # Push system time only once the clock is NTP-synced; otherwise
+                        # we'd set the FC clock to a bogus pre-sync value (no RTC on
+                        # Jetson or Pi). Latch so we stop polling timedatectl after sync.
                         if current_time - last_system_time_update_time > 5:
-                            self.send_system_time(current_time)
                             last_system_time_update_time = current_time
+                            if system_time_synced or self._clock_is_synchronized():
+                                if not system_time_synced:
+                                    logger.info("System clock synchronized; sending SYSTEM_TIME to autopilot")
+                                    system_time_synced = True
+                                self.send_system_time(current_time)
 
                     elif msg.get_type() == 'AUTOPILOT_VERSION':
                         # Extract version and git hash
