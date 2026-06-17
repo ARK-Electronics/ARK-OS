@@ -221,8 +221,10 @@ systemctl enable ark-os.target 2>/dev/null || true
 for svc in $ENABLE_SERVICES; do
     systemctl enable "$svc.service" 2>/dev/null || true
 done
-# Jetsons typically have no RTC; gate time-dependent services on NTP convergence.
-systemctl enable systemd-time-wait-sync.service 2>/dev/null || true
+# Don't gate boot on time sync: systemd-time-wait-sync has an infinite start timeout,
+# so an RTC-less Jetson booting offline wedges until NTP converges (never, with no net).
+# timesyncd still corrects the clock once a network is up.
+systemctl disable systemd-time-wait-sync.service 2>/dev/null || true
 # First-boot finalization (default hotspot, flight-review DB, Wi-Fi unblock). Enabled
 # so a chroot-built image runs it on first boot; a live install also kicks it below.
 systemctl enable ark-os-firstboot.service 2>/dev/null || true
