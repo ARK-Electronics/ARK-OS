@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Get the board serial number from get_serial_number.py in the same directory
-serial_number=$(/usr/lib/ark-os/venv/bin/python3 $(dirname $0)/get_serial_number.py)
+# Get the board serial number from jetson_serial_number.py in the same directory
+serial_number=$(/usr/lib/ark-os/venv/bin/python3 $(dirname $0)/jetson_serial_number.py)
 if [ $? -ne 0 ]; then
     echo "Error: could not get serial number"
     exit 1
