@@ -7,7 +7,6 @@ const ENDPOINTS = {
   restart: (serviceName) => `/api/service/restart?serviceName=${serviceName}`,
   enable: (serviceName) => `/api/service/enable?serviceName=${serviceName}`,
   disable: (serviceName) => `/api/service/disable?serviceName=${serviceName}`,
-  logs: (serviceName) => `/api/service/logs?serviceName=${serviceName}`,
   config: (serviceName) => `/api/service/config?serviceName=${serviceName}`,
 };
 
@@ -29,9 +28,6 @@ export default {
   },
   async disableService(serviceName) {
     return axios.post(ENDPOINTS.disable(serviceName));
-  },
-  async getServiceLogs(serviceName) {
-    return axios.get(ENDPOINTS.logs(serviceName));
   },
   async getServiceConfig(serviceName) {
     return axios.get(ENDPOINTS.config(serviceName));

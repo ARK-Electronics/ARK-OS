@@ -20,8 +20,11 @@ import json
 import subprocess
 import re
 import logging
+import asyncio
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -61,11 +64,11 @@ class ActionResponse(BaseModel):
     message: str | None = None
 
 
-class LogsResponse(BaseModel):
-    status: str
-    service: str
-    logs: str | None = None
-    message: str | None = None
+class LogLine(BaseModel):
+    """One journal entry pushed over the /logs/stream SSE channel."""
+    ts: int | None = None  # epoch milliseconds (None if journald omitted it)
+    priority: int = 6      # syslog severity 0..7; 6 = info, <=3 = error
+    message: str
 
 
 class ConfigResponse(BaseModel):
@@ -90,6 +93,45 @@ _ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 def strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE.sub('', text)
+
+
+def parse_journal_line(raw: bytes) -> LogLine | None:
+    """Turn one `journalctl -o json` line into a LogLine, or None if unusable.
+
+    journald gives __REALTIME_TIMESTAMP as microseconds-since-epoch (a string),
+    MESSAGE as a string or — for non-UTF-8 payloads — an array of byte values,
+    and PRIORITY as a syslog level 0..7.
+    """
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return None
+
+    if not isinstance(obj, dict):
+        return None
+
+    message = obj.get("MESSAGE")
+    if isinstance(message, list):
+        # journald encodes a non-UTF-8 message as an array of byte values.
+        try:
+            message = bytes(message).decode("utf-8", "replace")
+        except (ValueError, TypeError):
+            message = ""
+    elif not isinstance(message, str):
+        message = "" if message is None else str(message)
+
+    ts: int | None
+    try:
+        ts = int(obj["__REALTIME_TIMESTAMP"]) // 1000
+    except (KeyError, ValueError, TypeError):
+        ts = None
+
+    try:
+        priority = int(obj.get("PRIORITY", 6))
+    except (ValueError, TypeError):
+        priority = 6
+
+    return LogLine(ts=ts, priority=priority, message=strip_ansi(message))
 
 
 class ServiceManager:
@@ -301,26 +343,6 @@ class ServiceManager:
             return ActionResponse(status="fail", service=service_name, message=message)
 
     @staticmethod
-    def get_logs(service_name: str, num_lines: int = 50) -> LogsResponse:
-        if not ServiceManager.is_known_service(service_name):
-            return LogsResponse(status="fail", service=service_name,
-                                message=f"Unknown or unmanaged service: {service_name}")
-
-        try:
-            process = subprocess.run(
-                ["journalctl", "-u", service_name, "-n", str(num_lines), "--no-pager", "-o", "cat"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-
-            logs = strip_ansi(process.stdout).strip()
-
-            return LogsResponse(status="success", service=service_name, logs=logs)
-        except Exception as e:
-            return LogsResponse(status="fail", service=service_name, message=str(e))
-
-    @staticmethod
     def get_config(service_name: str) -> ConfigResponse:
         if not ServiceManager.is_known_service(service_name):
             return ConfigResponse(status="fail", data=f"Unknown or unmanaged service: {service_name}")
@@ -399,10 +421,71 @@ def disable_service(serviceName: str) -> ActionResponse:
     return ServiceManager.disable_service(serviceName)
 
 
-@app.get("/logs", response_model_exclude_none=True)
-def get_service_logs(serviceName: str) -> LogsResponse:
-    logger.debug(f"GET /logs called for {serviceName}")
-    return ServiceManager.get_logs(serviceName)
+@app.get("/logs/stream")
+async def stream_service_logs(serviceName: str) -> StreamingResponse:
+    """Server-Sent Events stream of a service's journal, tailing live.
+
+    Runs `journalctl -u <svc> -n 200 -f -o json` and pushes each entry as a
+    `log_line` event (a LogLine: {ts, priority, message}). One-way server->client
+    push, so it rides the same /api HTTP proxy chain as the REST endpoints — no
+    websocket layer. The client appends each line and renders a timestamp column
+    plus a severity colour, so there is no polling and no wholesale re-render.
+    """
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+    # Guard the user-supplied unit name before it reaches journalctl (same gate
+    # as every other systemctl/journalctl call). Can't return a 422 body the way
+    # the REST routes do once we're a stream, so emit one error event and close.
+    if not ServiceManager.is_known_service(serviceName):
+        async def reject() -> AsyncIterator[str]:
+            payload = json.dumps({"message": f"Unknown or unmanaged service: {serviceName}"})
+            yield f"event: log_error\ndata: {payload}\n\n"
+
+        return StreamingResponse(reject(), media_type="text/event-stream", headers=headers)
+
+    async def event_stream() -> AsyncIterator[str]:
+        logger.debug(f"Log stream connected for {serviceName}")
+        # -n 200 seeds recent history so the pane isn't empty on open; -f follows;
+        # -o json is structured so the client gets timestamp + severity, not just
+        # text. limit= raises the line buffer so a long entry can't overrun it.
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", serviceName, "-n", "200", "-f", "-o", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            limit=2 ** 20,
+        )
+
+        try:
+            assert proc.stdout is not None
+            while True:
+                try:
+                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    # A quiet service writes nothing; a comment keeps the stream
+                    # (and any intermediate proxy) from timing out the connection.
+                    yield ": keepalive\n\n"
+                    continue
+
+                if not raw:
+                    break  # journalctl exited
+
+                line = parse_journal_line(raw)
+                if line is None:
+                    continue
+
+                yield f"event: log_line\ndata: {json.dumps(line.model_dump())}\n\n"
+        finally:
+            # Runs on client disconnect (the generator is closed) as well as on a
+            # normal exit, so the followed journalctl is never left orphaned.
+            logger.debug(f"Log stream disconnected for {serviceName}")
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
 
 
 @app.get("/config")
