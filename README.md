@@ -135,7 +135,7 @@ This service downloads log files from the SD card of the flight controller via M
 This service hosts a local PX4 Flight Review server on port 5006. All logloader downloaded logs are available here.
 
 **rtsp-server.service** <br>
-This service provides an RTSP server via gstreamer. The stream from the first connected CSI camera can be accessed by default at `rtsp://<hostname>.local:5600/camera1`.
+This service provides an RTSP server via gstreamer. The stream from the first connected CSI camera can be accessed by default at `rtsp://<hostname>.local:5600/camera1`. It can also be viewed in the web UI's **Video** page, which plays a browser-friendly HLS restream of the feed. This runs on demand — the camera and encoder spin up only while the Video page is open and stop shortly after you leave it — and is controlled by `enabled` under `[hls]` in the rtsp-server config (on by default; set false to disable the Video page).
 
 **polaris.service** <br>
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.

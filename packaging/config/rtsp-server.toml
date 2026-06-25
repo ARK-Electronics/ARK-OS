@@ -10,3 +10,14 @@ resolution = "1920x1080"
 resolution_options = ["320x240", "640x480", "1280x720", "1920x1080"]
 rotation = "0"
 rotation_options = ["0", "90", "180", "270"]
+
+[hls]
+# Browser-playable restream (HTTP Live Streaming) of the RTSP feed, viewable on the
+# web UI's Video page. Runs on demand: the camera and H.264 encoder spin up only while
+# someone has the Video page open and stop shortly after they leave, so an idle device
+# pays nothing. Set false to disable the Video page entirely.
+enabled = true
+# Seconds of video per segment. Smaller = lower latency, more requests.
+segment_duration = 1
+# Number of segments kept in the live playlist.
+playlist_length = 5

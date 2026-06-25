@@ -4,6 +4,7 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const morgan = require('morgan');
 const cors = require('cors');
 const http = require('http');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,6 +12,12 @@ const PORT = process.env.PORT || 3000;
 // Bind localhost: the public surface is nginx :80, which proxies /api/* here.
 // Set HOST=0.0.0.0 only if a direct, non-nginx consumer truly needs the gateway.
 const HOST = process.env.HOST || '127.0.0.1';
+
+// Viewer-presence lease for the rtsp-server HLS restream. rtsp-server polls this file's
+// mtime and runs HLS (camera + encoder) only while it is fresh, so the stream spins up
+// only while someone has the Video page open. Path must match HLS_LEASE_FILE in
+// rtsp-server (services/rtsp-server/rtsp-server/src/RtspServer.cpp).
+const HLS_LEASE_FILE = '/dev/shm/ark-rtsp-hls.lease';
 
 // Apply middleware that doesn't interfere with request body.
 // Behind nginx (which already logs requests), only surface problems here so the
@@ -92,6 +99,29 @@ app.get('/health', (req, res) => {
       system: { url: SYSTEM_SERVICE_URL }
     }
   });
+});
+
+// Video (HLS) on-demand control. The Video page heartbeats keepalive while it is open and
+// beacons stop when it closes; we translate that into the lease file rtsp-server polls, so
+// the camera streams only while someone is watching. Handled here (not proxied) because
+// rtsp-server has no HTTP surface of its own.
+app.post('/api/video/keepalive', (req, res) => {
+  try {
+    fs.writeFileSync(HLS_LEASE_FILE, String(Date.now()));
+    res.sendStatus(204);
+  } catch (err) {
+    console.error(`HLS keepalive: could not write lease ${HLS_LEASE_FILE}: ${err.message}`);
+    res.sendStatus(500);
+  }
+});
+
+app.post('/api/video/stop', (req, res) => {
+  try {
+    fs.rmSync(HLS_LEASE_FILE, { force: true });
+  } catch (err) {
+    console.error(`HLS stop: could not remove lease ${HLS_LEASE_FILE}: ${err.message}`);
+  }
+  res.sendStatus(204);
 });
 
 // Fallback route for API requests when services are down

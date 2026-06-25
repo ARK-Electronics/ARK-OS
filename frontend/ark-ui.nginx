@@ -38,4 +38,18 @@ server {
         sub_filter_once off;
 
     }
+
+    # RTSP-server HLS output. rtsp-server writes the playlist + segments to this
+    # tmpfs dir when [hls] is enabled; serve them straight from disk. The playlist
+    # must never be cached or clients get stuck at a stale live edge. A missing
+    # playlist (HLS disabled / still starting) returns 404, which the Video page
+    # handles by retrying.
+    location /video/hls/ {
+        alias /dev/shm/ark-rtsp-hls/;
+        types {
+            application/vnd.apple.mpegurl m3u8;
+            video/mp2t ts;
+        }
+        add_header Cache-Control no-cache always;
+    }
 }
