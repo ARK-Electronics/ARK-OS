@@ -1,0 +1,15 @@
+[Unit]
+Description=go2rtc WebRTC gateway
+Wants=network.target
+After=network-online.target rtsp-server.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+ExecStart=/usr/lib/ark-os/bin/go2rtc -config /etc/ark-os/go2rtc.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

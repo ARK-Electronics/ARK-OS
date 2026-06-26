@@ -13,11 +13,11 @@
           playsinline
         ></video>
 
-        <!-- Live viewer chrome: only a LIVE badge + fullscreen. No seek bar: this is a
-             live stream, not a scrubbable recording. -->
+        <!-- Live viewer chrome: a LIVE badge + fullscreen. No seek bar — this is a live
+             WebRTC stream, not a scrubbable recording, and it always shows the latest frame. -->
         <div v-if="status === 'playing'" class="live-chrome">
-          <span class="live-badge" :class="{ behind: behindLive }" @click="jumpToLive">
-            <span class="live-dot"></span>{{ behindLive ? 'GO LIVE' : 'LIVE' }}
+          <span class="live-badge">
+            <span class="live-dot"></span>LIVE
           </span>
           <button class="icon-btn" title="Fullscreen" @click="toggleFullscreen">
             <i class="fas fa-expand"></i>
@@ -30,11 +30,9 @@
             <p class="overlay-title">Waiting for the camera&hellip;</p>
             <p class="overlay-text">
               The stream starts on demand and should appear within a few seconds. If it
-              doesn't, make sure a camera is connected and that <code>enabled = true</code>
-              under <code>[hls]</code> in the <strong>rtsp-server</strong> config on the
-              <router-link to="/services-page">Services</router-link> page.
+              doesn't, make sure a camera is connected.
             </p>
-            <p class="overlay-hint">Watching for the stream&hellip;</p>
+            <p class="overlay-hint">Reconnecting&hellip;</p>
           </template>
 
           <template v-else-if="status === 'error'">
@@ -55,24 +53,17 @@
 </template>
 
 <script>
-import Hls from 'hls.js';
-
-// Served by nginx straight from the rtsp-server tmpfs output dir.
-const STREAM_URL = '/video/hls/stream.m3u8';
-// How long to wait before re-probing when the playlist isn't up yet.
-const RETRY_MS = 4000;
-// How often to nudge playback back to the live edge.
-const SYNC_MS = 2000;
-// Seek to the live edge once we've drifted more than this far behind it (seconds).
-// Big enough not to fight normal jitter; small enough that a stall can't leave us
-// minutes behind, which is the whole "doesn't play the latest frame" complaint.
-const MAX_DRIFT_S = 5;
-
-// While the page is open we heartbeat the gateway, which keeps a lease fresh so
-// rtsp-server runs the camera + HLS restream only while someone is watching.
-const KEEPALIVE_URL = '/api/video/keepalive';
-const STOP_URL = '/api/video/stop';
-const KEEPALIVE_MS = 3000;
+// go2rtc restreams the camera to the browser over WebRTC. We negotiate with its WHEP
+// endpoint (nginx proxies /video/ to go2rtc): POST our SDP offer, get an SDP answer.
+// Media then flows directly from the device — playback is ~sub-second and there is no
+// buffer to drift, so no live-edge tracking is needed.
+const WHEP_URL = '/video/api/webrtc?src=camera1';
+// go2rtc opens the camera only while a client is connected, so the stream can take ~1s
+// to appear after the page opens (camera + encoder spin up). Retry until it's up.
+const RETRY_MS = 3000;
+// Cap ICE gathering so a slow candidate can't hang the offer; LAN host candidates
+// resolve well within this.
+const ICE_GATHER_MS = 1500;
 
 export default {
   name: 'VideoPage',
@@ -80,154 +71,120 @@ export default {
     return {
       status: 'connecting', // connecting | playing | offline | error
       errorText: '',
-      behindLive: false,
-      hls: null,
-      retryTimer: null,
-      syncTimer: null,
-      keepaliveTimer: null
+      pc: null,
+      retryTimer: null
     };
   },
   mounted() {
-    // Only stream while the page is actually visible. Starting here rather than on a
-    // hidden/background tab is what makes the camera run "only when on the page".
+    // Only stream while the page is actually visible: hiding the tab tears the peer
+    // connection down, which drops go2rtc's last consumer and releases the camera, so it
+    // runs only while someone is watching.
     document.addEventListener('visibilitychange', this.onVisibility);
-    window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('pagehide', this.teardown);
     if (!document.hidden) {
-      this.startViewing();
+      this.start();
     }
   },
   beforeUnmount() {
     document.removeEventListener('visibilitychange', this.onVisibility);
-    window.removeEventListener('pagehide', this.onPageHide);
-    this.stopViewing();
+    window.removeEventListener('pagehide', this.teardown);
+    this.teardown();
   },
   methods: {
-    start() {
+    async start() {
       this.teardown();
       this.status = 'connecting';
 
       const video = this.$refs.video;
       if (!video) return;
 
-      if (Hls.isSupported()) {
-        // Tuned for a live monitor: stay near the live edge, keep no back-buffer (so
-        // there's nothing to scrub back through), and drive reconnect ourselves since
-        // the playlist may 404 until the first segment lands.
-        const hls = new Hls({
-          lowLatencyMode: true,
-          liveSyncDurationCount: 3,
-          liveMaxLatencyDurationCount: 10,
-          liveDurationInfinity: true,
-          backBufferLength: 0,
-          maxLiveSyncPlaybackRate: 1.5,
-          manifestLoadingMaxRetry: 0,
-          levelLoadingMaxRetry: 2
-        });
-        this.hls = hls;
+      let pc;
+      try {
+        pc = new RTCPeerConnection();
+      } catch (err) {
+        this.fail('This browser cannot play WebRTC video.');
+        return;
+      }
+      this.pc = pc;
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      // Receive-only: we play the camera, we don't send anything.
+      pc.addTransceiver('video', { direction: 'recvonly' });
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          video.srcObject = event.streams[0];
           video.play().catch(() => {});
-        });
-        // A playlist carrying #EXT-X-ENDLIST is a leftover VOD playlist from a previous
-        // session (the restream stopped and finalized it). Playing it would start at
-        // segment 0 with a full scrub bar — exactly the "not live" behavior. Treat it as
-        // "not up yet" and retry until the fresh live playlist appears.
-        hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
-          if (data.details && data.details.live === false) {
-            this.goOffline();
-          }
-        });
-        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (this.pc !== pc) return;
+        switch (pc.connectionState) {
+        case 'connected':
           this.status = 'playing';
-          this.syncToLive();
+          break;
+        case 'failed':
+        case 'disconnected':
+        case 'closed':
+          // Lost the stream (camera unplugged, go2rtc restarted). Drop back to the retry
+          // loop, which re-negotiates once it's available again.
+          this.goOffline();
+          break;
+        }
+      };
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        // go2rtc's WHEP answer is non-trickle, so send a complete offer.
+        await this.waitForIceGathering(pc);
+        if (this.pc !== pc) return; // teardown raced the await
+
+        const resp = await fetch(WHEP_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: pc.localDescription.sdp
         });
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (!data.fatal) return;
 
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Most often the playlist 404s because HLS is disabled or the stream
-              // hasn't produced its first segment yet.
-              this.goOffline();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              this.fail('Could not play the video stream.');
-          }
-        });
+        // 404/5xx means go2rtc has no stream yet (camera still starting, or source
+        // down). Treat it as "not up" and retry.
+        if (!resp.ok) {
+          this.goOffline();
+          return;
+        }
 
-        hls.loadSource(STREAM_URL);
-        hls.attachMedia(video);
-
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari / iOS play HLS natively; no hls.js needed.
-        video.src = STREAM_URL;
-        video.addEventListener('loadeddata', this.onNativeLoaded, { once: true });
-        video.addEventListener('error', this.onNativeError, { once: true });
-        video.play().catch(() => {});
-
-      } else {
-        this.fail('This browser cannot play HLS video.');
-      }
-
-      this.startSync();
-    },
-
-    onNativeLoaded() {
-      this.status = 'playing';
-    },
-    onNativeError() {
-      this.goOffline();
-    },
-
-    // --- live-edge tracking: keep playback pinned to the latest frame ---
-
-    startSync() {
-      if (this.syncTimer) return;
-      this.syncTimer = setInterval(this.syncToLive, SYNC_MS);
-    },
-    stopSync() {
-      if (this.syncTimer) {
-        clearInterval(this.syncTimer);
-        this.syncTimer = null;
+        const text = await resp.text();
+        if (this.pc !== pc) return;
+        // go2rtc's WHEP endpoint answers with raw SDP (application/sdp); tolerate a
+        // JSON { type, sdp } body too, in case the API shape differs by version.
+        let answerSdp = text;
+        if (text.trimStart().startsWith('{')) {
+          try { answerSdp = JSON.parse(text).sdp; } catch (e) { /* keep raw text */ }
+        }
+        await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      } catch (err) {
+        this.goOffline();
       }
     },
-    // The live edge is hls.liveSyncPosition for hls.js, or the end of the seekable
-    // range for native playback. If we've fallen too far behind (a stall, a hidden
-    // tab, the encoder hiccuping), jump forward so the viewer sees "now".
-    syncToLive() {
-      const video = this.$refs.video;
-      if (!video || this.status !== 'playing') return;
 
-      let liveEdge = null;
-      if (this.hls && this.hls.liveSyncPosition != null && isFinite(this.hls.liveSyncPosition)) {
-        liveEdge = this.hls.liveSyncPosition;
-      } else if (video.seekable.length) {
-        liveEdge = video.seekable.end(video.seekable.length - 1);
-      }
-      if (liveEdge == null) return;
-
-      const drift = liveEdge - video.currentTime;
-      this.behindLive = drift > MAX_DRIFT_S;
-      if (this.behindLive) {
-        video.currentTime = liveEdge;
-      }
-      if (video.paused) {
-        video.play().catch(() => {});
-      }
-    },
-    jumpToLive() {
-      const video = this.$refs.video;
-      if (!video) return;
-      if (this.hls && this.hls.liveSyncPosition != null && isFinite(this.hls.liveSyncPosition)) {
-        video.currentTime = this.hls.liveSyncPosition;
-      } else if (video.seekable.length) {
-        video.currentTime = video.seekable.end(video.seekable.length - 1);
-      }
-      video.play().catch(() => {});
-      this.behindLive = false;
+    // Resolve once ICE gathering completes, or after ICE_GATHER_MS so a stalled
+    // candidate can't block the offer forever.
+    waitForIceGathering(pc) {
+      if (pc.iceGatheringState === 'complete') return Promise.resolve();
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          pc.removeEventListener('icegatheringstatechange', onChange);
+          resolve();
+        };
+        const onChange = () => {
+          if (pc.iceGatheringState === 'complete') finish();
+        };
+        pc.addEventListener('icegatheringstatechange', onChange);
+        setTimeout(finish, ICE_GATHER_MS);
+      });
     },
 
     toggleFullscreen() {
@@ -252,74 +209,29 @@ export default {
     },
 
     teardown() {
-      this.stopSync();
-      this.behindLive = false;
       if (this.retryTimer) {
         clearTimeout(this.retryTimer);
         this.retryTimer = null;
       }
-      if (this.hls) {
-        this.hls.destroy();
-        this.hls = null;
+      if (this.pc) {
+        this.pc.ontrack = null;
+        this.pc.onconnectionstatechange = null;
+        this.pc.close();
+        this.pc = null;
       }
       const video = this.$refs.video;
       if (video) {
-        video.removeEventListener('loadeddata', this.onNativeLoaded);
-        video.removeEventListener('error', this.onNativeError);
-        video.removeAttribute('src');
-        video.load();
-      }
-    },
-
-    // --- viewer presence: keep the camera/HLS running only while this page is open ---
-
-    startViewing() {
-      this.startKeepalive();
-      this.start();
-    },
-    // Hidden tab, in-app navigation, or close: release the stream and stop playback so
-    // the camera isn't held open for a page nobody is looking at.
-    stopViewing() {
-      this.stopKeepalive();
-      this.sendStop();
-      this.teardown();
-      this.status = 'connecting';
-    },
-
-    startKeepalive() {
-      if (this.keepaliveTimer) return;
-      this.sendKeepalive();
-      this.keepaliveTimer = setInterval(this.sendKeepalive, KEEPALIVE_MS);
-    },
-    stopKeepalive() {
-      if (this.keepaliveTimer) {
-        clearInterval(this.keepaliveTimer);
-        this.keepaliveTimer = null;
-      }
-    },
-    sendKeepalive() {
-      // rtsp-server brings HLS up within ~1s of the first beat; the retry loop above
-      // then picks up the stream once the first segments appear.
-      fetch(KEEPALIVE_URL, { method: 'POST' }).catch(() => {});
-    },
-    sendStop() {
-      // sendBeacon still delivers during page unload, where a fetch would be cancelled.
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(STOP_URL);
-      } else {
-        fetch(STOP_URL, { method: 'POST', keepalive: true }).catch(() => {});
+        video.srcObject = null;
       }
     },
 
     onVisibility() {
       if (document.hidden) {
-        this.stopViewing();
+        this.teardown();
+        this.status = 'connecting';
       } else {
-        this.startViewing();
+        this.start();
       }
-    },
-    onPageHide() {
-      this.stopViewing();
     }
   }
 };
@@ -405,7 +317,6 @@ export default {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.06em;
-  pointer-events: auto;
   user-select: none;
 }
 
@@ -414,16 +325,6 @@ export default {
   height: 9px;
   border-radius: 50%;
   background-color: var(--ark-color-red);
-}
-
-/* When behind, the badge becomes a "GO LIVE" button. */
-.live-badge.behind {
-  cursor: pointer;
-  background-color: rgba(0, 0, 0, 0.75);
-}
-
-.live-badge.behind .live-dot {
-  background-color: var(--ark-color-grey);
 }
 
 .icon-btn {
@@ -479,23 +380,6 @@ export default {
   margin-top: 12px;
   font-size: 0.9rem;
   opacity: 0.7;
-}
-
-.overlay-text code {
-  background-color: rgba(255, 255, 255, 0.15);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: monospace;
-}
-
-.overlay-text a {
-  color: var(--ark-color-green);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.overlay-text a:hover {
-  text-decoration: underline;
 }
 
 .retry-btn {

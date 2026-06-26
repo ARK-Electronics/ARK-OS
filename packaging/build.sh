@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # the CI workflow). Source it, then export the pins the helper scripts consume.
 # shellcheck source=packaging/versions.env
 source "$SCRIPT_DIR/versions.env"
-export NODE_VERSION MAVSDK_VERSION
+export NODE_VERSION MAVSDK_VERSION GO2RTC_VERSION GO2RTC_SHA256
 
 # --- Parse args ---
 PLATFORM="${1:-}"

@@ -14,9 +14,9 @@ Merge rule (see overlay()): template structure wins, user scalar/list values win
 user-added *sub-tables* (e.g. extra mavlink-router [UdpEndpoint ...] sections) are kept —
 only user-only *scalars* are pruned, since those are the removed schema fields.
 
-.toml is handled by the `toml` lib; .ini/.conf by configparser (case-preserving, no
-interpolation). Best-effort per file: a parse error seeds the template and logs a warning
-rather than aborting the upgrade. Exit status is always 0.
+.toml is handled by the `toml` lib, .yaml/.yml by PyYAML; .ini/.conf by configparser
+(case-preserving, no interpolation). Best-effort per file: a parse error seeds the
+template and logs a warning rather than aborting the upgrade. Exit status is always 0.
 """
 import sys
 import os
@@ -28,6 +28,11 @@ try:
 except Exception:
     toml = None
 
+try:
+    import yaml
+except Exception:
+    yaml = None
+
 
 def _ini_parser() -> configparser.ConfigParser:
     # optionxform=str: mavlink-router keys are CamelCase (TcpServerPort, FlowControl).
@@ -38,11 +43,16 @@ def _ini_parser() -> configparser.ConfigParser:
 
 
 def load(path: str):
-    """Return (kind, data) where data is a nested dict; kind in {'toml','ini'}."""
+    """Return (kind, data) where data is a nested dict; kind in {'toml','yaml','ini'}."""
     if path.endswith('.toml'):
         if toml is None:
             raise RuntimeError('toml library unavailable')
         return 'toml', toml.load(path)
+    if path.endswith(('.yaml', '.yml')):
+        if yaml is None:
+            raise RuntimeError('yaml library unavailable')
+        with open(path) as f:
+            return 'yaml', yaml.safe_load(f) or {}
     p = _ini_parser()
     p.read(path)
     return 'ini', {s: dict(p[s]) for s in p.sections()}
@@ -73,6 +83,9 @@ def dump(kind: str, data: dict, path: str) -> None:
     if kind == 'toml':
         with open(tmp, 'w') as f:
             toml.dump(data, f)
+    elif kind == 'yaml':
+        with open(tmp, 'w') as f:
+            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
     else:
         p = _ini_parser()
         for section, kv in data.items():

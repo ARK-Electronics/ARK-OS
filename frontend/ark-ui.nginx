@@ -10,6 +10,15 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Never cache the SPA shell. Vue's JS/CSS are content-hashed so they bust
+    # themselves, but a cached index.html keeps serving an old bundle after an upgrade
+    # — the "fix shipped but the UI still looks old" trap. try_files above falls back
+    # here for client routes, so this also covers deep links.
+    location = /index.html {
+        root /var/www/ark-ui/html;
+        add_header Cache-Control "no-cache" always;
+    }
+
     # API Gateway - all API traffic goes to Express server
     location /api/ {
         proxy_pass http://localhost:3000;
@@ -39,17 +48,16 @@ server {
 
     }
 
-    # RTSP-server HLS output. rtsp-server writes the playlist + segments to this
-    # tmpfs dir when [hls] is enabled; serve them straight from disk. The playlist
-    # must never be cached or clients get stuck at a stale live edge. A missing
-    # playlist (HLS disabled / still starting) returns 404, which the Video page
-    # handles by retrying.
-    location /video/hls/ {
-        alias /dev/shm/ark-rtsp-hls/;
-        types {
-            application/vnd.apple.mpegurl m3u8;
-            video/mp2t ts;
-        }
-        add_header Cache-Control no-cache always;
+    # Video page -> go2rtc. go2rtc's API/signaling (including the WHEP endpoint at
+    # /video/api/webrtc) is localhost-only; proxy it here. WebRTC *media* does not pass
+    # through nginx — it flows directly between the browser and this device over UDP/TCP
+    # 8555 (see /etc/ark-os/go2rtc.yaml). The Upgrade headers also let go2rtc's
+    # WebSocket API work through this path.
+    location /video/ {
+        proxy_pass http://127.0.0.1:1984/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
     }
 }

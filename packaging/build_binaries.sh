@@ -216,6 +216,26 @@ for must in "lib/$mavsdk_soname" lib/libmavsdk.so lib/cmake/MAVSDK/MAVSDKConfig.
         || { echo "ERROR: staged MAVSDK SDK is missing $must" >&2; exit 1; }
 done
 
+# --- go2rtc: prebuilt WebRTC/RTSP gateway (single static Go binary, no apt repo) ---
+# The web UI's Video page plays the camera over WebRTC; go2rtc restreams rtsp-server's
+# H.264 RTSP feed to the browser and dials it only while someone is watching, so the
+# camera runs on demand. Pin + verify the upstream release binary (link == ship), same
+# rationale as the bundled MAVSDK above.
+echo "==> go2rtc ($GO2RTC_VERSION)"
+GO2RTC_ASSET="go2rtc_linux_arm64"
+GO2RTC_CACHE="$REPO_ROOT/build/${GO2RTC_ASSET}-${GO2RTC_VERSION}"
+if [ ! -f "$GO2RTC_CACHE" ]; then
+    echo "    downloading $GO2RTC_ASSET"
+    curl -fsSL -o "$GO2RTC_CACHE.partial" \
+        "https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/${GO2RTC_ASSET}"
+    mv "$GO2RTC_CACHE.partial" "$GO2RTC_CACHE"
+fi
+# Verify on every build, not just on download: a corrupted cache or a tampered release
+# must fail the build rather than ship a bad binary we run as a service.
+echo "${GO2RTC_SHA256}  ${GO2RTC_CACHE}" | sha256sum -c - \
+    || { echo "ERROR: go2rtc checksum mismatch — GO2RTC_SHA256 in versions.env does not match $GO2RTC_ASSET $GO2RTC_VERSION" >&2; exit 1; }
+install -m 0755 "$GO2RTC_CACHE" "$BIN_DIR/go2rtc"
+
 echo "==> binaries staged in $BIN_DIR:"
 ls -1 "$BIN_DIR"
 echo "==> libraries bundled in $LIB_DIR:"

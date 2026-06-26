@@ -1,0 +1,26 @@
+# go2rtc restreams the camera (rtsp-server's RTSP feed) to the web UI's Video page over
+# WebRTC. The API is localhost-only and nginx proxies /video/ to it; WebRTC media flows
+# directly from the browser to this device on port 8555 (the one network port the Video
+# page needs), not through nginx.
+
+# Localhost only: nginx (:80) proxies /video/ here. Binding 0.0.0.0 would expose the API
+# and the stream listing on the LAN.
+api:
+  listen: "127.0.0.1:1984"
+
+# WebRTC media transport. 8555 (UDP + TCP) must be reachable from the browser. candidates
+# is left empty so go2rtc auto-detects this device's interface IPs (USB/LAN) as ICE host
+# candidates; on a directly-reached device no STUN/TURN is needed. If auto-detection ever
+# misses the address the browser uses, pin it, e.g.  candidates: ["192.168.55.1:8555"].
+webrtc:
+  listen: "0.0.0.0:8555"
+  candidates: []
+
+# camera1 matches rtsp-server's [rtsp] url. go2rtc connects lazily — it opens this RTSP
+# source only while a browser is watching, which is what makes the camera run on demand
+# (rtsp-server's shared media starts on the first client and stops when the last leaves).
+streams:
+  camera1: rtsp://127.0.0.1:5600/camera1
+
+log:
+  level: info
