@@ -60,6 +60,7 @@ check_fan() {
                             echo "Fan set to 100% PWM (255)"
                         else
                             echo "Failed to set fan to 100% - insufficient privileges"
+                            FAIL_REASON="cannot set pwm (privileges)"
                             fan_status=1
                             return $fan_status
                         fi
@@ -71,6 +72,7 @@ check_fan() {
                             # Critical check: RPM must be > 0 for fan to be considered working
                             if [ "$rpm_value" -eq 0 ]; then
                                 echo "CRITICAL FAILURE: Fan RPM is 0 at 100% speed - Fan may be unplugged or broken!"
+                                FAIL_REASON="rpm 0 at full speed"
                                 fan_status=1
                                 return $fan_status
                             elif [ "$rpm_value" -lt 500 ]; then
@@ -78,11 +80,13 @@ check_fan() {
                             fi
                         else
                             echo "FAILURE: Cannot read RPM sensor"
+                            FAIL_REASON="cannot read rpm sensor"
                             fan_status=1
                             return $fan_status
                         fi
                     else
                         echo "FAILURE: RPM sensor not found"
+                        FAIL_REASON="no rpm sensor"
                         fan_status=1
                         return $fan_status
                     fi
@@ -119,6 +123,7 @@ check_fan() {
                                     # Critical check: RPM must always be > 0 during operation
                                     if [ "$current_rpm" -eq 0 ]; then
                                         echo "✗ CRITICAL FAILURE: RPM dropped to 0 - Fan disconnected or failed!"
+                                        FAIL_REASON="rpm dropped to 0 during ramp"
                                         fan_status=1
                                         break
                                     fi
@@ -174,6 +179,7 @@ check_fan() {
                                     # Critical check: RPM must always be > 0 during operation
                                     if [ "$current_rpm" -eq 0 ]; then
                                         echo "✗ CRITICAL FAILURE: RPM dropped to 0 - Fan disconnected or failed!"
+                                        FAIL_REASON="rpm dropped to 0 during ramp"
                                         fan_status=1
                                         break
                                     fi
@@ -200,6 +206,7 @@ check_fan() {
                                         echo "Maximum speed test WARNING - Fan RPM is $current_rpm (may be thermally limited)"
                                     else
                                         echo "Maximum speed test FAILED - Fan RPM is 0, fan disconnected!"
+                                        FAIL_REASON="rpm 0 at full speed"
                                         fan_status=1
                                     fi
                                 fi
@@ -239,24 +246,34 @@ check_fan() {
                     fi
                 else
                     echo "Fan check FAILED - Invalid PWM value: $pwm_value"
+                    FAIL_REASON="invalid pwm value"
                     fan_status=1
                 fi
             else
                 echo "Fan check FAILED - PWM control file not found"
+                FAIL_REASON="no pwm1 control"
                 fan_status=1
             fi
         else
             echo "Fan check FAILED - hwmon directory not found"
+            FAIL_REASON="no hwmon device"
             fan_status=1
         fi
     else
         echo "Fan check FAILED - PWM fan device not found"
+        FAIL_REASON="no pwm-fan device"
         fan_status=1
     fi
     
     return $fan_status
 }
 
-# Run the fan check
+# Run the fan check and emit a single parseable result line for the bench test to read.
 check_fan
-exit $?
+result=$?
+if [ "$result" -eq 0 ]; then
+    echo "fan: OK"
+else
+    echo "fan: FAILED: ${FAIL_REASON:-check failed}"
+fi
+exit $result
