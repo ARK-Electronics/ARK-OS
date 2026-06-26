@@ -94,6 +94,11 @@ html, body {
 
 #app {
   display: flex;
+  /* Pin to the viewport width. Without this the flex container shrink-wraps to its
+     content, which collapses any page whose content has no intrinsic width — the Video
+     page (the video is position:absolute, so the frame's only in-flow sibling is the
+     short "Video" title) renders as a thin strip the width of that title. */
+  width: 100%;
   font-family: 'Roboto', sans-serif;
   color: var(--ark-color-black); /* Should be your black color */
   background-color: var(--ark-color-white); /* Your specified white color */
