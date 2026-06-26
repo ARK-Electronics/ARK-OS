@@ -3,16 +3,26 @@
     <h1 class="page-title">Video</h1>
 
     <div class="video-card">
-      <div class="video-frame">
+      <div ref="frame" class="video-frame">
         <video
           ref="video"
           class="video-el"
           :class="{ hidden: status !== 'playing' }"
-          controls
           autoplay
           muted
           playsinline
         ></video>
+
+        <!-- Live viewer chrome: only a LIVE badge + fullscreen. No seek bar: this is a
+             live stream, not a scrubbable recording. -->
+        <div v-if="status === 'playing'" class="live-chrome">
+          <span class="live-badge" :class="{ behind: behindLive }" @click="jumpToLive">
+            <span class="live-dot"></span>{{ behindLive ? 'GO LIVE' : 'LIVE' }}
+          </span>
+          <button class="icon-btn" title="Fullscreen" @click="toggleFullscreen">
+            <i class="fas fa-expand"></i>
+          </button>
+        </div>
 
         <div v-if="status !== 'playing'" class="overlay">
           <template v-if="status === 'offline'">
@@ -51,6 +61,12 @@ import Hls from 'hls.js';
 const STREAM_URL = '/video/hls/stream.m3u8';
 // How long to wait before re-probing when the playlist isn't up yet.
 const RETRY_MS = 4000;
+// How often to nudge playback back to the live edge.
+const SYNC_MS = 2000;
+// Seek to the live edge once we've drifted more than this far behind it (seconds).
+// Big enough not to fight normal jitter; small enough that a stall can't leave us
+// minutes behind, which is the whole "doesn't play the latest frame" complaint.
+const MAX_DRIFT_S = 5;
 
 // While the page is open we heartbeat the gateway, which keeps a lease fresh so
 // rtsp-server runs the camera + HLS restream only while someone is watching.
@@ -64,8 +80,10 @@ export default {
     return {
       status: 'connecting', // connecting | playing | offline | error
       errorText: '',
+      behindLive: false,
       hls: null,
       retryTimer: null,
+      syncTimer: null,
       keepaliveTimer: null
     };
   },
@@ -92,11 +110,16 @@ export default {
       if (!video) return;
 
       if (Hls.isSupported()) {
-        // We drive reconnect ourselves (the playlist may not exist yet), so disable
-        // hls.js's own manifest retry and treat a fatal network error as "offline".
+        // Tuned for a live monitor: stay near the live edge, keep no back-buffer (so
+        // there's nothing to scrub back through), and drive reconnect ourselves since
+        // the playlist may 404 until the first segment lands.
         const hls = new Hls({
           lowLatencyMode: true,
-          liveSyncDurationCount: 2,
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: 10,
+          liveDurationInfinity: true,
+          backBufferLength: 0,
+          maxLiveSyncPlaybackRate: 1.5,
           manifestLoadingMaxRetry: 0,
           levelLoadingMaxRetry: 2
         });
@@ -105,8 +128,18 @@ export default {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().catch(() => {});
         });
+        // A playlist carrying #EXT-X-ENDLIST is a leftover VOD playlist from a previous
+        // session (the restream stopped and finalized it). Playing it would start at
+        // segment 0 with a full scrub bar — exactly the "not live" behavior. Treat it as
+        // "not up yet" and retry until the fresh live playlist appears.
+        hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+          if (data.details && data.details.live === false) {
+            this.goOffline();
+          }
+        });
         hls.on(Hls.Events.FRAG_BUFFERED, () => {
           this.status = 'playing';
+          this.syncToLive();
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
           if (!data.fatal) return;
@@ -138,6 +171,8 @@ export default {
       } else {
         this.fail('This browser cannot play HLS video.');
       }
+
+      this.startSync();
     },
 
     onNativeLoaded() {
@@ -145,6 +180,64 @@ export default {
     },
     onNativeError() {
       this.goOffline();
+    },
+
+    // --- live-edge tracking: keep playback pinned to the latest frame ---
+
+    startSync() {
+      if (this.syncTimer) return;
+      this.syncTimer = setInterval(this.syncToLive, SYNC_MS);
+    },
+    stopSync() {
+      if (this.syncTimer) {
+        clearInterval(this.syncTimer);
+        this.syncTimer = null;
+      }
+    },
+    // The live edge is hls.liveSyncPosition for hls.js, or the end of the seekable
+    // range for native playback. If we've fallen too far behind (a stall, a hidden
+    // tab, the encoder hiccuping), jump forward so the viewer sees "now".
+    syncToLive() {
+      const video = this.$refs.video;
+      if (!video || this.status !== 'playing') return;
+
+      let liveEdge = null;
+      if (this.hls && this.hls.liveSyncPosition != null && isFinite(this.hls.liveSyncPosition)) {
+        liveEdge = this.hls.liveSyncPosition;
+      } else if (video.seekable.length) {
+        liveEdge = video.seekable.end(video.seekable.length - 1);
+      }
+      if (liveEdge == null) return;
+
+      const drift = liveEdge - video.currentTime;
+      this.behindLive = drift > MAX_DRIFT_S;
+      if (this.behindLive) {
+        video.currentTime = liveEdge;
+      }
+      if (video.paused) {
+        video.play().catch(() => {});
+      }
+    },
+    jumpToLive() {
+      const video = this.$refs.video;
+      if (!video) return;
+      if (this.hls && this.hls.liveSyncPosition != null && isFinite(this.hls.liveSyncPosition)) {
+        video.currentTime = this.hls.liveSyncPosition;
+      } else if (video.seekable.length) {
+        video.currentTime = video.seekable.end(video.seekable.length - 1);
+      }
+      video.play().catch(() => {});
+      this.behindLive = false;
+    },
+
+    toggleFullscreen() {
+      const frame = this.$refs.frame;
+      if (!frame) return;
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        frame.requestFullscreen().catch(() => {});
+      }
     },
 
     goOffline() {
@@ -159,6 +252,8 @@ export default {
     },
 
     teardown() {
+      this.stopSync();
+      this.behindLive = false;
       if (this.retryTimer) {
         clearTimeout(this.retryTimer);
         this.retryTimer = null;
@@ -231,36 +326,43 @@ export default {
 </script>
 
 <style scoped>
+/* Fill the viewport so the live view is as large as it can be without ever pushing a
+   page scrollbar: the title takes its natural height, the video frame takes the rest. */
 .page-container {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 1400px;
+  max-width: 1600px;
+  height: 100vh;
   margin: 0 auto;
-  padding: 20px;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
 }
 
 .page-title {
+  flex: 0 0 auto;
   font-size: 2rem;
   font-weight: 600;
   color: var(--ark-color-black);
-  margin: 0;
+  margin: 0 0 16px;
   text-align: center;
 }
 
 .video-card {
-  margin-top: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
   background-color: var(--ark-color-white);
   border-radius: 8px;
   box-shadow: 0 2px 10px var(--ark-color-black-shadow);
   overflow: hidden;
 }
 
-/* 16:9 responsive frame */
 .video-frame {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
-  padding-top: 56.25%;
   background-color: #000;
 }
 
@@ -280,6 +382,68 @@ export default {
 
 .video-el.hidden {
   visibility: hidden;
+}
+
+/* --- live chrome --- */
+.live-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.live-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: var(--ark-color-white);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: var(--ark-color-red);
+}
+
+/* When behind, the badge becomes a "GO LIVE" button. */
+.live-badge.behind {
+  cursor: pointer;
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+.live-badge.behind .live-dot {
+  background-color: var(--ark-color-grey);
+}
+
+.icon-btn {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: var(--ark-color-white);
+  font-size: 1rem;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color 0.1s ease-in-out;
+}
+
+.icon-btn:hover {
+  background-color: rgba(0, 0, 0, 0.8);
 }
 
 .overlay {

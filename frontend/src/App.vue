@@ -69,6 +69,12 @@ export default {
 </script>
 
 <style>
+/* No default UA margin: pages size themselves against the viewport (the Video page
+   fills 100vh), and the fixed sidebar already sits flush in the corner. */
+html, body {
+  margin: 0;
+}
+
 :root {
   --ark-color-black: rgba(0, 0, 0, 0.65);
   --ark-color-black-bold: rgba(0, 0, 0, 1);
