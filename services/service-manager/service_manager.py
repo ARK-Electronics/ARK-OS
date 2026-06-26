@@ -425,7 +425,7 @@ def disable_service(serviceName: str) -> ActionResponse:
 async def stream_service_logs(serviceName: str) -> StreamingResponse:
     """Server-Sent Events stream of a service's journal, tailing live.
 
-    Runs `journalctl -u <svc> -n 200 -f -o json` and pushes each entry as a
+    Runs `journalctl -u <svc> -b 0 -n 200 -f -o json` and pushes each entry as a
     `log_line` event (a LogLine: {ts, priority, message}). One-way server->client
     push, so it rides the same /api HTTP proxy chain as the REST endpoints — no
     websocket layer. The client appends each line and renders a timestamp column
@@ -445,11 +445,13 @@ async def stream_service_logs(serviceName: str) -> StreamingResponse:
 
     async def event_stream() -> AsyncIterator[str]:
         logger.debug(f"Log stream connected for {serviceName}")
-        # -n 200 seeds recent history so the pane isn't empty on open; -f follows;
-        # -o json is structured so the client gets timestamp + severity, not just
-        # text. limit= raises the line buffer so a long entry can't overrun it.
+        # -b 0 scopes to the current boot, like `systemctl status` does. With no
+        # NTP/RTC the wall clock restarts at the same value every boot, so without it
+        # journalctl interleaves prior boots into the tail by timestamp and the pane
+        # mixes old runs with the live one. -n 200 seeds history; -f follows; -o json
+        # carries ts+severity; limit= keeps one long line from overrunning the buffer.
         proc = await asyncio.create_subprocess_exec(
-            "journalctl", "-u", serviceName, "-n", "200", "-f", "-o", "json",
+            "journalctl", "-u", serviceName, "-b", "0", "-n", "200", "-f", "-o", "json",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             limit=2 ** 20,

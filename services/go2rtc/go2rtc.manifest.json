@@ -1,0 +1,5 @@
+{
+  "displayName": "Video Gateway (go2rtc)",
+  "description": "WebRTC gateway that streams the camera to the web UI's Video page.",
+  "visible": true
+}
