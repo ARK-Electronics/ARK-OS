@@ -1,0 +1,33 @@
+name: ark-os-test
+
+services:
+  # The userspace stack in one container (managers + gateway + nginx + fake FC), built
+  # from the repo. Browse the UI at http://localhost:8080.
+  arkos:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    image: ark-os-test:latest
+    init: true
+    depends_on:
+      - go2rtc
+    ports:
+      - "8080:80"
+    volumes:
+      # Manifests drive the Services page; configs are editable from it. Mounted (not
+      # baked) so you can tweak them without rebuilding.
+      - ./manifests:/usr/lib/ark-os/manifests:ro
+      - ./configs/mavlink-router.conf:/etc/ark-os/mavlink-router.conf
+      # Same file the go2rtc sidecar reads — editing it in the UI affects the real stream.
+      - ./go2rtc.test.yaml:/etc/ark-os/go2rtc.yaml
+
+  # Synthetic camera. The official image bundles ffmpeg, so the test pattern source in
+  # go2rtc.test.yaml works with no /dev/video* device.
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    volumes:
+      - ./go2rtc.test.yaml:/config/go2rtc.yaml
+    ports:
+      # WebRTC media flows browser<->here directly; must be reachable from the host.
+      - "8555:8555/tcp"
+      - "8555:8555/udp"

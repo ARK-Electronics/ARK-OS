@@ -1,0 +1,25 @@
+# go2rtc config for the LOCAL TEST HARNESS (no camera).
+#
+# camera1 is a synthetic ffmpeg test pattern instead of rtsp-server's real RTSP feed,
+# so the Video page streams without any /dev/video* device. Swap it for a file loop to
+# see "real" footage, e.g.:
+#   camera1: "ffmpeg:/media/sample.mp4#video=h264#input=-stream_loop -1 -re"
+streams:
+  camera1: "ffmpeg:virtual?video=testsrc&size=1280x720#video=h264"
+
+# Bound to 0.0.0.0 (not 127.0.0.1 as on-device) because nginx runs in a separate
+# container here and proxies /video/ to this one over the compose network.
+api:
+  listen: ":1984"
+
+# WebRTC media flows directly browser<->container over 8555 (published to the host by
+# docker-compose). candidates must be the address the host browser can reach, i.e. the
+# published port on localhost — auto-detection would advertise the container's internal
+# IP, which the browser can't route to.
+webrtc:
+  listen: ":8555"
+  candidates:
+    - "127.0.0.1:8555"
+
+log:
+  level: info

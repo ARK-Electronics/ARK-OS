@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Minimal `journalctl -o json` stand-in for the no-systemd test container.
+
+service-manager streams logs with `journalctl -u <svc> -b 0 -n N -f -o json` and parses
+each line for __REALTIME_TIMESTAMP (microseconds), MESSAGE and PRIORITY. We emit a short
+synthetic backlog and then, with -f, keep emitting a line every couple of seconds so the
+log pane in the UI shows a live tail.
+"""
+import itertools
+import json
+import sys
+import time
+
+
+def emit(unit: str, message: str, priority: int = 6) -> None:
+    line = {
+        "__REALTIME_TIMESTAMP": str(int(time.time() * 1_000_000)),
+        "PRIORITY": str(priority),
+        "MESSAGE": message,
+        "SYSLOG_IDENTIFIER": unit,
+    }
+    sys.stdout.write(json.dumps(line) + "\n")
+    sys.stdout.flush()
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    unit, follow, n = "system", False, 50
+    for i, a in enumerate(args):
+        if a == "-u" and i + 1 < len(args):
+            unit = args[i + 1]
+        elif a == "-f":
+            follow = True
+        elif a == "-n" and i + 1 < len(args):
+            try:
+                n = int(args[i + 1])
+            except ValueError:
+                pass
+    unit = unit[: -len(".service")] if unit.endswith(".service") else unit
+
+    for i in range(min(n, 20)):
+        emit(unit, f"[test harness] {unit}: backlog line {i + 1}")
+    if follow:
+        for k in itertools.count(1):
+            time.sleep(2)
+            emit(unit, f"[test harness] {unit}: live tail tick {k}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
