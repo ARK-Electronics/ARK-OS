@@ -246,7 +246,10 @@ export default {
   width: 100%;
   max-width: 1600px;
   height: 100vh;
-  margin: 0 auto;
+  /* Left-aligned (not centered): the Video route widens #app to the full viewport, so
+     keep the frame beside the sidebar like the other pages instead of floating it in the
+     middle of that full width. */
+  margin: 0;
   padding: 16px 20px 20px;
   box-sizing: border-box;
 }
