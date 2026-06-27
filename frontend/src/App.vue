@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div id="app" :class="{ 'fill-viewport': isActive('/video-page') }">
     <div class="sidebar" ref="sidebar">
       <img src="@/assets/logo.png" alt="Logo" class="logo">
       <router-link class="link" :class="{ active: isActive('/') }" to="/">System</router-link>
@@ -94,14 +94,19 @@ html, body {
 
 #app {
   display: flex;
-  /* Pin to the viewport width. Without this the flex container shrink-wraps to its
-     content, which collapses any page whose content has no intrinsic width — the Video
-     page (the video is position:absolute, so the frame's only in-flow sibling is the
-     short "Video" title) renders as a thin strip the width of that title. */
-  width: 100%;
   font-family: 'Roboto', sans-serif;
   color: var(--ark-color-black); /* Should be your black color */
   background-color: var(--ark-color-white); /* Your specified white color */
+}
+
+/* The app root is a shrink-wrapping flex item, so each page sizes #app to its own
+   content — data pages keep their natural width and stay left-aligned beside the sidebar.
+   The Video page has no intrinsic width (the video is position:absolute, leaving only the
+   short "Video" title in flow), so it would collapse to a thin strip. Pin #app to the
+   viewport on the Video route only, so the frame fills the area without also stretching
+   and centering the data pages in a full-width column. */
+#app.fill-viewport {
+  width: 100%;
 }
 
 .sidebar {
