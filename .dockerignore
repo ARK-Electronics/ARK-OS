@@ -1,0 +1,21 @@
+# Keeps the Docker build context lean for test/Dockerfile (context = repo root).
+# The x86 services-only test image only needs the frontend, the four in-repo manager
+# services, the gateway, and test/ — not the heavy native-build submodules.
+.git
+**/node_modules
+**/__pycache__
+**/*.pyc
+frontend/dist
+build
+out
+
+# Native-build service submodules — not compiled or run in the x86 test harness.
+services/rtsp-server
+services/mavlink-router
+services/polaris
+services/logloader
+services/dds-agent
+services/rid-transmitter
+services/flight-review
+services/go2rtc
+services/jetson-can

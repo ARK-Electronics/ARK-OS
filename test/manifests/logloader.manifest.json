@@ -1,0 +1,6 @@
+{
+  "displayName": "Log Loader",
+  "description": "Pulls flight logs off the autopilot and uploads them.",
+  "configFile": "",
+  "visible": true
+}

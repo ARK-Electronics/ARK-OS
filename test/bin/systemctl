@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Minimal `systemctl` stand-in for the no-systemd test container.
+
+service-manager shells out to systemctl to read and toggle unit state. There is no
+systemd here, so this shim answers the exact subset it calls (`show -p Id -p
+UnitFileState -p ActiveState ...`, `is-active`, `is-enabled`, and the
+start/stop/restart/enable/disable/reset-failed actions) from a small JSON state file,
+so the Services page renders and its buttons actually flip state.
+
+State is seeded from the installed manifests on first use. The services that genuinely
+run in this harness are reported active; the rest start inactive and can be "started"
+from the UI (which just flips the flag here).
+"""
+import json
+import os
+import sys
+
+STATE = "/run/ark-os-test/units.json"
+MANIFEST_DIR = "/usr/lib/ark-os/manifests"
+# Units that are real processes in this harness (or the go2rtc sidecar).
+RUNNING = {
+    "system-manager", "service-manager", "connection-manager",
+    "autopilot-manager", "ark-ui-backend", "go2rtc",
+}
+
+
+def load() -> dict:
+    if os.path.exists(STATE):
+        with open(STATE) as fh:
+            return json.load(fh)
+    units = {}
+    if os.path.isdir(MANIFEST_DIR):
+        for fn in os.listdir(MANIFEST_DIR):
+            if fn.endswith(".manifest.json"):
+                name = fn[: -len(".manifest.json")]
+                units[name] = {
+                    "active": "active" if name in RUNNING else "inactive",
+                    "enabled": "enabled",
+                }
+    save(units)
+    return units
+
+
+def save(units: dict) -> None:
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w") as fh:
+        json.dump(units, fh)
+
+
+def norm(name: str) -> str:
+    return name[: -len(".service")] if name.endswith(".service") else name
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if not args:
+        return 0
+    op = args[0]
+    units = load()
+    # Anything ending in .service (show) or matching a known unit is a target.
+    targets = [a for a in args[1:] if a.endswith(".service") or norm(a) in units]
+
+    if op == "show":
+        blocks = []
+        for tgt in targets:
+            name = norm(tgt)
+            st = units.get(name, {"active": "inactive", "enabled": "disabled"})
+            blocks.append(
+                f"Id={name}.service\n"
+                f"UnitFileState={st['enabled']}\n"
+                f"ActiveState={st['active']}\n"
+            )
+        sys.stdout.write("\n".join(blocks))
+        return 0
+
+    name = norm(targets[0]) if targets else None
+    if op == "is-active":
+        state = units.get(name, {}).get("active", "inactive")
+        print(state)
+        return 0 if state == "active" else 3
+    if op == "is-enabled":
+        state = units.get(name, {}).get("enabled", "disabled")
+        print(state)
+        return 0 if state == "enabled" else 1
+
+    if name is None or name not in units:
+        # Unknown unit: succeed quietly (service-manager already gated on manifests).
+        return 0
+    if op in ("start", "restart"):
+        units[name]["active"] = "active"
+    elif op == "stop":
+        units[name]["active"] = "inactive"
+    elif op == "enable":
+        units[name]["enabled"] = "enabled"
+    elif op == "disable":
+        units[name]["enabled"] = "disabled"
+    # reset-failed and anything else: no-op success.
+    save(units)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
