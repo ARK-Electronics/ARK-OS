@@ -104,7 +104,7 @@ reset_fmu_wait_bl.py          # reset the FC into bootloader mode
 jetson_serial_number.py       # print the Jetson carrier serial number (Jetson only)
 can_check.py can0             # check DroneCAN traffic on a CAN interface (Jetson only)
 check_cameras.sh              # stream-test the CSI cameras (Jetson only)
-check_fan.sh                  # ramp + tachometer-check the cooling fan (Jetson only)
+check_fan.sh                  # spin up the cooling fan and confirm it holds full speed (Jetson only)
 ```
 
 The directory also holds the service start-scripts and other internal helpers; the ones above are the operator-facing tools. The `PATH` entry takes effect on your next login — in the current shell, run `source /etc/profile.d/ark-os.sh` (or invoke a script by its full path under `/usr/lib/ark-os/scripts/`).
