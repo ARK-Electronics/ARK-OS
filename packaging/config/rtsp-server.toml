@@ -10,3 +10,7 @@ resolution = "1920x1080"
 resolution_options = ["320x240", "640x480", "1280x720", "1920x1080"]
 rotation = "0"
 rotation_options = ["0", "90", "180", "270"]
+# Capture device to stream. Empty = auto-select the lowest-numbered connected camera
+# (CSI via nvarguscamerasrc, USB via v4l2src). The Video page writes this when you pick
+# a camera; leave empty for auto.
+device = ""
