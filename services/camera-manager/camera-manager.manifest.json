@@ -1,0 +1,6 @@
+{
+  "displayName": "Camera Manager",
+  "description": "Microservice backend for selecting the RTSP server camera",
+  "configFile": "",
+  "visible": false
+}

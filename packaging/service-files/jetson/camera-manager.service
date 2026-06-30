@@ -1,0 +1,17 @@
+[Unit]
+Description=Microservice backend for selecting the RTSP server camera
+Wants=network.target network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/camera_manager.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=PORT=3005
+
+[Install]
+WantedBy=multi-user.target ark-os.target

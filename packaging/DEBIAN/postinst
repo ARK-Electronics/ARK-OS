@@ -212,7 +212,7 @@ ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_us
 # but deliberately NOT enabled — the operator turns them on via the web UI.
 # systemctl enable is a static symlink operation that works offline in a chroot.
 # ===========================================================================
-ENABLE_SERVICES="mavlink-router rtsp-server go2rtc ark-ui-backend autopilot-manager connection-manager service-manager system-manager"
+ENABLE_SERVICES="mavlink-router rtsp-server go2rtc ark-ui-backend autopilot-manager camera-manager connection-manager service-manager system-manager"
 if [ "$PLATFORM" = "jetson" ]; then
     ENABLE_SERVICES="$ENABLE_SERVICES jetson-can"
 fi

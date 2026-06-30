@@ -24,6 +24,25 @@
           </button>
         </div>
 
+        <!-- Camera picker: only shown when more than one camera is connected. Sits in
+             the top-right and stays reachable whatever the stream status is, so you can
+             switch source while it's still connecting. -->
+        <div v-if="cameras.length > 1" class="camera-picker">
+          <i class="fas fa-video"></i>
+          <select
+            :value="configured"
+            :disabled="switching"
+            title="Choose which camera the RTSP server streams"
+            @change="onSelectCamera($event.target.value)"
+          >
+            <option value="">Auto ({{ autoLabel }})</option>
+            <option v-for="cam in cameras" :key="cam.path" :value="cam.path" :title="cam.name">
+              {{ cameraLabel(cam) }}
+            </option>
+          </select>
+          <i v-if="switching" class="fas fa-spinner fa-spin"></i>
+        </div>
+
         <div v-if="status !== 'playing'" class="overlay">
           <template v-if="status === 'offline'">
             <i class="fas fa-video-slash overlay-icon"></i>
@@ -57,6 +76,8 @@
 // endpoint (nginx proxies /video/ to go2rtc): POST our SDP offer, get an SDP answer.
 // Media then flows directly from the device — playback is ~sub-second and there is no
 // buffer to drift, so no live-edge tracking is needed.
+import CameraService from '../services/CameraService';
+
 const WHEP_URL = '/video/api/webrtc?src=camera1';
 // go2rtc opens the camera only while a client is connected, so the stream can take ~1s
 // to appear after the page opens (camera + encoder spin up). Retry until it's up.
@@ -64,6 +85,12 @@ const RETRY_MS = 3000;
 // Cap ICE gathering so a slow candidate can't hang the offer; LAN host candidates
 // resolve well within this.
 const ICE_GATHER_MS = 1500;
+// Poll the camera list so a hotplugged camera (or the active one being unplugged)
+// shows up in the picker without a page reload.
+const CAMERA_POLL_MS = 5000;
+// After switching cameras the rtsp-server restarts and go2rtc has to re-open the new
+// source; give it a moment before re-negotiating so the first attempt doesn't 404.
+const SWITCH_RECONNECT_MS = 2000;
 
 export default {
   name: 'VideoPage',
@@ -72,8 +99,18 @@ export default {
       status: 'connecting', // connecting | playing | offline | error
       errorText: '',
       pc: null,
-      retryTimer: null
+      retryTimer: null,
+      cameras: [],          // [{ path, index, name, type, selected }]
+      configured: '',       // persisted [camera].device ("" = auto-select)
+      switching: false,     // a select() round-trip + restart is in flight
+      cameraPollTimer: null
     };
+  },
+  computed: {
+    // Label for the auto option: the lowest-numbered camera the server would pick.
+    autoLabel() {
+      return this.cameras.length ? this.cameraLabel(this.cameras[0]) : 'lowest /dev/video';
+    }
   },
   mounted() {
     // Only stream while the page is actually visible: hiding the tab tears the peer
@@ -84,13 +121,61 @@ export default {
     if (!document.hidden) {
       this.start();
     }
+    this.fetchCameras();
+    this.cameraPollTimer = setInterval(this.fetchCameras, CAMERA_POLL_MS);
   },
   beforeUnmount() {
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('pagehide', this.teardown);
+    if (this.cameraPollTimer) clearInterval(this.cameraPollTimer);
     this.teardown();
   },
   methods: {
+    async fetchCameras() {
+      try {
+        const { data } = await CameraService.getCameras();
+        this.cameras = data.cameras || [];
+        // Don't clobber the dropdown mid-switch; the optimistic value set in
+        // onSelectCamera is authoritative until the restart settles.
+        if (!this.switching) {
+          this.configured = data.configured || '';
+        }
+      } catch (err) {
+        // Camera-manager down or no cameras — leave the picker hidden, keep streaming.
+        this.cameras = [];
+      }
+    },
+
+    cameraLabel(cam) {
+      const kind = cam.type === 'csi' ? 'CSI' : cam.type === 'usb' ? 'USB' : 'Camera';
+      return `${kind} — ${cam.path}`;
+    },
+
+    async onSelectCamera(device) {
+      if (device === this.configured) return;
+      this.switching = true;
+      const previous = this.configured;
+      this.configured = device; // optimistic; reconciled by the next poll
+      try {
+        const { data } = await CameraService.selectCamera(device);
+        if (data.status !== 'success') {
+          this.configured = previous;
+          alert(`Could not switch camera: ${data.message || 'unknown error'}`);
+          return;
+        }
+        // rtsp-server is restarting on the new device — reconnect the stream shortly.
+        this.teardown();
+        this.status = 'connecting';
+        this.retryTimer = setTimeout(this.start, SWITCH_RECONNECT_MS);
+      } catch (err) {
+        this.configured = previous;
+        alert('Could not switch camera: request failed');
+      } finally {
+        this.switching = false;
+        this.fetchCameras();
+      }
+    },
+
     async start() {
       this.teardown();
       this.status = 'connecting';
@@ -297,6 +382,43 @@ export default {
 
 .video-el.hidden {
   visibility: hidden;
+}
+
+/* --- camera picker --- */
+.camera-picker {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: var(--ark-color-white);
+  font-size: 0.85rem;
+}
+
+.camera-picker select {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: var(--ark-color-white);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.camera-picker select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The native dropdown list renders with the UA's default colors; force dark text so
+   options stay readable against the white menu background. */
+.camera-picker option {
+  color: var(--ark-color-black);
 }
 
 /* --- live chrome --- */
