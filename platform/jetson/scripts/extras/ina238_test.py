@@ -19,6 +19,11 @@ VBUS_LSB = 3.125e-3  # 3.125 mV/LSB
 TEMP_LSB = 0.125  # 125 m°C/LSB
 POWER_LSB_MULTIPLIER = 0.2
 
+# TODO:
+# JAJ:
+# I2C1 == bus 7 == VBAT ina238
+# I2C0 == bus 1 == PAB Power Module ina226
+
 class INA238:
     def __init__(self, bus_num=7, address=0x45, r_shunt=0.001, i_max=70.7):
         self.bus = SMBus(bus_num)
