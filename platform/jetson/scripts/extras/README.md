@@ -14,9 +14,10 @@ that would be expensive to rediscover.
 | `install_opencv.sh` | Builds/installs OpenCV with CUDA support on a Jetson dev box. |
 | `install_ros2.sh` | Installs ROS 2 on a dev box. |
 | `i2s_gpio_example.py` | Example: drive the Jetson I2S/GPIO pins. |
-| `icm42688p_driver.py` | Example: read the ICM-42688-P IMU over SPI. |
+| `icm42688p_test.py` | Read the ICM-42688-P IMU over SPI: full-screen live view by default, `--raw` for a JSON stream. |
 | `ina238_test.py` | Example: read the INA238 power monitor over I2C/SMBus. |
 | `test_jtop.py` | Example: query `jtop` for Jetson telemetry. |
 
 Run them manually on the target as needed; they expect their own dependencies
-(OpenCV/ROS toolchains, `spidev`, `smbus2`, `jtop`) to be present.
+(OpenCV/ROS toolchains, `spidev`, `smbus2`, `jtop`; `rich` + `plotext` for the
+IMU live view) to be present.
