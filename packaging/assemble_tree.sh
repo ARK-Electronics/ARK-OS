@@ -81,7 +81,7 @@ sed -e "s/@ARK_USER@/$ARK_USER/g" -e "s/@PLATFORM@/$PLATFORM/g" \
 chmod 0755 "$PKG$ARK/libexec/ark_os_firstboot.sh"
 
 # --- python services ---
-for svc in autopilot_manager connection_manager service_manager system_manager; do
+for svc in autopilot_manager camera_manager connection_manager service_manager system_manager; do
     dir=$(echo "$svc" | tr '_' '-')
     install -m 0644 "services/$dir/$svc.py" "$PKG$ARK/python/$svc.py"
 done
