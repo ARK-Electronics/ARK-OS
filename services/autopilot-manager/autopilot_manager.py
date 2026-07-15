@@ -259,6 +259,16 @@ class MAVLinkConnection:
         time_since_heartbeat = (datetime.now() - self.last_heartbeat).total_seconds()
         return time_since_heartbeat < self.heartbeat_timeout
 
+    def invalidate_version(self):
+        """Drop the cached version/git hash so the message loop re-requests them.
+
+        PX4 only sends AUTOPILOT_VERSION when asked, and the loop asks only while
+        the version is "Unknown". Anything that can leave the FC running different
+        firmware must clear the latch or the stale string is reported forever."""
+        with self._lock:
+            self.autopilot_data["version"] = "Unknown"
+            self.autopilot_data["git_hash"] = "Unknown"
+
     def request_autopilot_version(self):
         """Request the autopilot version information"""
         if not self.mav_connection:
@@ -435,6 +445,9 @@ class MAVLinkConnection:
                     if not disconnect_logged:
                         logger.warning("No autopilot heartbeat; probing and reconnecting in the background")
                         disconnect_logged = True
+                        # The FC may return reflashed or rebooted, so the cached
+                        # version is unverified until it answers again.
+                        self.invalidate_version()
 
                     # Probe with a GCS heartbeat at ~1 Hz to elicit a response.
                     if current_time - last_probe_time >= 1.0:
@@ -659,6 +672,9 @@ class AutopilotManager:
             # Disconnect from MAVLink first to avoid conflicts
             logger.debug("Disconnecting MAVLink connection")
             self.mavlink.disconnect()
+            # disconnect() stops the message loop, so the heartbeat-gap path that
+            # normally invalidates the version cannot run during a flash.
+            self.mavlink.invalidate_version()
 
             # Stop mavlink router service if it's running
             logger.debug("Checking if mavlink-router is active")
