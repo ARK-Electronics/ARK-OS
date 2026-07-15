@@ -11,7 +11,7 @@
 
             <!-- String input -->
             <input
-              v-if="typeof value === 'string'"
+              v-if="fieldType(key, value) === 'string'"
               type="text"
               :id="key"
               v-model="config[key]"
@@ -19,7 +19,7 @@
             />
 
             <!-- Boolean input -->
-            <div v-else-if="typeof value === 'boolean'" class="checkbox-group">
+            <div v-else-if="fieldType(key, value) === 'boolean'" class="checkbox-group">
               <input
                 type="checkbox"
                 :id="key"
@@ -30,7 +30,7 @@
 
             <!-- Number input -->
             <input
-              v-else-if="typeof value === 'number'"
+              v-else-if="fieldType(key, value) === 'number'"
               type="number"
               :id="key"
               v-model.number="config[key]"
@@ -71,7 +71,7 @@
 
                 <!-- String input -->
                 <input
-                  v-else-if="typeof tableValue[subKey] === 'string'"
+                  v-else-if="fieldType(`${tableKey}.${subKey}`, tableValue[subKey]) === 'string'"
                   type="text"
                   :id="`${tableKey}.${subKey}`"
                   v-model="config[tableKey][subKey]"
@@ -79,7 +79,7 @@
                 />
 
                 <!-- Boolean input -->
-                <div v-else-if="typeof tableValue[subKey] === 'boolean'" class="checkbox-group">
+                <div v-else-if="fieldType(`${tableKey}.${subKey}`, tableValue[subKey]) === 'boolean'" class="checkbox-group">
                   <input
                     type="checkbox"
                     :id="`${tableKey}.${subKey}`"
@@ -90,7 +90,7 @@
 
                 <!-- Number input -->
                 <input
-                  v-else-if="typeof tableValue[subKey] === 'number'"
+                  v-else-if="fieldType(`${tableKey}.${subKey}`, tableValue[subKey]) === 'number'"
                   type="number"
                   :id="`${tableKey}.${subKey}`"
                   v-model.number="config[tableKey][subKey]"
@@ -197,6 +197,19 @@ export default {
       return this.config[tableKey][optionsKey] || [];
     },
 
+    // Pick the input from the type in the loaded config rather than the live
+    // value. Vue's .number modifier passes non-numeric input straight through,
+    // so an emptied number field holds "" — keying off the live type would swap
+    // it to a text input and every later keystroke would save as a string.
+    fieldType(path, value) {
+      return this.originalTypes[path] || typeof value;
+    },
+
+    // Number('') is 0, so blank must be rejected rather than silently saved.
+    toNumber(value) {
+      return String(value).trim() === '' ? NaN : Number(value);
+    },
+
     // Store original types when config is loaded
     storeOriginalTypes(obj, path = '') {
       for (const key in obj) {
@@ -228,8 +241,7 @@ export default {
 
             if (originalType === 'number' && currentType !== 'number') {
               // Check if it can be converted to a number
-              const numValue = Number(value);
-              if (isNaN(numValue)) {
+              if (isNaN(this.toNumber(value))) {
                 invalidFields.push({
                   path: fullPath,
                   expectedType: originalType,
@@ -296,20 +308,17 @@ export default {
         const configToSave = JSON.parse(JSON.stringify(this.config));
 
         // Convert numeric strings to actual numbers
-        const convertTypes = (obj) => {
+        const convertTypes = (obj, path = '') => {
           for (const key in obj) {
+            const fullPath = path ? `${path}.${key}` : key;
             const value = obj[key];
 
-            if (value && typeof value === 'object' && !Array.isArray(value)) {
-              convertTypes(value);
-            } else if (typeof value === 'string') {
-              // Check if this was originally a number
-              const fullPath = this.getFullPath(obj, key);
-              if (fullPath && this.originalTypes[fullPath] === 'number') {
-                const numValue = Number(value);
-                if (!isNaN(numValue)) {
-                  obj[key] = numValue;
-                }
+            if (this.isObject(value)) {
+              convertTypes(value, fullPath);
+            } else if (typeof value === 'string' && this.originalTypes[fullPath] === 'number') {
+              const numValue = this.toNumber(value);
+              if (!isNaN(numValue)) {
+                obj[key] = numValue;
               }
             }
           }
@@ -341,33 +350,6 @@ export default {
         console.error('Error converting to TOML:', error);
         alert('Error preparing configuration for saving');
       }
-    },
-
-    // Helper to get the full path of a nested property
-    getFullPath(obj, key) {
-      for (const path in this.originalTypes) {
-        const parts = path.split('.');
-        const lastPart = parts[parts.length - 1];
-
-        if (lastPart === key) {
-          // Check if this is actually the right object
-          let currentObj = this.config;
-          let found = true;
-
-          for (let i = 0; i < parts.length - 1; i++) {
-            if (currentObj[parts[i]] === undefined) {
-              found = false;
-              break;
-            }
-            currentObj = currentObj[parts[i]];
-          }
-
-          if (found && currentObj === obj) {
-            return path;
-          }
-        }
-      }
-      return null;
     },
 
     cancelEdit() {
