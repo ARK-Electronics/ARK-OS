@@ -1,0 +1,28 @@
+# MAVLink connection to the autopilot (mavlink-router UdpEndpoint pointperfect)
+connection_url = "udp://:14554"
+
+# u-blox PointPerfect corrections over NTRIP.
+# NTRIP credentials are found in the Thingstream portal under your PointPerfect
+# Thing > Credentials. Each Thing allows a single simultaneous NTRIP connection.
+ntrip_host = "ppntrip.services.u-blox.com"
+ntrip_port = 2102          # 2102 = TLS, 2101 = plain TCP
+
+# Correction format: "rtcm" (default, natively supported by PX4) or "spartn".
+# PX4 currently only injects/parses RTCM; use "spartn" only if your
+# receiver/firmware supports SPARTN forwarded over GPS_RTCM_DATA.
+correction_format = "rtcm"
+
+# Mountpoint. Leave empty to derive it from correction_format
+# (NEAR-RTCM or NEAR-SPARTN); set it explicitly to override.
+ntrip_mountpoint = ""
+
+ntrip_username = "your_username_goes_here"
+ntrip_password = "your_password_goes_here"
+
+# Use TLS (recommended, matches port 2102).
+use_tls = true
+
+# The caster requires a periodic NMEA-GGA position report from the rover to
+# provide localized corrections. The position is taken from the autopilot's
+# GPS_RAW_INT messages and sent every 10 seconds.
+send_gga = true

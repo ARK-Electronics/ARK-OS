@@ -118,7 +118,7 @@ A web based UI is provided to more easily manage your device. The webpage is hos
 ![alt text](ark-ui4.png)
 
 ## Services
-The package installs the services below as system-level [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) running as the unprivileged platform user (`jetson` or `pi`). The always-on services are enabled automatically; the optional services (`dds-agent`, `logloader`, `polaris`, `flight-review`, `rid-transmitter`) are installed but disabled — enable them from the web UI or with `systemctl enable --now <service>`.
+The package installs the services below as system-level [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) running as the unprivileged platform user (`jetson` or `pi`). The always-on services are enabled automatically; the optional services (`dds-agent`, `logloader`, `polaris`, `pointperfect`, `flight-review`, `rid-transmitter`) are installed but disabled — enable them from the web UI or with `systemctl enable --now <service>`.
 
 ## Jetson and Pi
 
@@ -139,6 +139,9 @@ This service provides an RTSP server via gstreamer. The stream from the first co
 
 **polaris.service** <br>
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.
+
+**pointperfect.service** <br>
+This service receives GNSS corrections from the u-blox PointPerfect NTRIP service (RTCM by default, optional SPARTN) and publishes them to the flight controller via MAVLink.
 
 **ark-ui-backend.service** <br>
 This service provides an API gateway for the ARK UI.

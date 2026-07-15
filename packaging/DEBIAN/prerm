@@ -13,7 +13,7 @@ set -e
 
 # Platform-specific units (jetson-can, rid-transmitter) are simply not loaded on
 # the other platform, so stopping them there is a harmless no-op.
-ARK_SERVICES="mavlink-router rtsp-server ark-ui-backend autopilot-manager connection-manager service-manager system-manager dds-agent logloader polaris flight-review rid-transmitter jetson-can"
+ARK_SERVICES="mavlink-router rtsp-server ark-ui-backend autopilot-manager connection-manager service-manager system-manager dds-agent logloader polaris pointperfect flight-review rid-transmitter jetson-can"
 
 case "$1" in
     remove)

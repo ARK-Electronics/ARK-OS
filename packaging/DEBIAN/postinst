@@ -194,7 +194,8 @@ rm -rf /var/lib/ark-os/.config-backup
 chgrp -R "$ARK_USER" /etc/ark-os
 chmod 2775 /etc/ark-os
 # TODO(security): these configs are world-readable (0664; dir 2775), so any local
-# user can read secrets entered via the web UI (polaris_api_key, flight-review SMTP
+# user can read secrets entered via the web UI (polaris_api_key, pointperfect
+# ntrip credentials, flight-review SMTP
 # password, rid-transmitter serial, ...). Revisit: restrict secret-bearing files to
 # 0640 root:$ARK_USER and drop world-read once every reader (service-manager web UI
 # and each service) is confirmed to run as $ARK_USER or in its group.
@@ -208,8 +209,8 @@ ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_us
 
 # ===========================================================================
 # Step 5/6: Enable always-on services (and the group target). Opt-in services
-# (dds-agent, logloader, polaris, flight-review, rid-transmitter) are installed
-# but deliberately NOT enabled — the operator turns them on via the web UI.
+# (dds-agent, logloader, polaris, pointperfect, flight-review, rid-transmitter)
+# are installed but deliberately NOT enabled — the operator turns them on via the web UI.
 # systemctl enable is a static symlink operation that works offline in a chroot.
 # ===========================================================================
 ENABLE_SERVICES="mavlink-router rtsp-server go2rtc ark-ui-backend autopilot-manager connection-manager service-manager system-manager"
@@ -285,7 +286,7 @@ if [ -d /run/systemd/system ]; then
     # failed (e.g. mavlink-router with no FC) or operator-stopped service is
     # left as-is rather than force-started.
     if [ -n "$2" ]; then
-        RESTART_SERVICES="$ENABLE_SERVICES dds-agent logloader polaris flight-review rid-transmitter"
+        RESTART_SERVICES="$ENABLE_SERVICES dds-agent logloader polaris pointperfect flight-review rid-transmitter"
         systemctl try-restart $RESTART_SERVICES 2>/dev/null || true
     fi
 
