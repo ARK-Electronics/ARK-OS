@@ -5,13 +5,29 @@
         <h1>{{ serviceName }}</h1>
 
         <div class="toml-editor">
-          <!-- Top-level primitive values first -->
-          <div v-for="(value, key) in topLevelPrimitives" :key="key" class="form-group">
+          <!-- Top-level primitive values first (skip *_options arrays used for dropdowns) -->
+          <div v-for="key in topLevelFieldKeys" :key="key" class="form-group">
             <label :for="key">{{ formatKey(key) }}</label>
+
+            <!-- Dropdown when a sibling <field>_options array is present -->
+            <select
+              v-if="hasTopLevelOptions(key)"
+              :id="key"
+              v-model="config[key]"
+              class="select-input"
+            >
+              <option
+                v-for="option in getTopLevelOptions(key)"
+                :key="option"
+                :value="option"
+              >
+                {{ option }}
+              </option>
+            </select>
 
             <!-- String input -->
             <input
-              v-if="fieldType(key, value) === 'string'"
+              v-else-if="fieldType(key, config[key]) === 'string'"
               type="text"
               :id="key"
               v-model="config[key]"
@@ -19,7 +35,7 @@
             />
 
             <!-- Boolean input -->
-            <div v-else-if="fieldType(key, value) === 'boolean'" class="checkbox-group">
+            <div v-else-if="fieldType(key, config[key]) === 'boolean'" class="checkbox-group">
               <input
                 type="checkbox"
                 :id="key"
@@ -30,7 +46,7 @@
 
             <!-- Number input -->
             <input
-              v-else-if="fieldType(key, value) === 'number'"
+              v-else-if="fieldType(key, config[key]) === 'number'"
               type="number"
               :id="key"
               v-model.number="config[key]"
@@ -138,15 +154,15 @@ export default {
     };
   },
   computed: {
-    // Separate top-level primitives from sub-tables
-    topLevelPrimitives() {
-      const primitives = {};
-      Object.entries(this.config).forEach(([key, value]) => {
-        if (!this.isObject(value)) {
-          primitives[key] = value;
+    // Top-level editable fields (primitives + simple arrays that aren't *_options)
+    topLevelFieldKeys() {
+      return Object.keys(this.config).filter((key) => {
+        if (this.isOptionsField(key)) {
+          return false;
         }
+        const value = this.config[key];
+        return !this.isObject(value);
       });
-      return primitives;
     },
     // Get all sub-tables (nested objects)
     subTables() {
@@ -195,6 +211,15 @@ export default {
     getOptionsArray(tableKey, fieldKey) {
       const optionsKey = `${fieldKey}_options`;
       return this.config[tableKey][optionsKey] || [];
+    },
+
+    // Top-level dropdown support (same *_options convention as nested tables)
+    hasTopLevelOptions(fieldKey) {
+      return Array.isArray(this.config[`${fieldKey}_options`]);
+    },
+
+    getTopLevelOptions(fieldKey) {
+      return this.config[`${fieldKey}_options`] || [];
     },
 
     // Pick the input from the type in the loaded config rather than the live

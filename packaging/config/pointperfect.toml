@@ -10,7 +10,9 @@ ntrip_port = 2102          # 2102 = TLS, 2101 = plain TCP
 # Correction format: "rtcm" (default, natively supported by PX4) or "spartn".
 # PX4 currently only injects/parses RTCM; use "spartn" only if your
 # receiver/firmware supports SPARTN forwarded over GPS_RTCM_DATA.
+# correction_format_options drives the ARK UI dropdown (ignored by the client).
 correction_format = "rtcm"
+correction_format_options = ["rtcm", "spartn"]
 
 # Mountpoint. Leave empty to derive it from correction_format
 # (NEAR-RTCM or NEAR-SPARTN); set it explicitly to override.
