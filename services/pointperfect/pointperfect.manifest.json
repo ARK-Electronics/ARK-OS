@@ -1,0 +1,6 @@
+{
+  "displayName": "PointPerfect Mavlink",
+  "description": "Client for the u-blox PointPerfect GNSS corrections service (NTRIP) to provide corrections over Mavlink.",
+  "configFile": "pointperfect.toml",
+  "visible": true
+}

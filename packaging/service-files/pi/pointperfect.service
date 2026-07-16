@@ -1,0 +1,15 @@
+[Unit]
+Description=u-blox PointPerfect GNSS corrections client for MAVLink
+Wants=network.target
+After=network-online.target mavlink-router.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+ExecStart=/usr/lib/ark-os/bin/pointperfect-client-mavlink --config /etc/ark-os/pointperfect.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target

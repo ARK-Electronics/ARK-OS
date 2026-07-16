@@ -91,6 +91,10 @@ while read -r lib; do
     install_bundled_lib "$lib"
 done <<<"$polaris_extra_libs"
 
+echo "==> pointperfect-client-mavlink (make -> cmake)"
+( cd services/pointperfect/pointperfect-client-mavlink && make )
+install -m 0755 services/pointperfect/pointperfect-client-mavlink/build/pointperfect-client-mavlink "$BIN_DIR/"
+
 if [ "$PLATFORM" = "jetson" ]; then
     echo "==> rid-transmitter (make -> cmake, jetson only)"
     ( cd services/rid-transmitter/RemoteIDTransmitter && make )

@@ -14,6 +14,7 @@ polkit.addRule(function(action, subject) {
         "logloader.service",
         "rtsp-server.service",
         "polaris.service",
+        "pointperfect.service",
         "rid-transmitter.service",   // JETSON-ONLY
         "jetson-can.service",        // JETSON-ONLY
         "flight-review.service",
