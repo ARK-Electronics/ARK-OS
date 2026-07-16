@@ -14,9 +14,15 @@ ntrip_port = 2102          # 2102 = TLS, 2101 = plain TCP
 correction_format = "rtcm"
 correction_format_options = ["rtcm", "spartn"]
 
-# Mountpoint. Leave empty to derive it from correction_format
-# (NEAR-RTCM or NEAR-SPARTN); set it explicitly to override.
+# Mountpoint. Leave empty to derive it from correction_format and use_mga
+# (NEAR-RTCM[-MGA] or NEAR-SPARTN[-MGA]); set it explicitly to override.
 ntrip_mountpoint = ""
+
+# Request AssistNow (MGA) start-up assistance for a faster time to first fix.
+# The *-MGA mountpoints send u-blox ephemeris (UBX-MGA) once on connect, ahead
+# of the correction stream; the client forwards it to the receiver. u-blox
+# receivers only, and requires send_gga (corrections start after a valid GGA).
+use_mga = false
 
 ntrip_username = "your_username_goes_here"
 ntrip_password = "your_password_goes_here"
