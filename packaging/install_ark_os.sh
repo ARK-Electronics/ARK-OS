@@ -16,8 +16,8 @@
 # /usr/lib/ark-os/mavsdk (issue #74), independent of any system MAVSDK.
 #
 # Re-running is safe: jetson-stats is skipped when already at the pinned version,
-# and re-installing the ark-os deb upgrades it in place — so this is also the
-# supported way to update a live device.
+# and re-installing the ark-os deb upgrades (or downgrades) it in place — so this
+# is also the supported way to update a live device.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -138,8 +138,9 @@ fetch() {
 
 # apt-get treats a bare filename as a package name; only a path containing a
 # slash is read as a local deb. Resolve to an absolute path so cwd-relative and
-# downloaded debs both install correctly.
-apt_install_deb() { apt-get install -y "$(readlink -f "$1")"; }
+# downloaded debs both install correctly. --allow-downgrades lets an older build
+# install over a newer one (version testing/rollback), which apt refuses by default.
+apt_install_deb() { apt-get install -y --allow-downgrades "$(readlink -f "$1")"; }
 
 install_jtop() {
     apt-get install -y python3-pip || return 1
