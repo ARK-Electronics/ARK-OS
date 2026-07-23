@@ -12,6 +12,11 @@ itself runs in a worker thread; ProgressBroker fans its events out to subscriber
 The pymavlink message loop stays on its own daemon thread; handlers are plain `def`
 so FastAPI runs them in a threadpool and blocking subprocess calls never stall the
 event loop.
+
+Time sync with the FC is bidirectional but mutually exclusive: once the local
+clock is NTP-synchronized it is pushed to the FC (send_system_time), and while it
+is not, a valid GNSS-derived SYSTEM_TIME from the FC steps the local clock
+(_maybe_step_clock_from_fc; CAP_SYS_TIME comes from the systemd unit).
 """
 
 import os
@@ -161,6 +166,22 @@ class MAVLinkConnection:
     _INITIAL_RESET_BACKOFF = 1.0
     _MAX_RESET_BACKOFF = 30.0
 
+    # FC time outside these bounds (µs since epoch) is not GNSS-derived UTC:
+    # below 2001-01-01 it's the unset-clock default (PX4 suppresses the stream
+    # entirely below it, ArduPilot streams zeros), above 2100-01-01 it's garbage.
+    _FC_TIME_MIN_VALID_US = 978307200000000
+    _FC_TIME_MAX_VALID_US = 4102444800000000
+    # Adopt FC time only when the clocks disagree by more than this — absorbs
+    # MAVLink transport latency and keeps an already-correct clock unstepped.
+    _CLOCK_STEP_THRESHOLD = 2.0  # seconds
+    # Floor between steps, so FC time jitter or transport latency above the
+    # threshold can't step the clock once per message.
+    _MIN_CLOCK_STEP_INTERVAL = 30.0  # seconds
+    # Re-ask for the SYSTEM_TIME stream after this much silence. Silence is
+    # ambiguous — stream not configured, FC reboot dropped the interval, or PX4
+    # muting it while its clock is unset — a cheap re-request covers all three.
+    _SYSTEM_TIME_SILENCE_REREQUEST = 30.0  # seconds
+
     def __init__(self, connection_string='udpin:localhost:14571', source_system=254):
         self.connection_string = connection_string
         self.source_system = source_system
@@ -171,6 +192,18 @@ class MAVLinkConnection:
         self.last_heartbeat = None
         self.device_detector = DeviceDetector()
         self._lock = threading.Lock()
+
+        # Monotonic mirror of last_heartbeat: staleness checks must survive the
+        # wall-clock steps this service itself performs (NTP or FC time adoption).
+        self._last_heartbeat_mono: float | None = None
+
+        # FC→local time sync state (all time.monotonic based).
+        self._last_system_time_seen = 0.0
+        self._last_system_time_request = 0.0
+        self._last_clock_step = 0.0
+        self._clock_settime_denied = False
+        self._ntp_synced_cache = False
+        self._ntp_synced_checked = 0.0
 
         # Store the latest autopilot data
         self.autopilot_data: dict[str, Any] = {
@@ -248,16 +281,16 @@ class MAVLinkConnection:
     def update_heartbeat_time(self):
         """Update the last heartbeat timestamp"""
         self.last_heartbeat = datetime.now()
+        self._last_heartbeat_mono = time.monotonic()
         with self._lock:
             self.autopilot_data["last_heartbeat"] = self.last_heartbeat.isoformat()
 
     def is_mavlink_connected(self):
         """Check if the MAVLink connection is active based on recent heartbeats"""
-        if not self.last_heartbeat:
+        if self._last_heartbeat_mono is None:
             return False
 
-        time_since_heartbeat = (datetime.now() - self.last_heartbeat).total_seconds()
-        return time_since_heartbeat < self.heartbeat_timeout
+        return time.monotonic() - self._last_heartbeat_mono < self.heartbeat_timeout
 
     def invalidate_version(self):
         """Drop the cached version/git hash so the message loop re-requests them.
@@ -290,6 +323,28 @@ class MAVLinkConnection:
             logger.error(f"Error requesting autopilot version: {e}")
             return False
 
+    def request_system_time_stream(self) -> bool:
+        """Ask the FC to stream SYSTEM_TIME at 1 Hz. Most PX4 stream sets already
+        include it; this covers ArduPilot and modes that omit it."""
+        if not self.mav_connection:
+            return False
+
+        try:
+            logger.debug("Requesting SYSTEM_TIME stream at 1 Hz")
+            self.mav_connection.mav.command_long_send(
+                self.mav_connection.target_system,
+                self.mav_connection.target_component,
+                mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                0,  # Confirmation
+                mavlink.MAVLINK_MSG_ID_SYSTEM_TIME,
+                1_000_000,  # Interval in microseconds (1 Hz)
+                0, 0, 0, 0, 0
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error requesting SYSTEM_TIME stream: {e}")
+            return False
+
     def send_system_time(self, current_time):
         if not self.mav_connection:
             return False
@@ -320,6 +375,52 @@ class MAVLinkConnection:
             logger.debug(f"Could not query clock sync status: {e}")
             return False
 
+    def _clock_is_synchronized_cached(self, now_mono: float) -> bool:
+        # 5 s TTL so the 1 Hz SYSTEM_TIME stream doesn't spawn timedatectl per message.
+        if self._ntp_synced_checked == 0.0 or now_mono - self._ntp_synced_checked > 5:
+            self._ntp_synced_cache = self._clock_is_synchronized()
+            self._ntp_synced_checked = now_mono
+        return self._ntp_synced_cache
+
+    def _maybe_step_clock_from_fc(self, fc_time_usec: int) -> None:
+        """Adopt the FC's GNSS-derived UTC time when the local clock has nothing
+        better: never while NTP-synchronized, and only on a disagreement above
+        the threshold. clock_settime does not raise the kernel NTP-synced flag,
+        so an adopted FC time can never trick the send_system_time path into
+        echoing time back at the FC."""
+        if not self._FC_TIME_MIN_VALID_US < fc_time_usec < self._FC_TIME_MAX_VALID_US:
+            return
+        if self._clock_settime_denied:
+            return
+
+        now_mono = time.monotonic()
+        if now_mono - self._last_clock_step < self._MIN_CLOCK_STEP_INTERVAL:
+            return
+        if self._clock_is_synchronized_cached(now_mono):
+            return
+
+        fc_time = fc_time_usec / 1e6
+        delta = fc_time - time.time()
+        if abs(delta) <= self._CLOCK_STEP_THRESHOLD:
+            return
+
+        try:
+            time.clock_settime(time.CLOCK_REALTIME, fc_time)
+        except PermissionError:
+            # Won't heal within this process lifetime; latch instead of logging
+            # once per message forever.
+            self._clock_settime_denied = True
+            logger.error("Cannot set system clock from autopilot time: missing "
+                         "CAP_SYS_TIME (the unit needs AmbientCapabilities=CAP_SYS_TIME)")
+            return
+        except Exception as e:
+            logger.error(f"Error setting system clock from autopilot time: {e}")
+            return
+
+        self._last_clock_step = now_mono
+        logger.info(f"System clock stepped {delta:+.1f}s from autopilot GNSS time "
+                    f"to {datetime.now().isoformat()} (local clock had no NTP sync)")
+
     def update_device_status(self):
         """Update device connection status via USB detection"""
         device_status = self.device_detector.check_device_status()
@@ -349,12 +450,15 @@ class MAVLinkConnection:
 
         while self.running:
             try:
-                current_time = time.time()
+                # Monotonic throughout: this loop steps the wall clock itself
+                # (FC time adoption), and NTP steps it at first sync, so interval
+                # timers on time.time() would stall or fire spuriously.
+                now_mono = time.monotonic()
 
                 # Periodically check device status (every 2 seconds)
-                if current_time - last_device_check_time > 2:
+                if now_mono - last_device_check_time > 2:
                     self.update_device_status()
-                    last_device_check_time = current_time
+                    last_device_check_time = now_mono
 
                 if self.mav_connection is None:
                     time.sleep(1)
@@ -385,23 +489,30 @@ class MAVLinkConnection:
                         next_reset_time = 0.0
 
                         # Periodically request version information if needed
-                        if current_time - last_version_request_time > 5:
+                        if now_mono - last_version_request_time > 5:
                             with self._lock:
                                 version_unknown = self.autopilot_data["version"] == "Unknown"
                             if version_unknown:
                                 self.request_autopilot_version()
-                                last_version_request_time = current_time
+                                last_version_request_time = now_mono
 
                         # Push system time only once the clock is NTP-synced; otherwise
                         # we'd set the FC clock to a bogus pre-sync value (no RTC on
                         # Jetson or Pi). Latch so we stop polling timedatectl after sync.
-                        if current_time - last_system_time_update_time > 5:
-                            last_system_time_update_time = current_time
+                        if now_mono - last_system_time_update_time > 5:
+                            last_system_time_update_time = now_mono
                             if system_time_synced or self._clock_is_synchronized():
                                 if not system_time_synced:
                                     logger.info("System clock synchronized; sending SYSTEM_TIME to autopilot")
                                     system_time_synced = True
-                                self.send_system_time(current_time)
+                                self.send_system_time(time.time())
+
+                        # Keep the FC's SYSTEM_TIME stream alive for the reverse
+                        # direction (GNSS time → local clock when NTP hasn't synced).
+                        if (now_mono - self._last_system_time_seen > self._SYSTEM_TIME_SILENCE_REREQUEST and
+                                now_mono - self._last_system_time_request > self._SYSTEM_TIME_SILENCE_REREQUEST):
+                            self.request_system_time_stream()
+                            self._last_system_time_request = now_mono
 
                     elif msg.get_type() == 'AUTOPILOT_VERSION':
                         # Extract version and git hash
@@ -419,6 +530,10 @@ class MAVLinkConnection:
                                 hex_hash = ''.join(f'{b:02x}' for b in hash_bytes)
                                 self.autopilot_data["git_hash"] = hex_hash
 
+                    elif msg.get_type() == 'SYSTEM_TIME':
+                        self._last_system_time_seen = now_mono
+                        self._maybe_step_clock_from_fc(msg.time_unix_usec)
+
                     elif msg.get_type() == 'SYS_STATUS':
                         # Extract battery information
                         with self._lock:
@@ -434,8 +549,8 @@ class MAVLinkConnection:
                                 self.autopilot_data["remaining"] = msg.battery_remaining
 
                 # No message, and the autopilot heartbeat is missing or stale.
-                elif (self.last_heartbeat is None or
-                      (datetime.now() - self.last_heartbeat).total_seconds() > 5):
+                elif (self._last_heartbeat_mono is None or
+                      now_mono - self._last_heartbeat_mono > 5):
 
                     with self._lock:
                         self.autopilot_data["mavlink_connected"] = False
@@ -450,7 +565,7 @@ class MAVLinkConnection:
                         self.invalidate_version()
 
                     # Probe with a GCS heartbeat at ~1 Hz to elicit a response.
-                    if current_time - last_probe_time >= 1.0:
+                    if now_mono - last_probe_time >= 1.0:
                         try:
                             self.mav_connection.mav.heartbeat_send(
                                 mavlink.MAV_TYPE_GCS,
@@ -458,13 +573,13 @@ class MAVLinkConnection:
                                 0, 0, 0)
                         except Exception as e:
                             logger.error(f"Error sending heartbeat: {e}")
-                        last_probe_time = current_time
+                        last_probe_time = now_mono
 
                     # Rebuild the link on a capped exponential backoff so a
                     # permanently absent FC can't churn the socket (or journal)
                     # every few seconds. Skipped entirely for a udpin listener,
                     # which has no peer to reconnect to.
-                    if current_time >= next_reset_time:
+                    if now_mono >= next_reset_time:
                         if self._reconnect_helps():
                             try:
                                 self._reset_connection()
@@ -472,7 +587,7 @@ class MAVLinkConnection:
                                 logger.error(f"Error resetting MAVLink connection: {reset_error}")
                                 self.mav_connection = None
                                 time.sleep(1)
-                        next_reset_time = current_time + reset_backoff
+                        next_reset_time = now_mono + reset_backoff
                         reset_backoff = min(reset_backoff * 2, self._MAX_RESET_BACKOFF)
 
             except socket.timeout:
@@ -486,7 +601,7 @@ class MAVLinkConnection:
                 try:
                     self._reset_connection()
                     reset_backoff = self._INITIAL_RESET_BACKOFF
-                    next_reset_time = current_time + reset_backoff
+                    next_reset_time = now_mono + reset_backoff
                 except Exception as reset_error:
                     logger.error(f"Error resetting MAVLink connection: {reset_error}")
                     self.mav_connection = None
