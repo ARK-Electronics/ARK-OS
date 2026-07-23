@@ -12,6 +12,8 @@ Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=PORT=3003
+# clock_settime: adopt the FC's GNSS time when the local clock has no NTP sync.
+AmbientCapabilities=CAP_SYS_TIME
 
 [Install]
 WantedBy=multi-user.target ark-os.target
