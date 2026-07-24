@@ -141,7 +141,7 @@ This service provides an RTSP server via gstreamer. The stream from the first co
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.
 
 **pointperfect.service** <br>
-This service receives GNSS corrections from the u-blox PointPerfect NTRIP service (RTCM by default, optional SPARTN) and publishes them to the flight controller via MAVLink.
+This service receives GNSS corrections from the u-blox PointPerfect NTRIP service (RTCM by default, optional SPARTN) and publishes them to the flight controller via MAVLink. For u-blox receivers it can optionally request AssistNow (MGA) start-up assistance for a faster time to first fix (`use_mga`).
 
 **ark-ui-backend.service** <br>
 This service provides an API gateway for the ARK UI.
