@@ -29,16 +29,16 @@ jobs:
             runner: ubuntu-22.04-arm
             container: ""
             extra_deps: "libbluetooth-dev"
-          # - platform: pi
-          #   codename: bookworm
-          #   runner: ubuntu-22.04-arm
-          #   container: "debian:bookworm"
-          #   extra_deps: ""
-          # - platform: pi
-          #   codename: trixie
-          #   runner: ubuntu-22.04-arm
-          #   container: "debian:trixie"
-          #   extra_deps: ""
+          - platform: pi
+            codename: bookworm
+            runner: ubuntu-22.04-arm
+            container: "debian:bookworm"
+            extra_deps: ""
+          - platform: pi
+            codename: trixie
+            runner: ubuntu-22.04-arm
+            container: "debian:trixie"
+            extra_deps: ""
     # Build each platform on a host whose OS matches the target so the bundled venv
     # and natively-compiled binaries are ABI-compatible. The venv is created with
     # `python3 -m venv --copies`, which ships the interpreter but resolves the stdlib
