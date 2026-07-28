@@ -1,8 +1,51 @@
 connection_url = "udp://:14551"
-local_server = "http://127.0.0.1:5006"
-remote_server = "https://review.px4.io"
+
+# error | warn | info | debug
+log_level = "info"
+
+[data]
+# Where logloader stages downloaded ulogs and keeps its database
+# (FHS runtime data dir, created by postinst).
+directory = "/var/lib/ark-os/logs/"
+
+# Local API the ARK-OS Logs page talks to, via the ark-ui-backend gateway.
+[api]
+enabled = true
+bind = "127.0.0.1"
+port = 3005
+
+[download]
+# Fetch a log as soon as it appears, which in practice means after a flight.
+auto = true
+
+# On a database that has never seen this vehicle every log looks new. Rather
+# than pull a whole SD card the first time logloader runs, take only the most
+# recent one; everything else is available from the Logs page.
+latest_on_first_start = true
+
+# A listing with more new logs than this is an unfamiliar card, not a burst of
+# flights: queue only the newest. 0 disables the guard.
+max_auto_queue = 5
+
+# Empty probes "@MAV_LOG", then /fs/microsd/log and /APM/LOGS.
+remote_directory = ""
+
+[upload]
+# Upload what was fetched automatically.
+auto = true
+
+# Flight Review on this companion, reachable at /flight-review.
+[upload.local]
+enabled = true
+url = "http://127.0.0.1:5006"
+public = true
+
+[upload.remote]
+enabled = false
+url = "https://review.px4.io"
 email = ""
-upload_enabled = false
-public_logs = false
-# Where logloader stages downloaded ulogs (FHS runtime data dir, created by postinst).
-application_directory = "/var/lib/ark-os/logs/"
+public = false
+
+# Per-account key for an authenticated Flight Review. Empty sends no auth
+# headers at all, which is what open servers expect.
+api_key = ""

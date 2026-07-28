@@ -6,6 +6,12 @@ module.exports = {
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true
+      },
+      // nginx serves this in production; the Logs page links plots here.
+      '/flight-review': {
+        target: 'http://localhost:5006',
+        changeOrigin: true,
+        pathRewrite: { '^/flight-review': '' }
       }
     }
   }

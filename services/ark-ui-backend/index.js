@@ -23,12 +23,14 @@ const NETWORK_SERVICE_URL = process.env.NETWORK_SERVICE_URL || 'http://localhost
 const SERVICE_MANAGER_URL = process.env.SERVICE_MANAGER_URL || 'http://localhost:3002';
 const AUTOPILOT_SERVICE_URL = process.env.AUTOPILOT_SERVICE_URL || 'http://localhost:3003';
 const SYSTEM_SERVICE_URL = process.env.SYSTEM_SERVICE_URL || 'http://localhost:3004';
+const LOGLOADER_SERVICE_URL = process.env.LOGLOADER_SERVICE_URL || 'http://localhost:3005';
 
 console.log('Service URLs:');
 console.log(`- NETWORK_SERVICE_URL: ${NETWORK_SERVICE_URL}`);
 console.log(`- SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}`);
 console.log(`- AUTOPILOT_SERVICE_URL: ${AUTOPILOT_SERVICE_URL}`);
 console.log(`- SYSTEM_SERVICE_URL: ${SYSTEM_SERVICE_URL}`);
+console.log(`- LOGLOADER_SERVICE_URL: ${LOGLOADER_SERVICE_URL}`);
 
 // Service proxy
 app.use('/api/service', createProxyMiddleware({
@@ -78,6 +80,19 @@ app.use('/api/system', createProxyMiddleware({
   }
 }));
 
+// Logloader proxy. Carries an SSE stream (/api/logloader/events), so buffering
+// must stay off for it to be of any use.
+app.use('/api/logloader', createProxyMiddleware({
+  target: LOGLOADER_SERVICE_URL,
+  changeOrigin: true,
+  logLevel: 'warn',
+  onError: (err, req, res) => {
+    console.error(`Logloader proxy error: ${err.message}`);
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Logloader service unavailable' }));
+  }
+}));
+
 // NOW add body parsing middleware AFTER all proxies
 app.use(express.json());
 
@@ -89,7 +104,8 @@ app.get('/health', (req, res) => {
       network: { url: NETWORK_SERVICE_URL },
       service: { url: SERVICE_MANAGER_URL },
       autopilot: { url: AUTOPILOT_SERVICE_URL },
-      system: { url: SYSTEM_SERVICE_URL }
+      system: { url: SYSTEM_SERVICE_URL },
+      logloader: { url: LOGLOADER_SERVICE_URL }
     }
   });
 });

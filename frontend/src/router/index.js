@@ -4,6 +4,7 @@ import ConnectionsPage from '../pages/ConnectionsPage.vue';
 import AutopilotPage from '../pages/AutopilotPage.vue';
 import SystemPage from '../pages/SystemPage.vue';
 import VideoPage from '../pages/VideoPage.vue';
+import LogsPage from '../pages/LogsPage.vue';
 
 const routes = [
   {
@@ -30,6 +31,11 @@ const routes = [
     path: '/video-page',
     name: 'VideoPage',
     component: VideoPage
+  },
+  {
+    path: '/logs-page',
+    name: 'LogsPage',
+    component: LogsPage
   }
 ];
 
