@@ -36,11 +36,15 @@ console.log(`- LOGLOADER_SERVICE_URL: ${LOGLOADER_SERVICE_URL}`);
 app.use('/api/service', createProxyMiddleware({
   target: SERVICE_MANAGER_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Service service unavailable' }));
+  // http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+  // options are ignored, which left every proxy answering a dead upstream with
+  // the default plain-text 504 instead of the JSON the UI expects.
+  on: {
+    error: (err, req, res) => {
+      console.error(`Service proxy error: ${err.message}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Service service unavailable' }));
+    }
   }
 }));
 
@@ -48,11 +52,15 @@ app.use('/api/service', createProxyMiddleware({
 app.use('/api/network', createProxyMiddleware({
   target: NETWORK_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Network proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Network service unavailable' }));
+  // http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+  // options are ignored, which left every proxy answering a dead upstream with
+  // the default plain-text 504 instead of the JSON the UI expects.
+  on: {
+    error: (err, req, res) => {
+      console.error(`Network proxy error: ${err.message}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Network service unavailable' }));
+    }
   }
 }));
 
@@ -60,11 +68,15 @@ app.use('/api/network', createProxyMiddleware({
 app.use('/api/autopilot', createProxyMiddleware({
   target: AUTOPILOT_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Autopilot service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Autopilot service unavailable' }));
+  // http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+  // options are ignored, which left every proxy answering a dead upstream with
+  // the default plain-text 504 instead of the JSON the UI expects.
+  on: {
+    error: (err, req, res) => {
+      console.error(`Autopilot service proxy error: ${err.message}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Autopilot service unavailable' }));
+    }
   }
 }));
 
@@ -72,11 +84,15 @@ app.use('/api/autopilot', createProxyMiddleware({
 app.use('/api/system', createProxyMiddleware({
   target: SYSTEM_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`System service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'System service unavailable' }));
+  // http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+  // options are ignored, which left every proxy answering a dead upstream with
+  // the default plain-text 504 instead of the JSON the UI expects.
+  on: {
+    error: (err, req, res) => {
+      console.error(`System service proxy error: ${err.message}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'System service unavailable' }));
+    }
   }
 }));
 
@@ -85,11 +101,15 @@ app.use('/api/system', createProxyMiddleware({
 app.use('/api/logloader', createProxyMiddleware({
   target: LOGLOADER_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Logloader proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Logloader service unavailable' }));
+  // http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+  // options are ignored, which left every proxy answering a dead upstream with
+  // the default plain-text 504 instead of the JSON the UI expects.
+  on: {
+    error: (err, req, res) => {
+      console.error(`Logloader proxy error: ${err.message}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Logloader service unavailable' }));
+    }
   }
 }));
 

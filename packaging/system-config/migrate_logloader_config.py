@@ -20,12 +20,12 @@ except Exception:
 
 # Old flat key -> where it lives now.
 RENAMES = {
-    'local_server': ('upload', 'local', 'url'),
-    'remote_server': ('upload', 'remote', 'url'),
-    'email': ('upload', 'remote', 'email'),
-    'upload_enabled': ('upload', 'remote', 'enabled'),
-    'public_logs': ('upload', 'remote', 'public'),
-    'remote_api_key': ('upload', 'remote', 'api_key'),
+    'local_server': ('upload_local', 'url'),
+    'remote_server': ('upload_remote', 'url'),
+    'email': ('upload_remote', 'email'),
+    'upload_enabled': ('upload_remote', 'enabled'),
+    'public_logs': ('upload_remote', 'public'),
+    'remote_api_key': ('upload_remote', 'api_key'),
     'application_directory': ('data', 'directory'),
     'remote_log_directory': ('download', 'remote_directory'),
     'ftp_use_burst': ('download', 'use_burst'),
@@ -45,7 +45,7 @@ def migrate(path: str) -> bool:
         return False
 
     # Already migrated, or written against the new layout to begin with.
-    if 'upload' in config or not any(key in config for key in RENAMES):
+    if 'upload_local' in config or 'upload_remote' in config or not any(key in config for key in RENAMES):
         return False
 
     for flat, destination in RENAMES.items():
@@ -62,7 +62,7 @@ def migrate(path: str) -> bool:
         table.setdefault(destination[-1], value)
 
     # local uploads used to be implicit and always on.
-    config.setdefault('upload', {}).setdefault('local', {}).setdefault('enabled', True)
+    config.setdefault('upload_local', {}).setdefault('enabled', True)
 
     with open(path, 'w', encoding='utf-8') as handle:
         toml.dump(config, handle)

@@ -35,12 +35,12 @@ remote_directory = ""
 auto = true
 
 # Flight Review on this companion, reachable at /flight-review.
-[upload.local]
+[upload_local]
 enabled = true
 url = "http://127.0.0.1:5006"
 public = true
 
-[upload.remote]
+[upload_remote]
 enabled = false
 url = "https://review.px4.io"
 email = ""

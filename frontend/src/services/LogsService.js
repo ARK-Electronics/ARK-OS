@@ -29,7 +29,7 @@ export default {
   },
 
   async requestUpload(ids, targets) {
-    return axios.post(ENDPOINTS.upload, targets ? { ids, targets } : { ids });
+    return axios.post(ENDPOINTS.upload, targets && targets.length ? { ids, targets } : { ids });
   },
 
   async cancelRequests(ids) {

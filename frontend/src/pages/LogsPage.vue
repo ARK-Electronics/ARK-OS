@@ -27,6 +27,9 @@
             <span class="dot" :class="status.ftp_available ? 'dot-ok' : 'dot-bad'"></span>
             {{ status.ftp_available ? `MAVLink FTP: ${status.log_root}` : 'MAVLink FTP unavailable' }}
           </span>
+          <span class="status-item warning" v-if="!streamConnected">
+            <i class="fas fa-exclamation-triangle"></i> Live updates disconnected — reconnecting
+          </span>
           <span class="status-item warning" v-if="status.armed">
             <i class="fas fa-exclamation-triangle"></i> Armed — transfers are paused
           </span>
@@ -68,14 +71,14 @@
               <tr>
                 <th class="checkbox-cell">
                   <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected"
-                    @change="toggleAll" title="Select all">
+                    :disabled="!logs.length" @change="toggleAll" title="Select all">
                 </th>
                 <th>Date (local)</th>
                 <th>Name</th>
                 <th>Size</th>
                 <th>On Vehicle</th>
                 <th>Downloaded</th>
-                <th v-for="target in targets" :key="target">{{ targetLabel(target) }}</th>
+                <th v-for="target in targets" :key="target.name">{{ targetLabel(target.name) }}</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -100,18 +103,18 @@
                   <i v-else-if="log.download_requested" class="fas fa-clock state-pending" title="Queued"></i>
                   <i v-else class="fas fa-minus state-muted"></i>
                 </td>
-                <td v-for="target in targets" :key="target">
-                  <a v-if="uploadOf(log, target).uploaded && uploadOf(log, target).location"
-                    :href="plotUrl(target, uploadOf(log, target).location)" target="_blank"
+                <td v-for="target in targets" :key="target.name">
+                  <a v-if="uploadOf(log, target.name).uploaded && uploadOf(log, target.name).location"
+                    :href="plotUrl(target, uploadOf(log, target.name).location)" target="_blank"
                     rel="noopener noreferrer" class="plot-link" title="Open in Flight Review">
                     <i class="fas fa-external-link-alt"></i> View
                   </a>
-                  <i v-else-if="uploadOf(log, target).uploaded" class="fas fa-check state-ok"></i>
-                  <i v-else-if="log.id === status.uploading_id && status.uploading_target === target"
+                  <i v-else-if="uploadOf(log, target.name).uploaded" class="fas fa-check state-ok"></i>
+                  <i v-else-if="log.id === status.uploading_id && status.uploading_target === target.name"
                     class="fas fa-spinner fa-spin state-pending" title="Uploading"></i>
-                  <i v-else-if="uploadOf(log, target).rejected" class="fas fa-ban state-bad"
-                    :title="uploadOf(log, target).message"></i>
-                  <i v-else-if="uploadOf(log, target).requested" class="fas fa-clock state-pending"
+                  <i v-else-if="uploadOf(log, target.name).rejected" class="fas fa-ban state-bad"
+                    :title="uploadOf(log, target.name).message"></i>
+                  <i v-else-if="uploadOf(log, target.name).requested" class="fas fa-clock state-pending"
                     title="Queued"></i>
                   <i v-else class="fas fa-minus state-muted"></i>
                 </td>
@@ -146,9 +149,10 @@
 <script>
 import LogsService from '@/services/LogsService';
 
-// logloader only ever reports the path Flight Review redirected to. The origin
-// is added here so the link works from whatever host the browser is on, which
-// is not the 127.0.0.1 logloader itself uploaded to.
+// logloader only ever reports the path Flight Review redirected to, because
+// that is all the server sends back. The local instance is reachable through
+// nginx on whatever host the browser is on -- not the 127.0.0.1 logloader
+// uploaded to -- so it gets the proxy prefix; a remote one gets its own origin.
 const LOCAL_FLIGHT_REVIEW_PREFIX = '/flight-review';
 
 export default {
@@ -163,7 +167,9 @@ export default {
       error: null,
       busy: false,
       message: '',
+      streamConnected: false,
       eventSource: null,
+      messageTimer: null,
     };
   },
   computed: {
@@ -171,7 +177,7 @@ export default {
       return this.logs.filter((log) => log.downloaded).length;
     },
     uploadedCount() {
-      return this.logs.filter((log) => this.targets.some((t) => this.uploadOf(log, t).uploaded)).length;
+      return this.logs.filter((log) => this.targets.some((t) => this.uploadOf(log, t.name).uploaded)).length;
     },
     allSelected() {
       return this.logs.length > 0 && this.selected.length === this.logs.length;
@@ -187,12 +193,12 @@ export default {
     uploadableSelected() {
       return this.selectedLogs.filter(
         (log) => (log.downloaded || log.present)
-          && this.targets.some((t) => !this.uploadOf(log, t).uploaded)
+          && this.targets.some((t) => !this.uploadOf(log, t.name).uploaded)
       );
     },
     cancellableSelected() {
       return this.selectedLogs.filter(
-        (log) => log.download_requested || this.targets.some((t) => this.uploadOf(log, t).requested)
+        (log) => log.download_requested || this.targets.some((t) => this.uploadOf(log, t.name).requested)
       );
     },
     downloadPercent() {
@@ -207,9 +213,11 @@ export default {
   },
   beforeUnmount() {
     this.disconnectStream();
+    clearTimeout(this.messageTimer);
   },
   methods: {
     async fetchLogs() {
+      this.loading = true;
       try {
         const response = await LogsService.getLogs();
         this.applyPayload(response.data);
@@ -240,6 +248,8 @@ export default {
       const source = new EventSource(LogsService.eventsUrl());
       this.eventSource = source;
 
+      source.onopen = () => { this.streamConnected = true; };
+
       // The full list only arrives when it changed. Transfer progress ticks
       // several times a second and comes through as `status` alone.
       source.addEventListener('logs', (event) => {
@@ -256,7 +266,9 @@ export default {
       });
 
       source.onerror = () => {
-        // Connection-level only; EventSource reconnects on its own.
+        // EventSource reconnects on its own; say so rather than showing a table
+        // that has quietly stopped changing.
+        this.streamConnected = false;
       };
     },
 
@@ -273,18 +285,27 @@ export default {
         this.eventSource.close();
         this.eventSource = null;
       }
+      this.streamConnected = false;
     },
 
     async run(action, describe) {
       this.busy = true;
-      this.message = '';
+      this.setMessage('');
       try {
         const response = await action();
-        this.message = describe(response.data);
+        this.setMessage(describe(response.data));
       } catch (error) {
-        this.message = error.response?.data?.error || error.message || 'Request failed';
+        this.setMessage(error.response?.data?.error || error.message || 'Request failed');
       } finally {
         this.busy = false;
+      }
+    },
+
+    setMessage(text) {
+      clearTimeout(this.messageTimer);
+      this.message = text;
+      if (text) {
+        this.messageTimer = setTimeout(() => { this.message = ''; }, 8000);
       }
     },
 
@@ -303,9 +324,15 @@ export default {
     },
 
     uploadSelected() {
-      const ids = this.uploadableSelected.map((log) => log.id);
+      const logs = this.uploadableSelected;
+      const ids = logs.map((log) => log.id);
+      // Only the targets that are actually missing one of these logs, so a
+      // request cannot re-queue a target that already has them all.
+      const targets = this.targets
+        .filter((t) => logs.some((log) => !this.uploadOf(log, t.name).uploaded))
+        .map((t) => t.name);
       this.run(
-        () => LogsService.requestUpload(ids),
+        () => LogsService.requestUpload(ids, targets),
         (data) => `Queued ${data.queued} log(s) for upload`
       );
     },
@@ -319,6 +346,10 @@ export default {
     },
 
     deleteFile(log) {
+      if (!window.confirm(`Delete the downloaded copy of ${log.name}? `
+        + 'It can be fetched again while it is still on the vehicle.')) {
+        return;
+      }
       this.run(
         () => LogsService.deleteLocalFile(log.id),
         () => `Deleted the local copy of ${log.name}`
@@ -338,7 +369,8 @@ export default {
     },
 
     plotUrl(target, location) {
-      return target === 'local' ? `${LOCAL_FLIGHT_REVIEW_PREFIX}${location}` : location;
+      if (target.name === 'local') return `${LOCAL_FLIGHT_REVIEW_PREFIX}${location}`;
+      return target.url ? `${target.url.replace(/\/$/, '')}${location}` : location;
     },
 
     formatSize(bytes) {
@@ -575,7 +607,7 @@ export default {
 }
 
 .state-muted {
-  color: #999;
+  color: var(--ark-color-grey);
 }
 
 .progress {
