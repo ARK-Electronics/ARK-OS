@@ -2,7 +2,8 @@
 ARK-OS is a collection of software services and tools for drones. These services provide essential features such as mavlink routing, video streaming, automatic flight log upload, flight controller firmware updating, network RTK corrections, and more.
 
 #### Supported targets
-- **ARK Jetson Carrier** <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
+- **ARK Jetson PAB Carrier / PAB Carrier V3** <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
+- **ARK Just a Jetson** <br> https://arkelectron.com/product/ark-just-a-jetson/
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
 - **ARK Just a Pi** <br> https://arkelectron.com/product/ark-just-a-pi/
 
@@ -89,7 +90,7 @@ Re-run `install_ark_os.sh` (it upgrades ARK-OS in place and leaves jtop alone wh
 Installing the package on a device that was set up with the old `install.sh` flow migrates it automatically: the legacy user services and binaries are removed and your previous configs are backed up to `~/.config/ark-os-legacy-backup/`. **Reboot after installing** so no stale user-session services keep holding the autopilot UART / MAVLink ports.
 
 ### Building Jetson images
-To install ARK-OS into a Jetson image during an `ark_jetson_kernel --provision` build (chroot), see `packaging/PLAN.md` Task 9.
+[ark_jetson_kernel](https://github.com/ARK-Electronics/ark_jetson_kernel) installs ARK-OS into the image automatically during a full `build.sh` run (it fetches the pinned release deb and installs it into the rootfs chroot — see `provision.sh` there).
 
 ## Command-line tools
 The package puts its operator scripts on `PATH` via `/etc/profile.d/ark-os.sh`, which adds `/usr/lib/ark-os/scripts`. Each script's shebang points at the bundled venv (`/usr/lib/ark-os/venv/bin/python3`), so there is nothing to source or activate — open a login shell (e.g. SSH in) and run them by name:
@@ -110,12 +111,13 @@ check_fan.sh                  # spin up the cooling fan and confirm it holds ful
 The directory also holds the service start-scripts and other internal helpers; the ones above are the operator-facing tools. The `PATH` entry takes effect on your next login — in the current shell, run `source /etc/profile.d/ark-os.sh` (or invoke a script by its full path under `/usr/lib/ark-os/scripts/`).
 
 ## ARK-UI
-A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local.
+A web based UI is provided to more easily manage your device. The webpage is hosted with nginx and is available at http://jetson.local or http://pi6x.local. Pages: **System** (hardware/resource info, hostname), **Autopilot** (status, firmware update, reset), **Connections** (WiFi/Ethernet/LTE, data usage), **Services** (start/stop, autostart, journal logs, config editing), **Video** (live WebRTC camera stream), and **Logs** (flight log download and upload to Flight Review).
 
-![alt text](ark-ui1.png)
-![alt text](ark-ui2.png)
-![alt text](ark-ui3.png)
-![alt text](ark-ui4.png)
+![System page](ark-ui1.png)
+![Autopilot page](ark-ui2.png)
+![Connections page](ark-ui3.png)
+![Services page](ark-ui4.png)
+![Logs page](ark-ui5.png)
 
 ## Services
 The package installs the services below as system-level [systemd services](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) running as the unprivileged platform user (`jetson` or `pi`). The always-on services are enabled automatically; the optional services (`dds-agent`, `logloader`, `polaris`, `pointperfect`, `flight-review`, `rid-transmitter`) are installed but disabled — enable them from the web UI or with `systemctl enable --now <service>`.
@@ -123,19 +125,22 @@ The package installs the services below as system-level [systemd services](https
 ## Jetson and Pi
 
 **mavlink-router.service** <br>
-This service enables mavlink-router to route mavlink packets from the flight controller USB port to user defined UDP endpoints. You can add and remove endpoints using the service configuration enditor in the UI.
+This service enables mavlink-router to route mavlink packets from the flight controller USB port to user defined UDP endpoints. You can add and remove endpoints using the service configuration editor in the UI.
 
 **dds-agent.service** <br>
 The dds-agent service bridges the PX4 uORB and ROS2 topics. The bridged topics are defined in PX4 Firmware and can be [found here](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/uxrce_dds_client/dds_topics.yaml). The **dds-agent** runs the [micro-xrce-dds-agent](https://github.com/eProsima/Micro-XRCE-DDS-Agent) over the high speed serial connection between flight controller and Companion.
 
 **logloader.service** <br>
-This service downloads log files from the SD card of the flight controller via MAVLink and optionally uploads them to [PX4 Flight Review](https://review.px4.io/).
+This service downloads log files from the SD card of the flight controller via MAVLink and optionally uploads them to [PX4 Flight Review](https://review.px4.io/). Driven from the web UI's **Logs** page.
 
 **flight-review.service** <br>
 This service hosts a local PX4 Flight Review server on port 5006. All logloader downloaded logs are available here.
 
 **rtsp-server.service** <br>
-This service provides an RTSP server via gstreamer. The stream from the first connected CSI camera can be accessed by default at `rtsp://<hostname>.local:5600/camera1`. It can also be viewed in the web UI's **Video** page, which plays a browser-friendly HLS restream of the feed. This runs on demand — the camera and encoder spin up only while the Video page is open and stop shortly after you leave it — and is controlled by `enabled` under `[hls]` in the rtsp-server config (on by default; set false to disable the Video page).
+This service provides an RTSP server via gstreamer. The stream from the first connected CSI camera can be accessed by default at `rtsp://<hostname>.local:5600/camera1`.
+
+**go2rtc.service** <br>
+This service restreams the RTSP feed to the browser over WebRTC for the web UI's **Video** page. It runs on demand — the camera and encoder spin up only while the Video page is open and stop shortly after you leave it.
 
 **polaris.service** <br>
 This service receives RTCM corrections from the PointOne GNSS Corrections service and publishes them to the flight controller via MAVLink.
@@ -152,7 +157,7 @@ This service provides a REST API for linux system management via the ARK UI.
 **autopilot-manager.service** <br>
 This service provides a REST API for autopilot management via the ARK UI.
 
-**connecton-manager.service** <br>
+**connection-manager.service** <br>
 This service provides a REST API for connection management via the ARK UI.
 
 **service-manager.service** <br>
