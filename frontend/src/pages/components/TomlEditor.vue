@@ -5,9 +5,21 @@
         <h1>{{ serviceName }}</h1>
 
         <div class="toml-editor">
+          <!-- Link callouts from the service's UI hints; no beforeField = top of the form -->
+          <a
+            v-for="callout in calloutsBefore(null)"
+            :key="callout.url"
+            :href="callout.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="callout-link"
+          >
+            <span class="callout-text">{{ callout.text }}</span>
+            <span class="callout-cta">{{ callout.cta }}</span>
+          </a>
+
           <!-- Top-level primitive values first (skip *_options arrays used for dropdowns) -->
           <div v-for="key in topLevelFieldKeys" :key="key" class="form-group">
-            <!-- Link callouts declared in the service's UI hints -->
             <a
               v-for="callout in calloutsBefore(key)"
               :key="callout.url"
@@ -34,7 +46,7 @@
                 :key="option"
                 :value="option"
               >
-                {{ option }}
+                {{ formatValue(option) }}
               </option>
             </select>
 
@@ -94,7 +106,7 @@
                     :key="option"
                     :value="option"
                   >
-                    {{ option }}
+                    {{ formatValue(option) }}
                   </option>
                 </select>
 
@@ -152,6 +164,10 @@ import axios from 'axios';
 import toml from 'toml-js';
 import serviceUiHints from './serviceUiHints.js';
 
+// Display-only casing for tokens the sentence-case default would mangle
+// ("Ntrip host"); config keys and saved values stay lowercase.
+const ACRONYMS = new Set(['ntrip', 'rtcm', 'spartn', 'gga', 'mga', 'tls', 'url', 'api']);
+
 export default {
   name: 'TomlEditor',
   props: {
@@ -197,9 +213,10 @@ export default {
     this.loadConfig();
   },
   methods: {
-    // Link callouts the hints place above a given top-level field
+    // Link callouts for a given slot: a top-level field name, or null for
+    // the top of the form
     calloutsBefore(key) {
-      return (this.uiHints.callouts || []).filter((c) => c.beforeField === key);
+      return (this.uiHints.callouts || []).filter((c) => (c.beforeField || null) === key);
     },
 
     isObject(value) {
@@ -405,8 +422,22 @@ export default {
     },
 
     formatKey(key) {
-      // Capitalize first letter and replace underscores with spaces
-      return key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+      // Sentence case, with known acronyms uppercased
+      return key
+        .split('_')
+        .map((word, i) => {
+          if (ACRONYMS.has(word)) {
+            return word.toUpperCase();
+          }
+          return i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+        })
+        .join(' ');
+    },
+
+    // Dropdown option display text; the underlying value is unchanged
+    formatValue(option) {
+      const token = String(option).toLowerCase();
+      return ACRONYMS.has(token) ? token.toUpperCase() : option;
     }
   }
 };
