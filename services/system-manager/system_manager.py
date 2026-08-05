@@ -58,6 +58,9 @@ class Power(BaseModel):
     jetson_clocks: str | None
     total: float
     temperature: dict[str, float] = Field(default_factory=dict)
+    # Optional rail measurements (Modalix INA238); volts / amps when known
+    voltage: float | None = None
+    current: float | None = None
 
 
 class Usage(BaseModel):
@@ -554,28 +557,54 @@ class ModalixCollector(SystemInfoCollector):
         # Power: /run/ark-jaj/sys-power from INA238 userspace (or future hwmon)
         # Frontend expects power.total in milliwatts (Jetson jtop convention).
         power_total_mw = 0.0
-        power_uW = cls._read_file(f"{cls._POWER_DIR}/power_uW")
-        if power_uW and power_uW.lstrip("-").isdigit():
-            power_total_mw = float(power_uW) / 1000.0
-        else:
-            # Fallback: try in-kernel hwmon ina238 if present
+        voltage_V: float | None = None
+        current_A: float | None = None
+
+        def _num(s: str | None) -> float | None:
+            if s is None:
+                return None
+            s = s.strip()
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        power_uW = _num(cls._read_file(f"{cls._POWER_DIR}/power_uW"))
+        voltage_uV = _num(cls._read_file(f"{cls._POWER_DIR}/voltage_uV"))
+        current_uA = _num(cls._read_file(f"{cls._POWER_DIR}/current_uA"))
+        if power_uW is not None:
+            power_total_mw = power_uW / 1000.0
+        if voltage_uV is not None:
+            voltage_V = voltage_uV / 1e6
+        if current_uA is not None:
+            current_A = current_uA / 1e6
+
+        if power_uW is None and voltage_V is None:
+            # Fallback: in-kernel hwmon ina238 (power1 µW, in1 mV, curr1 mA)
             try:
                 for name in os.listdir("/sys/class/hwmon"):
                     base = f"/sys/class/hwmon/{name}"
-                    hwname = cls._read_file(f"{base}/name") or ""
-                    if hwname.lower() in ("ina238", "ina2xx"):
-                        pw = cls._read_file(f"{base}/power1_input")  # microwatts
-                        if pw and pw.lstrip("-").isdigit():
-                            power_total_mw = float(pw) / 1000.0
-                        break
+                    hwname = (cls._read_file(f"{base}/name") or "").lower()
+                    if hwname not in ("ina238", "ina2xx"):
+                        continue
+                    pw = _num(cls._read_file(f"{base}/power1_input"))
+                    if pw is not None:
+                        power_total_mw = pw / 1000.0
+                    vin = _num(cls._read_file(f"{base}/in1_input"))
+                    if vin is not None:
+                        voltage_V = vin / 1000.0  # mV → V
+                    cur = _num(cls._read_file(f"{base}/curr1_input"))
+                    if cur is not None:
+                        current_A = cur / 1000.0  # mA → A
+                    break
             except OSError:
                 pass
 
         # Die temp from INA238 publisher if available (millidegC → °C)
         temperatures: dict[str, float] = {}
-        temp_mC = cls._read_file(f"{cls._POWER_DIR}/temp_mC")
-        if temp_mC and temp_mC.lstrip("-").isdigit():
-            temperatures["ina238"] = float(temp_mC) / 1000.0
+        temp_mC = _num(cls._read_file(f"{cls._POWER_DIR}/temp_mC"))
+        if temp_mC is not None:
+            temperatures["ina238"] = temp_mC / 1000.0
 
         return {
             "hardware": {
@@ -586,6 +615,8 @@ class ModalixCollector(SystemInfoCollector):
             },
             "power": {
                 "total": power_total_mw,
+                "voltage": voltage_V,
+                "current": current_A,
                 "temperature": temperatures,
             },
         }
@@ -653,6 +684,8 @@ def get_system_info() -> SystemInfo:
             jetson_clocks=None,
             total=float(pw.get("total", 0) or 0),
             temperature=pw.get("temperature") or {},
+            voltage=pw.get("voltage"),
+            current=pw.get("current"),
         )
     elif JetsonCollector.is_jetson():
         device_type = "jetson"

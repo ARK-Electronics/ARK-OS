@@ -213,6 +213,13 @@ export default {
         data['Power Mode'] = power?.nvpmodel || 'Not available';
         data['Jetson Clocks'] = power?.jetson_clocks || 'Not available';
       }
+      // Rail voltage / current when provided (Modalix INA238)
+      if (power?.voltage != null && Number(power.voltage) > 0) {
+        data['Voltage'] = `${Number(power.voltage).toFixed(2)} V`;
+      }
+      if (power?.current != null && Number.isFinite(Number(power.current))) {
+        data['Current'] = `${Number(power.current).toFixed(3)} A`;
+      }
       // Jetson jtop and Modalix INA238 both use power.total in milliwatts
       data['Power Draw'] =
         power?.total && power.total > 0
