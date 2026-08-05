@@ -34,3 +34,7 @@ use_tls = true
 # provide localized corrections. The position is taken from the autopilot's
 # GPS_RAW_INT messages and sent every 10 seconds.
 send_gga = true
+
+# Log every correction chunk and every forwarded message. Off by default: the
+# client logs a throughput summary every 30 seconds instead.
+verbose = false
