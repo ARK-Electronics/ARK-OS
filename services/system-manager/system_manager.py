@@ -500,11 +500,26 @@ class ModalixCollector(SystemInfoCollector):
 
     @staticmethod
     def _read_dt_string(path: str) -> str | None:
+        """First NUL-terminated string (model is a single string)."""
         try:
             with open(path, "rb") as f:
                 return f.read().split(b"\x00")[0].decode("utf-8", errors="replace").strip()
         except OSError:
             return None
+
+    @staticmethod
+    def _read_dt_strings(path: str) -> list[str]:
+        """All NUL-separated strings (compatible is a list)."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+            return [
+                p.decode("utf-8", errors="replace").strip()
+                for p in raw.split(b"\x00")
+                if p.strip()
+            ]
+        except OSError:
+            return []
 
     @staticmethod
     def _read_file(path: str) -> str | None:
@@ -518,19 +533,16 @@ class ModalixCollector(SystemInfoCollector):
     def get_modalix_info(cls) -> dict[str, Any]:
         """Model/module/serial from DT + AT24CSW unique ID; power from INA238 publisher."""
         model = cls._read_dt_string("/proc/device-tree/model") or "Modalix"
-        compat = cls._read_dt_string("/proc/device-tree/compatible") or ""
+        compat_list = cls._read_dt_strings("/proc/device-tree/compatible")
 
         # Module: prefer SoM token from compatible (e.g. simaai,modalix-som)
         module = "Modalix SoM"
-        for part in re.split(r"[\x00\s]+", compat):
-            p = part.strip()
-            if not p:
-                continue
-            if "modalix-som" in p or p.endswith("modalix-som"):
-                module = p.replace(",", " / ")
+        for p in compat_list:
+            if "modalix-som" in p:
+                module = p  # e.g. simaai,modalix-som
                 break
-            if "modalix" in p and "just" not in p:
-                module = p.replace(",", " / ")
+            if p.startswith("simaai,") and "modalix" in p:
+                module = p
 
         # Serial: ARK JAJ unique ID from AT24CSW010 (ark-jaj-sys-power)
         serial = (
