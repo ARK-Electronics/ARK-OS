@@ -18,8 +18,10 @@ ARK="$PKG_PREFIX"   # /usr/lib/ark-os
 # Trixie's time64 transition renamed libssl3 -> libssl3t64, handled in control by the
 # alternative "libssl3t64 | libssl3"; use the same idiom if a future release renames more.
 case "$P" in
-    jetson) EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
-    pi)     EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
+    jetson)  EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
+    pi)      EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
+    # eLxr/Modalix: base gstreamer deps only; no Jetson BT QMI stack, no raspi-utils.
+    modalix) EXTRA_DEPENDS="" ;;
 esac
 
 # --- directory skeleton ---
@@ -111,8 +113,10 @@ mkdir -p "$DEFAULTS"
 install -m 0644 services/mavlink-router/main.conf "$DEFAULTS/mavlink-router.conf"
 for f in packaging/config/*; do
     base=$(basename "$f")
-    # rid-transmitter is jetson-only; skip its config on pi.
-    [ "$P" = "pi" ] && [ "$base" = "rid-transmitter.toml" ] && continue
+    # rid-transmitter is jetson-only; skip on pi and modalix.
+    if { [ "$P" = "pi" ] || [ "$P" = "modalix" ]; } && [ "$base" = "rid-transmitter.toml" ]; then
+        continue
+    fi
     install -m 0644 "$f" "$DEFAULTS/$base"
 done
 install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
@@ -131,7 +135,8 @@ install -m 0644 platform/common/wifi/99-network.pkla \
 
 # --- service-manager polkit rule: substitute @ARK_USER@; pi strips JETSON-ONLY ---
 SMR="$PKG/etc/polkit-1/rules.d/03-ark-service-manager.rules"
-if [ "$P" = "pi" ]; then
+if [ "$P" = "pi" ] || [ "$P" = "modalix" ]; then
+    # No Jetson-only polkit grants (jtop etc.) on Pi or Modalix.
     sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/03-ark-service-manager.rules \
         | grep -v 'JETSON-ONLY' > "$SMR"
 else

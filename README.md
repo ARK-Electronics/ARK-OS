@@ -3,7 +3,8 @@ ARK-OS is a collection of software services and tools for drones. These services
 
 #### Supported targets
 - **ARK Jetson PAB Carrier / PAB Carrier V3** <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
-- **ARK Just a Jetson** <br> https://arkelectron.com/product/ark-just-a-jetson/
+- **ARK Just a Jetson** (Jetson Orin NX/Nano) <br> https://arkelectron.com/product/ark-just-a-jetson/
+- **ARK Just a Jetson + SiMa Modalix SoM** (eLxr) — platform `modalix` (see `platform/modalix/README.md`)
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
 - **ARK Just a Pi** <br> https://arkelectron.com/product/ark-just-a-pi/
 
@@ -17,6 +18,7 @@ ssh <user>@<hostname>.local
 |--------|----------|----------|
 | jetson | jetson   | jetson   |
 | pi     | pi       | pi6x     |
+| sima   | edgeai   | modalix (SiMa eLxr / JAJ+Modalix) |
 
 Connect to your WiFi network using Network Manager
 ```
@@ -57,6 +59,17 @@ sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 # Recommended: jtop, for Jetson system stats in the web UI
 sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
 ```
+
+#### Modalix (SiMa eLxr 12 / ARK JAJ + Modalix)
+Flash the SiMa eLxr base image first (see meta-ark-simaai bring-up), then install the
+`modalix` package as user **`sima`**. No jetson-stats. Build on arm64 Debian 12 or eLxr 12:
+
+```
+./packaging/build.sh modalix --version=X.Y.Z
+sudo ./packaging/install_ark_os.sh --platform=modalix ./ark-os-modalix-bookworm_X.Y.Z_arm64.deb
+```
+
+Details: [`platform/modalix/README.md`](platform/modalix/README.md).
 
 #### Raspberry Pi
 Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:

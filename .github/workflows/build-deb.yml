@@ -39,6 +39,15 @@ jobs:
             runner: ubuntu-22.04-arm
             container: "debian:trixie"
             extra_deps: ""
+          # Modalix eLxr 12 (aria) is Debian 12 / Python 3.11 class. No public eLxr
+          # container on GH runners yet — build in debian:bookworm and name the
+          # package ark-os-modalix-bookworm for install testing; prefer a native
+          # aarch64 eLxr 12 host for ark-os-modalix-aria release builds.
+          - platform: modalix
+            codename: bookworm
+            runner: ubuntu-22.04-arm
+            container: "debian:bookworm"
+            extra_deps: ""
     # Build each platform on a host whose OS matches the target so the bundled venv
     # and natively-compiled binaries are ABI-compatible. The venv is created with
     # `python3 -m venv --copies`, which ships the interpreter but resolves the stdlib
@@ -47,6 +56,7 @@ jobs:
     #   - jetson: ubuntu-22.04-arm natively    (Jammy / Python 3.10  = JetPack 6 rootfs)
     #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS Bookworm)
     #   - pi:     a debian:trixie   container  (Debian 13 / Python 3.13 = Raspberry Pi OS Trixie)
+    #   - modalix: debian:bookworm container   (Python 3.11 ≈ eLxr 12 / aria)
     # The container runs on the same arm64 host. Each leg's `codename` (the host's OS
     # release) is part of the package name (ark-os-<platform>-<codename>); supporting a
     # new release is one more leg here plus an entry in build.sh's BASELINES table.

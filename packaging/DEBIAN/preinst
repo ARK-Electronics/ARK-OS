@@ -13,7 +13,17 @@ want="@CODENAME@"
 have=""
 [ -r /etc/os-release ] && have="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
 
-if [ -n "$have" ] && [ "$have" != "$want" ]; then
+# Modalix: eLxr 12 (aria) is Debian 12 / Python 3.11 class, same as bookworm CI builds.
+compatible_codename=0
+if [ "$have" = "$want" ]; then
+    compatible_codename=1
+elif [ "@PLATFORM@" = "modalix" ] && { [ "$want" = "bookworm" ] && [ "$have" = "aria" ]; }; then
+    compatible_codename=1
+elif [ "@PLATFORM@" = "modalix" ] && { [ "$want" = "aria" ] && [ "$have" = "bookworm" ]; }; then
+    compatible_codename=1
+fi
+
+if [ -n "$have" ] && [ "$compatible_codename" -eq 0 ]; then
     echo "ERROR: ark-os-@PLATFORM@-$want is built for the '$want' OS release, but this system is '$have'." >&2
     echo "       Its bundled runtime will not work here — install the ark-os-@PLATFORM@-$have build instead." >&2
     if [ "${ARK_OS_ALLOW_CODENAME_MISMATCH:-0}" != "1" ]; then

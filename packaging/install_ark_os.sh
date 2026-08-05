@@ -51,7 +51,7 @@ Positional:
                             --ark-os-version is given.
 
 Options:
-  --platform=jetson|pi      Override platform autodetection.
+  --platform=jetson|pi|modalix  Override platform autodetection.
   --codename=NAME           Override OS-release codename autodetection (bookworm, trixie,
                             jammy, …). Only needed to name a download when /etc/os-release
                             can't be read.
@@ -99,19 +99,30 @@ JETSON_STATS_VERSION="${OPT_JETSON_STATS_VERSION:-${JETSON_STATS_VERSION:-}}"
 # --- Helpers ---
 platform_from_deb() {
     case "$(basename "$1")" in
-        ark-os-jetson-*) echo jetson ;;
-        ark-os-pi-*)     echo pi ;;
+        ark-os-jetson-*)  echo jetson ;;
+        ark-os-pi-*)      echo pi ;;
+        ark-os-modalix-*) echo modalix ;;
         *)               return 1 ;;
     esac
 }
 
 detect_platform() {
     [ -f /etc/nv_tegra_release ] && { echo jetson; return; }
+    # SiMa eLxr on Modalix (ARK Just a Jetson + Modalix SoM, etc.)
+    if [ -r /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        . /etc/os-release
+        if [ "${ID:-}" = "elxr" ] || [ "${ID_LIKE:-}" = *"elxr"* ]; then
+            echo modalix
+            return
+        fi
+    fi
     if [ -r /proc/device-tree/model ]; then
         local model; model="$(tr -d '\0' < /proc/device-tree/model)"
         case "$model" in
             *Jetson*|*Tegra*) echo jetson; return ;;
             *Raspberry*Pi*)   echo pi;     return ;;
+            *Modalix*|*modalix*|*Just\ a\ Jetson*) echo modalix; return ;;
         esac
     fi
     return 1
@@ -156,8 +167,8 @@ if [ -z "$PLATFORM" ] && [ -n "$DEB_ARG" ]; then
     PLATFORM="$(platform_from_deb "$DEB_ARG" || true)"
 fi
 [ -n "$PLATFORM" ] || PLATFORM="$(detect_platform || true)"
-[ -n "$PLATFORM" ] || die "could not determine platform; pass --platform=jetson|pi."
-case "$PLATFORM" in jetson|pi) ;; *) die "invalid platform '$PLATFORM' (expected jetson or pi)." ;; esac
+[ -n "$PLATFORM" ] || die "could not determine platform; pass --platform=jetson|pi|modalix."
+case "$PLATFORM" in jetson|pi|modalix) ;; *) die "invalid platform '$PLATFORM' (expected jetson|pi|modalix)." ;; esac
 info "Platform: $PLATFORM"
 
 # Codename: explicit flag wins; otherwise read from the device's /etc/os-release.

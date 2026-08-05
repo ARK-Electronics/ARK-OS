@@ -1,0 +1,19 @@
+[Unit]
+Description=Mavlink Router
+Wants=network.target
+After=network-online.target
+# Cap the no-FC crash-loop: 5 failed starts within 60s fail the unit permanently
+# (until reset-failed/reboot); a re-plug within the window still recovers in ~5s.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=sima
+Group=sima
+ExecStart=/usr/lib/ark-os/libexec/start_mavlink_router.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target ark-os.target
