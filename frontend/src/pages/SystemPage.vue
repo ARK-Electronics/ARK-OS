@@ -88,17 +88,24 @@
                 </div>
               </div>
 
-              <div class="memory-item">
+              <div
+                v-for="(disk, idx) in diskVolumes"
+                :key="disk.device || idx"
+                class="memory-item"
+              >
                 <ProgressBar
-                  label="Disk"
-                  :value="diskPercent"
+                  :label="diskLabel(disk)"
+                  :value="disk.percent || 0"
                   :showPercentage="true"
                   :warningThreshold="80"
                   :criticalThreshold="90"
                 />
                 <div class="memory-info">
-                  <span>{{ formatDiskSize(diskTotal) }} Total</span>
-                  <span>{{ formatDiskSize(diskAvailable) }} Available</span>
+                  <span>{{ formatDiskSize(disk.total) }} Total</span>
+                  <span v-if="disk.mountpoint">
+                    {{ formatDiskSize(disk.available) }} Available
+                  </span>
+                  <span v-else class="disk-unmounted">Not mounted</span>
                 </div>
               </div>
             </div>
@@ -333,6 +340,28 @@ export default {
     diskAvailable() {
       const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
       return disk?.available || 0;
+    },
+
+    /** All physical disks (eMMC + NVMe etc.); fall back to root-only disk field. */
+    diskVolumes() {
+      const disks = this.systemInfo?.resources?.disks;
+      if (Array.isArray(disks) && disks.length > 0) {
+        return disks;
+      }
+      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
+      if (!disk) return [];
+      return [
+        {
+          name: 'Disk',
+          device: '/',
+          mountpoint: '/',
+          total: disk.total || 0,
+          used: disk.used || 0,
+          available: disk.available || 0,
+          percent: disk.percent || 0,
+          model: ''
+        }
+      ];
     }
   },
 
@@ -438,7 +467,16 @@ export default {
 
     formatDiskSize(sizeInGB) {
       if (!sizeInGB) return '0 GB';
+      if (sizeInGB >= 100) return `${sizeInGB.toFixed(0)} GB`;
       return `${sizeInGB.toFixed(1)} GB`;
+    },
+
+    diskLabel(disk) {
+      if (!disk) return 'Disk';
+      const name = disk.name || disk.device || 'Disk';
+      if (disk.mountpoint === '/') return `${name} (/)`;
+      if (disk.mountpoint) return `${name} (${disk.mountpoint})`;
+      return name;
     }
   }
 }
@@ -552,6 +590,11 @@ export default {
 
 .memory-info span:first-child {
   font-weight: 500;
+}
+
+.disk-unmounted {
+  font-style: italic;
+  color: #999;
 }
 
 .temp-scroll-container {

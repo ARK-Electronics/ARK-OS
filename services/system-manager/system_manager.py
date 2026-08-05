@@ -70,9 +70,22 @@ class Usage(BaseModel):
     percent: float
 
 
+class DiskVolume(BaseModel):
+    """One physical disk or mounted volume for the Memory/storage card."""
+    name: str          # short label, e.g. eMMC, NVMe, mmcblk0
+    device: str        # /dev/mmcblk0 or /dev/nvme0n1
+    mountpoint: str    # e.g. / or empty if not mounted
+    total: float       # GiB
+    used: float
+    available: float
+    percent: float
+    model: str = ""    # optional drive model string
+
+
 class Resources(BaseModel):
     memory: Usage
-    disk: Usage
+    disk: Usage  # root filesystem (backward compatible)
+    disks: list[DiskVolume] = Field(default_factory=list)
     cpu_count: int
 
 
@@ -140,6 +153,7 @@ class SystemInfoCollector:
                 "available": du.free / (1024**3),
                 "percent": du.percent
             },
+            "disks": SystemInfoCollector.get_disk_volumes(),
             "network_interfaces": {}
         }
 
@@ -168,6 +182,179 @@ class SystemInfoCollector:
             info["codename"] = "unknown"
 
         return info
+
+    @staticmethod
+    def _parent_disk(dev: str) -> str:
+        """/dev/mmcblk0p4 -> mmcblk0; /dev/nvme0n1p1 -> nvme0n1; /dev/sda1 -> sda."""
+        base = os.path.basename(dev)
+        if base.startswith("nvme") and "p" in base[4:]:
+            return re.sub(r"p\d+$", "", base)
+        if re.match(r".*p\d+$", base) and (
+            base.startswith("mmcblk") or base.startswith("sd") or base.startswith("vd")
+        ):
+            return re.sub(r"p\d+$", "", base)
+        m = re.match(r"^(sd[a-z]+|vd[a-z]+|hd[a-z]+)\d+$", base)
+        if m:
+            return m.group(1)
+        return base
+
+    @staticmethod
+    def _disk_label(disk: str, model: str = "") -> str:
+        if disk.startswith("mmcblk"):
+            return "eMMC" if not model else f"eMMC ({model})"
+        if disk.startswith("nvme"):
+            return "NVMe" if not model else f"NVMe ({model.strip()})"
+        if disk.startswith("sd") or disk.startswith("vd"):
+            return model.strip() if model.strip() else disk
+        return disk
+
+    @staticmethod
+    def get_disk_volumes() -> list[dict[str, Any]]:
+        """List physical disks: root usage + any other whole disks (e.g. unmounted NVMe)."""
+        gib = 1024.0 ** 3
+        # parent_disk -> aggregated stats
+        by_disk: dict[str, dict[str, Any]] = {}
+
+        # Mounted real filesystems
+        try:
+            partitions = psutil.disk_partitions(all=False)
+        except Exception:
+            partitions = []
+
+        for part in partitions:
+            dev = part.device or ""
+            if not dev.startswith("/dev/"):
+                continue
+            if any(
+                x in dev
+                for x in ("/loop", "/ram", "/zram", "/dm-", "/mapper/")
+            ):
+                continue
+            fstype = (part.fstype or "").lower()
+            if fstype in ("", "tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs"):
+                continue
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+            except OSError:
+                continue
+            parent = SystemInfoCollector._parent_disk(dev)
+            entry = by_disk.setdefault(
+                parent,
+                {
+                    "name": parent,
+                    "device": f"/dev/{parent}",
+                    "mountpoint": "",
+                    "total": 0.0,
+                    "used": 0.0,
+                    "available": 0.0,
+                    "percent": 0.0,
+                    "model": "",
+                    "_root_usage": None,
+                },
+            )
+            # Prefer filesystem stats from "/" for the root disk
+            if part.mountpoint == "/":
+                entry["mountpoint"] = "/"
+                entry["_root_usage"] = usage
+            elif not entry["mountpoint"]:
+                entry["mountpoint"] = part.mountpoint
+                if entry["_root_usage"] is None:
+                    entry["_root_usage"] = usage
+
+        # Whole-disk sizes from sysfs (covers unmounted NVMe etc.)
+        sys_block = "/sys/block"
+        try:
+            block_devs = os.listdir(sys_block)
+        except OSError:
+            block_devs = []
+
+        for disk in sorted(block_devs):
+            if disk.startswith(("loop", "ram", "zram", "dm-", "sr", "fd")):
+                continue
+            if "boot" in disk:  # mmcblk0boot0
+                continue
+            size_path = f"{sys_block}/{disk}/size"
+            try:
+                with open(size_path, "r") as f:
+                    sectors = int(f.read().strip())
+            except (OSError, ValueError):
+                continue
+            total_gib = (sectors * 512) / gib
+            if total_gib < 0.1:
+                continue
+
+            model = ""
+            for mp in (
+                f"{sys_block}/{disk}/device/model",
+                f"{sys_block}/{disk}/device/name",
+            ):
+                try:
+                    with open(mp, "r") as f:
+                        model = f.read().strip()
+                    if model:
+                        break
+                except OSError:
+                    pass
+
+            if disk not in by_disk:
+                by_disk[disk] = {
+                    "name": disk,
+                    "device": f"/dev/{disk}",
+                    "mountpoint": "",
+                    "total": total_gib,
+                    "used": 0.0,
+                    "available": total_gib,
+                    "percent": 0.0,
+                    "model": model,
+                    "_root_usage": None,
+                }
+            else:
+                by_disk[disk]["total"] = total_gib
+                by_disk[disk]["model"] = model or by_disk[disk].get("model", "")
+
+        # Build sorted list: root disk first, then others by name
+        volumes: list[dict[str, Any]] = []
+        for disk, e in by_disk.items():
+            total = float(e.get("total") or 0)
+            usage = e.get("_root_usage")
+            if usage is not None:
+                # Show the mounted filesystem usage (root partition on eMMC)
+                used = usage.used / gib
+                avail = usage.free / gib
+                # Keep device capacity as total when larger (whole eMMC)
+                fs_total = usage.total / gib
+                if total < fs_total:
+                    total = fs_total
+                pct = float(usage.percent)
+                mount = e.get("mountpoint") or ""
+            else:
+                # Unmounted whole disk (e.g. NVMe with old partition table)
+                used = 0.0
+                avail = total
+                pct = 0.0
+                mount = ""
+            if total <= 0:
+                continue
+            volumes.append(
+                {
+                    "name": SystemInfoCollector._disk_label(disk, e.get("model", "")),
+                    "device": e["device"],
+                    "mountpoint": mount,
+                    "total": total,
+                    "used": used,
+                    "available": avail,
+                    "percent": pct,
+                    "model": e.get("model") or "",
+                }
+            )
+
+        def sort_key(v: dict[str, Any]) -> tuple:
+            # Root-bearing disk first
+            is_root = 0 if v.get("mountpoint") == "/" else 1
+            return (is_root, v.get("device") or "")
+
+        volumes.sort(key=sort_key)
+        return volumes
 
     @staticmethod
     def get_temperature_info() -> dict[str, Any]:
@@ -800,6 +987,19 @@ def get_system_info() -> SystemInfo:
                 available=common["disk"]["available"],
                 percent=common["disk"]["percent"],
             ),
+            disks=[
+                DiskVolume(
+                    name=d["name"],
+                    device=d["device"],
+                    mountpoint=d.get("mountpoint") or "",
+                    total=float(d["total"]),
+                    used=float(d["used"]),
+                    available=float(d["available"]),
+                    percent=float(d["percent"]),
+                    model=d.get("model") or "",
+                )
+                for d in (common.get("disks") or [])
+            ],
             cpu_count=common["cpu_count"],
         ),
         network=network,
