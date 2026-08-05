@@ -7,6 +7,18 @@
         <div class="toml-editor">
           <!-- Top-level primitive values first (skip *_options arrays used for dropdowns) -->
           <div v-for="key in topLevelFieldKeys" :key="key" class="form-group">
+            <!-- Where to sign up for the service account, shown with the credentials -->
+            <a
+              v-if="accountSignup && accountSignup.beforeField === key"
+              :href="accountSignup.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="signup-link"
+            >
+              <span class="signup-text">{{ accountSignup.text }}</span>
+              <span class="signup-cta">{{ accountSignup.cta }}</span>
+            </a>
+
             <label :for="key">{{ formatKey(key) }}</label>
 
             <!-- Dropdown when a sibling <field>_options array is present -->
@@ -138,6 +150,18 @@
 import axios from 'axios';
 import toml from 'toml-js';
 
+// Where customers sign up for the account a service needs credentials from,
+// keyed by service name. Rendered above the field named by beforeField so the
+// prompt sits with the credentials it belongs to.
+const ACCOUNT_SIGNUPS = {
+  pointperfect: {
+    beforeField: 'ntrip_username',
+    text: 'PointPerfect corrections require a u-blox Thingstream account.',
+    cta: 'Create an account',
+    url: 'https://portal.thingstream.io/register?token=eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJjdG9rOmYzNGRkMTg2LWNjYWUtNDZhMS1hNWRmLWRiM2UxYjMwZWI5MCIsImF1ZCI6IlRoaW5nc3RyZWFtIiwiY21wIjoicmVkZW1wdGlvbi1jYW1wYWlnbjphZmViMmY4OS05MDMzLTQ1YjAtOGE4NC0wZjBhZGVjMzA3MWUifQ.Y0gn8ai-0eJ7LVs8k1uthvj7LM0WSXhefR70p3l6w6XWBD9mrO99NYdal1NS7wfi1DGyM21TMExaXUnFoxVYSA'
+  }
+};
+
 export default {
   name: 'TomlEditor',
   props: {
@@ -154,6 +178,10 @@ export default {
     };
   },
   computed: {
+    // Account signup prompt for this service, if it needs one
+    accountSignup() {
+      return ACCOUNT_SIGNUPS[this.serviceName] || null;
+    },
     // Top-level editable fields (primitives + simple arrays that aren't *_options)
     topLevelFieldKeys() {
       return Object.keys(this.config).filter((key) => {
@@ -438,6 +466,46 @@ h1 {
   font-weight: 600;
   margin-bottom: 8px;
   color: var(--ark-color-black);
+}
+
+.signup-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding: 14px 16px;
+  background-color: var(--ark-color-light-grey);
+  border: 1px solid var(--ark-color-black-shadow);
+  border-left: 4px solid var(--ark-color-blue);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background-color 0.3s ease;
+}
+
+.signup-link:hover {
+  background-color: var(--ark-color-white);
+}
+
+.signup-text {
+  color: var(--ark-color-grey);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.signup-cta {
+  color: var(--ark-color-blue);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.signup-cta::after {
+  content: ' \2192';
+}
+
+.signup-link:hover .signup-cta {
+  color: var(--ark-color-blue-hover);
 }
 
 .text-input,
