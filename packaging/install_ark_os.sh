@@ -180,8 +180,13 @@ info "Platform: $PLATFORM"
 # Every ARK-OS service runs as User=$PLATFORM (baked into the unit files). Modern
 # Raspberry Pi OS no longer ships a default 'pi' account, so fail before touching
 # the system rather than letting the deb's postinst abort on a missing user.
-getent passwd "$PLATFORM" >/dev/null 2>&1 || \
-    die "ARK-OS services run as the user '$PLATFORM', which does not exist on this device. Re-image with the username '$PLATFORM', or create it first: sudo useradd -m -s /bin/bash $PLATFORM && sudo passwd $PLATFORM && sudo usermod -aG sudo $PLATFORM"
+# Service account matches platform for jetson/pi; Modalix eLxr uses 'sima'.
+case "$PLATFORM" in
+    modalix) SERVICE_USER=sima ;;
+    *)       SERVICE_USER=$PLATFORM ;;
+esac
+getent passwd "$SERVICE_USER" >/dev/null 2>&1 || \
+    die "ARK-OS services run as the user '$SERVICE_USER', which does not exist on this device. Re-image with the username '$SERVICE_USER', or create it first: sudo useradd -m -s /bin/bash $SERVICE_USER && sudo passwd $SERVICE_USER && sudo usermod -aG sudo $SERVICE_USER"
 
 # --- Scratch space for downloads ---
 DL_DIR="$(mktemp -d)"
