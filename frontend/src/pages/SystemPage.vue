@@ -33,8 +33,9 @@
           :data="platformData"
         />
 
-        <!-- Libraries Card -->
+        <!-- Libraries Card (Jetson NVIDIA stack only) -->
         <SystemCard
+          v-if="showLibrariesCard"
           title="Libraries"
           icon="fa-book"
           :data="librariesData"
@@ -145,17 +146,34 @@ export default {
              'Unknown';
     },
 
+    deviceType() {
+      return this.systemInfo?.device_type || 'generic';
+    },
+
+    isJetson() {
+      return this.deviceType === 'jetson';
+    },
+
+    showLibrariesCard() {
+      // NVIDIA CUDA stack is Jetson-only; hide empty "Not available" wall on Modalix/Pi
+      return this.isJetson;
+    },
+
     hardwareData() {
       const hw = this.systemInfo?.hardware;
       if (!hw) return { 'Status': 'Data unavailable' };
 
-      return {
+      const data = {
         'Model': hw.model || 'Not available',
         'Module': hw.module || 'Not available',
-        'Serial': hw.serial_number || 'Not available',
-        'L4T': hw.l4t || 'Not available',
-        'JetPack': hw.jetpack || 'Not available'
+        'Serial': hw.serial_number || 'Not available'
       };
+      // L4T / JetPack only on real Jetson
+      if (this.isJetson) {
+        data['L4T'] = hw.l4t || 'Not available';
+        data['JetPack'] = hw.jetpack || 'Not available';
+      }
+      return data;
     },
 
     platformData() {
@@ -173,8 +191,9 @@ export default {
 
     librariesData() {
       const libs = this.systemInfo?.libraries;
-
-      // Always show these fields, even if not available
+      if (!this.isJetson) {
+        return {};
+      }
       return {
         'CUDA': libs?.cuda || 'Not available',
         'OpenCV': libs?.opencv || 'Not available',
@@ -190,19 +209,25 @@ export default {
       const data = {};
       const power = this.systemInfo?.power;
 
-      // Power information (primarily for Jetson)
-      data['Power Mode'] = power?.nvpmodel || 'Not available';
-      data['Jetson Clocks'] = power?.jetson_clocks || 'Not available';
-      data['Power Draw'] = power?.total ? `${(power.total / 1000).toFixed(2)} W` : 'Not available';
+      if (this.isJetson) {
+        data['Power Mode'] = power?.nvpmodel || 'Not available';
+        data['Jetson Clocks'] = power?.jetson_clocks || 'Not available';
+      }
+      // Jetson jtop and Modalix INA238 both use power.total in milliwatts
+      data['Power Draw'] =
+        power?.total && power.total > 0
+          ? `${(power.total / 1000).toFixed(2)} W`
+          : 'Not available';
 
-      // Primary temperatures
-      const temps = this.systemInfo?.temperature || power?.temperature;
-      if (temps) {
+      // Primary temperatures (Jetson has cpu/gpu; Modalix may have ina238 die temp)
+      const temps = this.systemInfo?.temperature || power?.temperature || {};
+      if (this.isJetson) {
         data['CPU Temp'] = temps.cpu ? `${temps.cpu.toFixed(1)}°C` : 'Not available';
         data['GPU Temp'] = temps.gpu ? `${temps.gpu.toFixed(1)}°C` : 'Not available';
-      } else {
-        data['CPU Temp'] = 'Not available';
-        data['GPU Temp'] = 'Not available';
+      } else if (temps.ina238 != null) {
+        data['PMIC Temp'] = `${Number(temps.ina238).toFixed(1)}°C`;
+      } else if (temps.cpu != null) {
+        data['CPU Temp'] = `${Number(temps.cpu).toFixed(1)}°C`;
       }
 
       return data;

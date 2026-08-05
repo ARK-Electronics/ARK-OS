@@ -267,12 +267,30 @@ class JetsonCollector(SystemInfoCollector):
 
     @staticmethod
     def is_jetson() -> bool:
-        """Check if running on a Jetson device"""
+        """Check if running on an NVIDIA Jetson (not ARK JAJ + Modalix).
+
+        Note: the carrier product name "Just a Jetson" also contains "jetson";
+        require NVIDIA/Tegra identity so Modalix eLxr is not mis-detected.
+        """
+        if os.path.isfile("/etc/nv_tegra_release"):
+            return True
         try:
-            with open('/proc/device-tree/model', 'r') as f:
+            with open("/proc/device-tree/compatible", "r") as f:
+                compat = f.read().lower()
+            if "simaai" in compat or "modalix" in compat:
+                return False
+            if "nvidia" in compat or "tegra" in compat:
+                return True
+        except OSError:
+            pass
+        try:
+            with open("/proc/device-tree/model", "r") as f:
                 model = f.read().lower()
-                return 'nvidia' in model or 'jetson' in model
-        except:
+            if "modalix" in model or "simaai" in model:
+                return False
+            # Do not match bare "jetson" (carrier product name on Modalix JAJ)
+            return "nvidia" in model or "tegra" in model
+        except OSError:
             return False
 
     @staticmethod
@@ -437,6 +455,130 @@ class GenericLinuxCollector(SystemInfoCollector):
         return info
 
 
+class ModalixCollector(SystemInfoCollector):
+    """Collector for SiMa Modalix (eLxr) on ARK Just a Jetson / Modalix carriers."""
+
+    _POWER_DIR = "/run/ark-jaj/sys-power"
+    _BOARD_DIR = "/run/ark-jaj/board"
+
+    @staticmethod
+    def is_modalix() -> bool:
+        """Detect Modalix SoM / eLxr (not Jetson, not Pi)."""
+        try:
+            if os.path.isfile("/etc/os-release"):
+                with open("/etc/os-release", "r") as f:
+                    osrel = f.read()
+                if re.search(r"^ID=elxr\b", osrel, re.M) or "elxr" in osrel.lower():
+                    return True
+        except OSError:
+            pass
+        try:
+            with open("/proc/device-tree/model", "r") as f:
+                model = f.read().lower()
+            if "modalix" in model:
+                return True
+            # ARK JAJ carrier with Modalix still says "Just a Jetson" in model
+            if "just a jetson" in model and "nvidia" not in model:
+                # Prefer compatible string to avoid false positives
+                try:
+                    with open("/proc/device-tree/compatible", "r") as f:
+                        compat = f.read().lower()
+                    if "modalix" in compat or "simaai" in compat:
+                        return True
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        try:
+            with open("/proc/device-tree/compatible", "r") as f:
+                compat = f.read().lower()
+            if "modalix" in compat or "simaai,modalix" in compat:
+                return True
+        except OSError:
+            pass
+        return False
+
+    @staticmethod
+    def _read_dt_string(path: str) -> str | None:
+        try:
+            with open(path, "rb") as f:
+                return f.read().split(b"\x00")[0].decode("utf-8", errors="replace").strip()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _read_file(path: str) -> str | None:
+        try:
+            with open(path, "r") as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
+    @classmethod
+    def get_modalix_info(cls) -> dict[str, Any]:
+        """Model/module/serial from DT + AT24CSW unique ID; power from INA238 publisher."""
+        model = cls._read_dt_string("/proc/device-tree/model") or "Modalix"
+        compat = cls._read_dt_string("/proc/device-tree/compatible") or ""
+
+        # Module: prefer SoM token from compatible (e.g. simaai,modalix-som)
+        module = "Modalix SoM"
+        for part in re.split(r"[\x00\s]+", compat):
+            p = part.strip()
+            if not p:
+                continue
+            if "modalix-som" in p or p.endswith("modalix-som"):
+                module = p.replace(",", " / ")
+                break
+            if "modalix" in p and "just" not in p:
+                module = p.replace(",", " / ")
+
+        # Serial: ARK JAJ unique ID from AT24CSW010 (ark-jaj-sys-power)
+        serial = (
+            cls._read_file(f"{cls._BOARD_DIR}/unique_id")
+            or cls._read_file(f"{cls._BOARD_DIR}/unique_id_text")
+            or "Not available"
+        )
+
+        # Power: /run/ark-jaj/sys-power from INA238 userspace (or future hwmon)
+        # Frontend expects power.total in milliwatts (Jetson jtop convention).
+        power_total_mw = 0.0
+        power_uW = cls._read_file(f"{cls._POWER_DIR}/power_uW")
+        if power_uW and power_uW.lstrip("-").isdigit():
+            power_total_mw = float(power_uW) / 1000.0
+        else:
+            # Fallback: try in-kernel hwmon ina238 if present
+            try:
+                for name in os.listdir("/sys/class/hwmon"):
+                    base = f"/sys/class/hwmon/{name}"
+                    hwname = cls._read_file(f"{base}/name") or ""
+                    if hwname.lower() in ("ina238", "ina2xx"):
+                        pw = cls._read_file(f"{base}/power1_input")  # microwatts
+                        if pw and pw.lstrip("-").isdigit():
+                            power_total_mw = float(pw) / 1000.0
+                        break
+            except OSError:
+                pass
+
+        # Die temp from INA238 publisher if available (millidegC → °C)
+        temperatures: dict[str, float] = {}
+        temp_mC = cls._read_file(f"{cls._POWER_DIR}/temp_mC")
+        if temp_mC and temp_mC.lstrip("-").isdigit():
+            temperatures["ina238"] = float(temp_mC) / 1000.0
+
+        return {
+            "hardware": {
+                "type": "modalix",
+                "model": model,
+                "module": module,
+                "serial_number": serial,
+            },
+            "power": {
+                "total": power_total_mw,
+                "temperature": temperatures,
+            },
+        }
+
+
 def get_system_info() -> SystemInfo:
     """Collect all system information as a validated SystemInfo model.
 
@@ -471,7 +613,36 @@ def get_system_info() -> SystemInfo:
         temperature={},
     )
 
-    if JetsonCollector.is_jetson():
+    # Modalix first: carrier DT model may include "Just a Jetson" without NVIDIA.
+    if ModalixCollector.is_modalix():
+        device_type = "modalix"
+        mx = ModalixCollector.get_modalix_info()
+        hw = mx.get("hardware", {})
+        hardware = Hardware(
+            type=hw.get("type", "modalix"),
+            model=hw.get("model", "Modalix"),
+            module=hw.get("module", "Modalix SoM"),
+            serial_number=hw.get("serial_number", "Not available"),
+            l4t="",
+            jetpack="",
+        )
+        libraries = Libraries(
+            cuda="",
+            opencv="",
+            opencv_cuda=False,
+            cudnn="",
+            tensorrt="",
+            vpi="",
+            vulkan="",
+        )
+        pw = mx.get("power", {})
+        power = Power(
+            nvpmodel="",
+            jetson_clocks=None,
+            total=float(pw.get("total", 0) or 0),
+            temperature=pw.get("temperature") or {},
+        )
+    elif JetsonCollector.is_jetson():
         device_type = "jetson"
         jetson_data = JetsonCollector.get_jetson_info()
         if jetson_data:
@@ -510,8 +681,23 @@ def get_system_info() -> SystemInfo:
             model=pi_info.get("model", "Raspberry Pi"),
             module="Not available",
             serial_number=pi_info.get("serial_number", "Unknown"),
-            l4t="Not available",
-            jetpack="Not available",
+            l4t="",
+            jetpack="",
+        )
+        libraries = Libraries(
+            cuda="",
+            opencv="",
+            opencv_cuda=False,
+            cudnn="",
+            tensorrt="",
+            vpi="",
+            vulkan="",
+        )
+        power = Power(
+            nvpmodel="",
+            jetson_clocks=None,
+            total=0,
+            temperature={},
         )
     else:
         device_type = "generic"
@@ -520,8 +706,23 @@ def get_system_info() -> SystemInfo:
             model=generic_info.get("cpu_model", "Generic Linux System"),
             module="Not available",
             serial_number="Not available",
-            l4t="Not available",
-            jetpack="Not available",
+            l4t="",
+            jetpack="",
+        )
+        libraries = Libraries(
+            cuda="",
+            opencv="",
+            opencv_cuda=False,
+            cudnn="",
+            tensorrt="",
+            vpi="",
+            vulkan="",
+        )
+        power = Power(
+            nvpmodel="",
+            jetson_clocks=None,
+            total=0,
+            temperature={},
         )
 
     network = Network(
@@ -630,7 +831,9 @@ if __name__ == '__main__':
     print("Device type detection in progress...")
 
     # Quick device detection for startup message
-    if JetsonCollector.is_jetson():
+    if ModalixCollector.is_modalix():
+        print("Detected: SiMa Modalix")
+    elif JetsonCollector.is_jetson():
         print("Detected: NVIDIA Jetson")
     elif RaspberryPiCollector.is_raspberry_pi():
         print("Detected: Raspberry Pi")
