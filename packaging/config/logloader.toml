@@ -30,6 +30,10 @@ max_auto_queue = 5
 # Empty probes "@MAV_LOG", then /fs/microsd/log and /APM/LOGS.
 remote_directory = ""
 
+# FTP burst reads. Much faster; disable if the flight stack's burst support
+# misbehaves.
+use_burst = true
+
 [upload]
 # Upload what was fetched automatically.
 auto = true

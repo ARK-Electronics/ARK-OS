@@ -127,7 +127,7 @@
                 </td>
                 <td>
                   <div class="actions">
-                    <button v-if="log.downloaded" class="icon-button danger"
+                    <button v-if="log.downloaded" class="icon-button danger" :disabled="busy"
                       title="Delete the downloaded copy" @click="deleteFile(log)">
                       <i class="fas fa-trash"></i>
                     </button>
@@ -177,6 +177,7 @@ export default {
       streamConnected: false,
       eventSource: null,
       messageTimer: null,
+      reconnectTimer: null,
     };
   },
   computed: {
@@ -276,9 +277,19 @@ export default {
       });
 
       source.onerror = () => {
-        // EventSource reconnects on its own; say so rather than showing a table
-        // that has quietly stopped changing.
+        // Say so rather than showing a table that has quietly stopped changing.
         this.streamConnected = false;
+
+        // EventSource retries network failures on its own, but an HTTP error --
+        // the gateway's 502 while logloader restarts -- closes it for good, so
+        // that retry is ours. fetchLogs resyncs whatever the dead stream missed.
+        if (source.readyState === EventSource.CLOSED) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = setTimeout(() => {
+            this.fetchLogs();
+            this.connectStream();
+          }, 3000);
+        }
       };
     },
 
@@ -291,6 +302,7 @@ export default {
     },
 
     disconnectStream() {
+      clearTimeout(this.reconnectTimer);
       if (this.eventSource) {
         this.eventSource.close();
         this.eventSource = null;
