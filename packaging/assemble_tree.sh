@@ -116,6 +116,7 @@ for f in packaging/config/*; do
     install -m 0644 "$f" "$DEFAULTS/$base"
 done
 install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
+install -m 0755 packaging/system-config/migrate_logloader_config.py "$PKG$ARK/libexec/migrate_logloader_config.py"
 
 # --- nginx site ---
 install -m 0644 frontend/ark-ui.nginx "$PKG/etc/nginx/sites-available/ark-ui"

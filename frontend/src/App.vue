@@ -7,6 +7,7 @@
       <router-link class="link" :class="{ active: isActive('/connections-page') }" to="/connections-page">Connections</router-link>
       <router-link class="link" :class="{ active: isActive('/services-page') }" to="/services-page">Services</router-link>
       <router-link class="link" :class="{ active: isActive('/video-page') }" to="/video-page">Video</router-link>
+      <router-link class="link" :class="{ active: isActive('/logs-page') }" to="/logs-page">Logs</router-link>
       <a
         class="link external-link"
         :href="`http://${hostname}.local/flight-review`"

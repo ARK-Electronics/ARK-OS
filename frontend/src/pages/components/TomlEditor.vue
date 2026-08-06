@@ -143,6 +143,13 @@
                 <div v-else-if="Array.isArray(tableValue[subKey])" class="array-display">
                   {{ JSON.stringify(tableValue[subKey]) }}
                 </div>
+
+                <!-- Anything else, which in practice means a table nested two
+                     deep. Nothing rendered here before, so the field simply
+                     vanished from the form; say so instead. -->
+                <div v-else class="unsupported-field">
+                  Not editable here — change this in the config file directly.
+                </div>
               </div>
             </div>
           </div>
@@ -444,6 +451,12 @@ export default {
 </script>
 
 <style scoped>
+.unsupported-field {
+  font-size: 0.85rem;
+  color: var(--ark-color-grey);
+  font-style: italic;
+}
+
 .editor-backdrop {
   position: fixed;
   top: 0;

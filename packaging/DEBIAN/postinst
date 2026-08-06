@@ -180,6 +180,14 @@ chown -R "$ARK_USER:$ARK_USER" /var/lib/ark-os
 # ===========================================================================
 mkdir -p /etc/ark-os
 if [ -x /usr/lib/ark-os/venv/bin/python3 ] && [ -d /usr/lib/ark-os/config-defaults ]; then
+    # logloader.toml moved from flat keys to nested tables. merge_configs takes
+    # its structure from the template and prunes scalars the template lacks,
+    # which for a *renamed* key means silently discarding the operator's value —
+    # a vehicle set up to upload to a remote Flight Review would just stop.
+    # Translating first turns the rename into an ordinary merge.
+    /usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/libexec/migrate_logloader_config.py \
+        /etc/ark-os/logloader.toml /var/lib/ark-os/.config-backup/logloader.toml || true
+
     /usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/libexec/merge_configs.py \
         /usr/lib/ark-os/config-defaults /var/lib/ark-os/.config-backup /etc/ark-os || true
 fi

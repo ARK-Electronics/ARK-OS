@@ -23,59 +23,70 @@ const NETWORK_SERVICE_URL = process.env.NETWORK_SERVICE_URL || 'http://localhost
 const SERVICE_MANAGER_URL = process.env.SERVICE_MANAGER_URL || 'http://localhost:3002';
 const AUTOPILOT_SERVICE_URL = process.env.AUTOPILOT_SERVICE_URL || 'http://localhost:3003';
 const SYSTEM_SERVICE_URL = process.env.SYSTEM_SERVICE_URL || 'http://localhost:3004';
+const LOGLOADER_SERVICE_URL = process.env.LOGLOADER_SERVICE_URL || 'http://localhost:3005';
 
 console.log('Service URLs:');
 console.log(`- NETWORK_SERVICE_URL: ${NETWORK_SERVICE_URL}`);
 console.log(`- SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}`);
 console.log(`- AUTOPILOT_SERVICE_URL: ${AUTOPILOT_SERVICE_URL}`);
 console.log(`- SYSTEM_SERVICE_URL: ${SYSTEM_SERVICE_URL}`);
+console.log(`- LOGLOADER_SERVICE_URL: ${LOGLOADER_SERVICE_URL}`);
+
+// http-proxy-middleware v3 reads handlers from `on`; the v2 `onError`/`logLevel`
+// options are ignored, which left every proxy answering a dead upstream with
+// the default plain-text 504 instead of the JSON the UI expects. Supplying
+// `on.error` also replaces HPM's own error plugin, so its guards live here:
+// `res` can be a raw socket (upgraded request), and a response that already
+// streamed headers (SSE) cannot take a second writeHead -- the throw would
+// escape into a socket callback and take the whole gateway down.
+const proxyError = (label) => (err, req, res) => {
+  console.error(`${label} proxy error: ${err.message}`);
+  if (!res || typeof res.writeHead !== 'function') {
+    if (res && typeof res.destroy === 'function') res.destroy();
+    return;
+  }
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+  res.writeHead(502, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: `${label} service unavailable` }));
+};
 
 // Service proxy
 app.use('/api/service', createProxyMiddleware({
   target: SERVICE_MANAGER_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Service service unavailable' }));
-  }
+  on: { error: proxyError('Service') }
 }));
 
 // Network proxy
 app.use('/api/network', createProxyMiddleware({
   target: NETWORK_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Network proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Network service unavailable' }));
-  }
+  on: { error: proxyError('Network') }
 }));
 
 // Autopilot proxy
 app.use('/api/autopilot', createProxyMiddleware({
   target: AUTOPILOT_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`Autopilot service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Autopilot service unavailable' }));
-  }
+  on: { error: proxyError('Autopilot') }
 }));
 
 // System proxy
 app.use('/api/system', createProxyMiddleware({
   target: SYSTEM_SERVICE_URL,
   changeOrigin: true,
-  logLevel: 'warn',
-  onError: (err, req, res) => {
-    console.error(`System service proxy error: ${err.message}`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'System service unavailable' }));
-  }
+  on: { error: proxyError('System') }
+}));
+
+// Logloader proxy. Carries an SSE stream (/api/logloader/events), so buffering
+// must stay off for it to be of any use.
+app.use('/api/logloader', createProxyMiddleware({
+  target: LOGLOADER_SERVICE_URL,
+  changeOrigin: true,
+  on: { error: proxyError('Logloader') }
 }));
 
 // NOW add body parsing middleware AFTER all proxies
@@ -89,7 +100,8 @@ app.get('/health', (req, res) => {
       network: { url: NETWORK_SERVICE_URL },
       service: { url: SERVICE_MANAGER_URL },
       autopilot: { url: AUTOPILOT_SERVICE_URL },
-      system: { url: SYSTEM_SERVICE_URL }
+      system: { url: SYSTEM_SERVICE_URL },
+      logloader: { url: LOGLOADER_SERVICE_URL }
     }
   });
 });
