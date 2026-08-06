@@ -27,6 +27,9 @@
             <span class="dot" :class="status.ftp_available ? 'dot-ok' : 'dot-bad'"></span>
             {{ status.ftp_available ? `MAVLink FTP: ${status.log_root}` : 'MAVLink FTP unavailable' }}
           </span>
+          <span class="status-item" v-if="status.logging">
+            <span class="dot dot-ok"></span> Logger running
+          </span>
           <span class="status-item warning" v-if="!streamConnected">
             <i class="fas fa-exclamation-triangle"></i> Live updates disconnected — reconnecting
           </span>
@@ -59,6 +62,10 @@
             <button class="action-button danger" :disabled="!cancellableSelected.length || busy"
               @click="cancelSelected">
               <i class="fas fa-times"></i> Cancel
+            </button>
+            <button class="action-button" :disabled="busy" @click="refreshVehicle"
+              title="List the vehicle's logs again">
+              <i class="fas fa-sync-alt"></i> Refresh
             </button>
           </div>
         </div>
@@ -210,6 +217,9 @@ export default {
   mounted() {
     this.fetchLogs();
     this.connectStream();
+    // Nothing polls the vehicle; ask for a fresh listing now that someone is
+    // actually looking. Ignored until the vehicle is connected and disarmed.
+    LogsService.refresh().catch(() => {});
   },
   beforeUnmount() {
     this.disconnectStream();
@@ -343,6 +353,14 @@ export default {
         () => LogsService.cancelRequests(ids),
         (data) => `Cancelled ${data.cancelled} pending request(s)`
       );
+    },
+
+    refreshVehicle() {
+      // Fire-and-forget: the new listing arrives over the event stream.
+      LogsService.refresh().catch(() => {});
+      this.setMessage(this.status.connected
+        ? 'Checking the vehicle for logs…'
+        : 'Refresh queued; it runs when the vehicle reconnects');
     },
 
     deleteFile(log) {

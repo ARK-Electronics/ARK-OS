@@ -4,6 +4,7 @@ const ENDPOINTS = {
   logs: `/api/logloader/logs`,
   status: `/api/logloader/status`,
   events: `/api/logloader/events`,
+  refresh: `/api/logloader/refresh`,
   download: `/api/logloader/logs/download`,
   upload: `/api/logloader/logs/upload`,
   cancel: `/api/logloader/logs/cancel`,
@@ -17,6 +18,12 @@ export default {
 
   async getStatus() {
     return axios.get(ENDPOINTS.status);
+  },
+
+  // Asks logloader to list the vehicle again — nothing polls, so this is how
+  // the page gets a current listing. Changes arrive over /events.
+  async refresh() {
+    return axios.post(ENDPOINTS.refresh);
   },
 
   // Queues a download, and an upload of the same logs unless upload is false.
