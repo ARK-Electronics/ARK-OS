@@ -29,6 +29,11 @@ jobs:
             runner: ubuntu-22.04-arm
             container: ""
             extra_deps: "libbluetooth-dev"
+          - platform: jetson
+            codename: noble
+            runner: ubuntu-24.04-arm
+            container: ""
+            extra_deps: "libbluetooth-dev"
           - platform: pi
             codename: bookworm
             runner: ubuntu-22.04-arm
@@ -45,6 +50,7 @@ jobs:
     # from the *system* python at runtime — a Jammy (3.10) venv will not run on
     # Bookworm (no system python3.10) and vice-versa.
     #   - jetson: ubuntu-22.04-arm natively    (Jammy / Python 3.10  = JetPack 6 rootfs)
+    #   - jetson: ubuntu-24.04-arm natively    (Noble / Python 3.12  = JetPack 7 rootfs)
     #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS Bookworm)
     #   - pi:     a debian:trixie   container  (Debian 13 / Python 3.13 = Raspberry Pi OS Trixie)
     # The container runs on the same arm64 host. Each leg's `codename` (the host's OS

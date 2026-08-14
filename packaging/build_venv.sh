@@ -2,7 +2,8 @@
 # Create the Python virtualenv AT ITS FINAL INSTALL PATH so that shebangs and
 # pyvenv.cfg resolve correctly on the device, then move it into the package tree.
 # The build host must be arm64 with the target's system Python: 3.10 for jetson
-# (JetPack 6 / Jammy) or, for pi, 3.11 on Bookworm / 3.13 on Trixie (Raspberry Pi OS).
+# on Jammy (JetPack 6) or 3.12 on Noble (JetPack 7); for pi, 3.11 on Bookworm /
+# 3.13 on Trixie (Raspberry Pi OS).
 # build.sh enforces this baseline. Invoked by build.sh.
 set -euo pipefail
 

@@ -1,4 +1,16 @@
 #!/bin/bash
+# Dev extra: ROS 2 Humble + the JP6 workspace. Humble has no noble packages;
+# on JetPack 7 / Ubuntu 24.04 use ROS 2 Jazzy instead and do not clone
+# ros2_jetpack6_ws.
+if [ -r /etc/os-release ]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    if [ "${VERSION_CODENAME:-}" = "noble" ]; then
+        echo "ERROR: extras/install_ros2.sh installs ROS 2 Humble (Jammy / JetPack 6)." >&2
+        echo "       JetPack 7 is Ubuntu 24.04 — install ROS 2 Jazzy by hand." >&2
+        exit 1
+    fi
+fi
 sudo apt update
 sudo apt-get install software-properties-common
 sudo add-apt-repository universe

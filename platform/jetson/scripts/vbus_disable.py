@@ -20,8 +20,9 @@
 # DEALINGS IN THE SOFTWARE.
 
 import Jetson.GPIO as GPIO
-import os
 import time
+
+from l4t_compat import vbus_is_pinmuxed
 
 # Pin definitions at:
 # ark_jetson_orin_nano_nx_device_tree/Linux_for_Tegra/source/hardware/nvidia/
@@ -30,11 +31,9 @@ import time
 vbus_det_pin = 32
 
 def main():
-    # Check Jetpack version. R36 can't use VBUS Enable
-    with open("/etc/nv_tegra_release") as f:
-        jetpack_version = f.read()
-    if "R36" in jetpack_version:
-        print("Jetpack version is R36, skipping VBUS Disable")
+    # R36+ (JP6 / JP7) pinmuxes VBUS_DET; do not drive it as GPIO.
+    if vbus_is_pinmuxed():
+        print("L4T R36+ pinmuxes VBUS_DET, skipping VBUS Disable")
         return
 
     # Configure VBUS_SENSE_BOOTLOADER
