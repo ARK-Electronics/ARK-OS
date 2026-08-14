@@ -156,8 +156,11 @@ pip_install() {
 install_jtop() {
     apt-get install -y python3-pip python3-setuptools || return 1
     pip_install "jetson-stats==$JETSON_STATS_VERSION" || return 1
-    # Bring the jtop daemon up now (pip's setup.py installs the unit) and enable
-    # it for next boot; harmless if already active.
+    # 7.x ships the unit under /usr/local/share/jetson_stats and installs it
+    # with `jtop --install-service`. Older 4.x wrote jtop.service from setup.py.
+    if command -v jtop >/dev/null 2>&1; then
+        jtop --install-service || true
+    fi
     systemctl enable --now jtop.service 2>/dev/null || true
     return 0
 }
