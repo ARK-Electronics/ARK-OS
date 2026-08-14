@@ -52,9 +52,9 @@ Positional:
 
 Options:
   --platform=jetson|pi      Override platform autodetection.
-  --codename=NAME           Override OS-release codename autodetection (bookworm, trixie,
-                            jammy, …). Only needed to name a download when /etc/os-release
-                            can't be read.
+  --codename=NAME           Override OS-release codename autodetection (jammy, noble,
+                            bookworm, trixie, …). Only needed to name a download when
+                            /etc/os-release can't be read.
   --ark-os-version=X.Y.Z    Download this ark-os release when no local deb is given.
   --jetson-stats-version=X  Override the jetson-stats version (default from versions.env).
   --skip-jtop               Do not install jetson-stats (Jetson only).
@@ -142,9 +142,20 @@ fetch() {
 # install over a newer one (version testing/rollback), which apt refuses by default.
 apt_install_deb() { apt-get install -y --allow-downgrades "$(readlink -f "$1")"; }
 
+# Ubuntu 24.04 (JetPack 7 / noble) marks the system Python as EXTERNALLY-MANAGED
+# (PEP 668). jtop must still be a *system* install so the bundled venv can import
+# it via system-site-packages; --break-system-packages is the matching flag.
+pip_install() {
+    local flags=()
+    if ls /usr/lib/python3*/EXTERNALLY-MANAGED >/dev/null 2>&1; then
+        flags+=(--break-system-packages)
+    fi
+    pip3 install "${flags[@]}" "$@"
+}
+
 install_jtop() {
-    apt-get install -y python3-pip || return 1
-    pip3 install "jetson-stats==$JETSON_STATS_VERSION" || return 1
+    apt-get install -y python3-pip python3-setuptools || return 1
+    pip_install "jetson-stats==$JETSON_STATS_VERSION" || return 1
     # Bring the jtop daemon up now (pip's setup.py installs the unit) and enable
     # it for next boot; harmless if already active.
     systemctl enable --now jtop.service 2>/dev/null || true
@@ -192,7 +203,7 @@ else
     elif [ "${#matches[@]}" -gt 1 ]; then
         die "multiple ark-os-${PLATFORM} debs in $(pwd); pass the one to install as an argument."
     elif [ -n "$ARK_OS_VERSION" ]; then
-        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|trixie|jammy|…>."
+        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<jammy|noble|bookworm|trixie|…>."
         ARK_OS_DEB="$DL_DIR/ark-os-${PLATFORM}-${CODENAME}_${ARK_OS_VERSION}_arm64.deb"
         fetch "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$(basename "$ARK_OS_DEB")" "$ARK_OS_DEB"
     else
@@ -220,7 +231,7 @@ if [ "$PLATFORM" = "jetson" ] && [ "$SKIP_JTOP" -eq 0 ]; then
             info "jetson-stats $JETSON_STATS_VERSION installed."
         else
             warn "jetson-stats install failed — Jetson stats in the web UI will be unavailable."
-            warn "  retry later with: sudo pip3 install \"jetson-stats==${JETSON_STATS_VERSION}\""
+            warn "  retry later with: sudo pip3 install --break-system-packages \"jetson-stats==${JETSON_STATS_VERSION}\""
         fi
     fi
 fi

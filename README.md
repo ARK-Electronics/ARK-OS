@@ -39,23 +39,31 @@ cd ARK-OS
 sudo ./packaging/install_ark_os.sh --ark-os-version=X.Y.Z
 
 # ...or install a .deb you already have (built locally or downloaded):
-sudo ./packaging/install_ark_os.sh ./ark-os-jetson-jammy_X.Y.Z_arm64.deb
+sudo ./packaging/install_ark_os.sh ./ark-os-jetson-jammy_X.Y.Z_arm64.deb   # JetPack 6
+sudo ./packaging/install_ark_os.sh ./ark-os-jetson-noble_X.Y.Z_arm64.deb   # JetPack 7
 ```
 
 The script auto-detects Jetson vs Pi (override with `--platform`), skips jtop when it is already at the pinned version, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
 
 ### Manual install
 
-MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6 (Ubuntu 22.04), `noble` for JetPack 7 (Ubuntu 24.04), `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
 
 #### Jetson
 ```
+# JetPack 6 (Ubuntu 22.04 / jammy)
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
-
 sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 
+# JetPack 7 (Ubuntu 24.04 / noble)
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-noble_<ark-os-ver>_arm64.deb
+sudo apt install ./ark-os-jetson-noble_<ark-os-ver>_arm64.deb
+
 # Recommended: jtop, for Jetson system stats in the web UI
-sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
+# Ubuntu 24.04 needs --break-system-packages (PEP 668); harmless on 22.04 if omitted
+# after `apt install python3-pip`.
+sudo apt install -y python3-pip python3-setuptools
+sudo pip3 install --break-system-packages "jetson-stats==<jetson-stats-ver>"
 ```
 
 #### Raspberry Pi

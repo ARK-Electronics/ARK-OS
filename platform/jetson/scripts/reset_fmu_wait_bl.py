@@ -20,8 +20,9 @@
 # DEALINGS IN THE SOFTWARE.
 
 import Jetson.GPIO as GPIO
-import os
 import time
+
+from l4t_compat import vbus_is_pinmuxed
 
 # Pin definitions at:
 # ark_jetson_orin_nano_nx_device_tree/Linux_for_Tegra/source/hardware/nvidia/
@@ -29,22 +30,18 @@ import time
 
 reset_pin = 33
 vbus_det_pin = 32
-jetpack_6 = False
 
 def main():
-    # Check Jetpack version. R36 can't use VBUS Enable
-    with open("/etc/nv_tegra_release") as f:
-        jetpack_version = f.read()
-    if "R36" in jetpack_version:
-        print("Jetpack version is R36, skipping VBUS Control")
-        jetpack_6 = True
+    # R36+ (JP6 / JP7) pinmuxes VBUS_DET; do not drive it as GPIO.
+    skip_vbus = vbus_is_pinmuxed()
+    if skip_vbus:
+        print("L4T R36+ pinmuxes VBUS_DET, skipping VBUS GPIO control")
 
     # Configure reset
     GPIO.setmode(GPIO.BOARD)
     GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    # Configure VBUS_DET if not JP6 -- configured in pinmux in JP6
-    if not jetpack_6:
+    if not skip_vbus:
         GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
 
     print("Resetting Flight Controller!")
@@ -54,8 +51,8 @@ def main():
     time.sleep(0.1)
     GPIO.output(reset_pin, GPIO.LOW)
 
-    if not jetpack_6:
-        # Enable VBUS immediatly to catch bootloader and wait
+    if not skip_vbus:
+        # Enable VBUS immediately to catch bootloader and wait
         GPIO.output(vbus_det_pin, GPIO.HIGH)
 
 if __name__ == '__main__':
