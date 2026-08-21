@@ -1,7 +1,7 @@
 [Unit]
 Description=Micro-XRCE-DDS-Agent
-Wants=network.target
-After=dev-ttyTHS1.device dev-ttyAMA4.device network-online.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple

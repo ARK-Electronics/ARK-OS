@@ -2,9 +2,10 @@
 ARK-OS is a collection of software services and tools for drones. These services provide essential features such as mavlink routing, video streaming, automatic flight log upload, flight controller firmware updating, network RTK corrections, and more.
 
 #### Supported targets
-- **ARK Jetson PAB Carrier / PAB Carrier V3** <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
+- **ARK Jetson PAB Carrier / PAB Carrier V3** (Jetson Orin NX/Nano) <br> https://arkelectron.com/product/ark-jetson-pab-carrier/
+- **ARK Jetson PAB Carrier V3 + SiMa Modalix SoM** (eLxr) — platform `modalix` (see `platform/modalix/README.md`)
 - **ARK Just a Jetson** (Jetson Orin NX/Nano) <br> https://arkelectron.com/product/ark-just-a-jetson/
-- **ARK Just a Jetson + SiMa Modalix SoM** (eLxr) — platform `modalix` (see `platform/modalix/README.md`)
+- **ARK Just a Jetson + SiMa Modalix SoM** (eLxr) — platform `modalix`
 - **ARK Pi6X Flow** <br> https://arkelectron.com/product/ark-pi6x-flow/
 - **ARK Just a Pi** <br> https://arkelectron.com/product/ark-just-a-pi/
 
@@ -60,9 +61,10 @@ sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
 ```
 
-#### Modalix (SiMa eLxr 12 / ARK JAJ + Modalix)
+#### Modalix (SiMa eLxr 12 / JAJ or PAB V3 + Modalix)
 Flash the SiMa eLxr base image first (see meta-ark-simaai bring-up), then install the
-`modalix` package as user **`sima`**. No jetson-stats. Build on arm64 Debian 12 or eLxr 12:
+`modalix` package as user **`sima`**. No jetson-stats. DDS uses **UDP Ethernet :8888**
+(not Telem2 UART). Build on arm64 Debian 12 or eLxr 12:
 
 ```
 ./packaging/build.sh modalix --version=X.Y.Z
@@ -141,7 +143,7 @@ The package installs the services below as system-level [systemd services](https
 This service enables mavlink-router to route mavlink packets from the flight controller USB port to user defined UDP endpoints. You can add and remove endpoints using the service configuration editor in the UI.
 
 **dds-agent.service** <br>
-The dds-agent service bridges the PX4 uORB and ROS2 topics. The bridged topics are defined in PX4 Firmware and can be [found here](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/uxrce_dds_client/dds_topics.yaml). The **dds-agent** runs the [micro-xrce-dds-agent](https://github.com/eProsima/Micro-XRCE-DDS-Agent) over the high speed serial connection between flight controller and Companion.
+The dds-agent service bridges the PX4 uORB and ROS2 topics. The bridged topics are defined in PX4 Firmware and can be [found here](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/uxrce_dds_client/dds_topics.yaml). The **dds-agent** runs the [micro-xrce-dds-agent](https://github.com/eProsima/Micro-XRCE-DDS-Agent). Jetson and Pi use the high-speed serial companion link (`/dev/ttyTHS1` / `/dev/ttyAMA4`). **Modalix** (PAB V3 / JAJ + SiMa SoM) has no usable UART1/Telem2 path, so the agent listens on **UDP Ethernet port 8888**.
 
 **logloader.service** <br>
 This service downloads log files from the SD card of the flight controller via MAVLink and optionally uploads them to [PX4 Flight Review](https://review.px4.io/). Driven from the web UI's **Logs** page.

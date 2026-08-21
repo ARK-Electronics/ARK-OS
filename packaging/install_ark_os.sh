@@ -107,8 +107,13 @@ platform_from_deb() {
 }
 
 detect_platform() {
-    [ -f /etc/nv_tegra_release ] && { echo jetson; return; }
-    # SiMa eLxr on Modalix (ARK Just a Jetson + Modalix SoM, etc.)
+    # Modalix before Jetson: PAB V3 model is "ARK Jetson PAB V3 with SiMa
+    # Modalix SoM" and would otherwise match *Jetson*.
+    if [ -r /proc/device-tree/compatible ] &&
+       grep -z -q 'simaai,modalix' /proc/device-tree/compatible; then
+        echo modalix
+        return
+    fi
     if [ -r /etc/os-release ]; then
         # shellcheck source=/dev/null
         . /etc/os-release
@@ -117,12 +122,13 @@ detect_platform() {
             return
         fi
     fi
+    [ -f /etc/nv_tegra_release ] && { echo jetson; return; }
     if [ -r /proc/device-tree/model ]; then
         local model; model="$(tr -d '\0' < /proc/device-tree/model)"
         case "$model" in
+            *Modalix*|*modalix*) echo modalix; return ;;
             *Jetson*|*Tegra*) echo jetson; return ;;
             *Raspberry*Pi*)   echo pi;     return ;;
-            *Modalix*|*modalix*|*Just\ a\ Jetson*) echo modalix; return ;;
         esac
     fi
     return 1
