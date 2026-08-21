@@ -1,6 +1,6 @@
 {
   "displayName": "DDS Agent",
   "description": "uXRCE-DDS agent bridging PX4 uORB topics to ROS 2.",
-  "configFile": "",
+  "configFile": "dds-agent.toml",
   "visible": true
 }

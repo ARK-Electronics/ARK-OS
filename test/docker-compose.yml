@@ -18,6 +18,7 @@ services:
       # baked) so you can tweak them without rebuilding.
       - ./manifests:/usr/lib/ark-os/manifests:ro
       - ./configs/mavlink-router.conf:/etc/ark-os/mavlink-router.conf
+      - ./configs/dds-agent.toml:/etc/ark-os/dds-agent.toml
       # Same file the go2rtc sidecar reads — editing it in the UI affects the real stream.
       - ./go2rtc.test.yaml:/etc/ark-os/go2rtc.yaml
 

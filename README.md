@@ -63,8 +63,9 @@ sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stat
 
 #### Modalix (SiMa eLxr 12 / JAJ or PAB V3 + Modalix)
 Flash the SiMa eLxr base image first (see meta-ark-simaai bring-up), then install the
-`modalix` package as user **`sima`**. No jetson-stats. DDS uses **UDP Ethernet :8888**
-(not Telem2 UART). Build on arm64 Debian 12 or eLxr 12:
+`modalix` package as user **`sima`**. No jetson-stats. DDS defaults to **UDP Ethernet
+:8888** (not Telem2 UART); change it from the Services tab. Build on arm64 Debian 12
+or eLxr 12:
 
 ```
 ./packaging/build.sh modalix --version=X.Y.Z
@@ -143,7 +144,7 @@ The package installs the services below as system-level [systemd services](https
 This service enables mavlink-router to route mavlink packets from the flight controller USB port to user defined UDP endpoints. You can add and remove endpoints using the service configuration editor in the UI.
 
 **dds-agent.service** <br>
-The dds-agent service bridges the PX4 uORB and ROS2 topics. The bridged topics are defined in PX4 Firmware and can be [found here](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/uxrce_dds_client/dds_topics.yaml). The **dds-agent** runs the [micro-xrce-dds-agent](https://github.com/eProsima/Micro-XRCE-DDS-Agent). Jetson and Pi use the high-speed serial companion link (`/dev/ttyTHS1` / `/dev/ttyAMA4`). **Modalix** (PAB V3 / JAJ + SiMa SoM) has no usable UART1/Telem2 path, so the agent listens on **UDP Ethernet port 8888**.
+The dds-agent service bridges the PX4 uORB and ROS2 topics. The bridged topics are defined in PX4 Firmware and can be [found here](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/uxrce_dds_client/dds_topics.yaml). The **dds-agent** runs the [micro-xrce-dds-agent](https://github.com/eProsima/Micro-XRCE-DDS-Agent). Transport is configured from the Services tab (`dds-agent.toml`): **serial** (device + baud rate) or **ethernet** / **tcp** (port + companion IP). Defaults are serial Telem2 on Jetson (`/dev/ttyTHS1`, 3 Mbaud) and Pi (`/dev/ttyAMA4`), and UDP Ethernet port **8888** on Modalix (UART1/Telem2 is not usable on that SoM).
 
 **logloader.service** <br>
 This service downloads log files from the SD card of the flight controller via MAVLink and optionally uploads them to [PX4 Flight Review](https://review.px4.io/). Driven from the web UI's **Logs** page.

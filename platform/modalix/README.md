@@ -51,12 +51,13 @@ sudo ./packaging/install_ark_os.sh --platform=modalix --ark-os-version=X.Y.Z
 mavlink-router still prefers `/dev/serial/by-id/*ARK*if00` (USB FC). That path is
 the same as Jetson when the flight controller is USB.
 
-**uXRCE-DDS is Ethernet, not UART.** Modalix UART1/Telem2 is not usable, so
-`dds-agent` runs `MicroXRCEAgent udp4 -p 8888` (not `/dev/ttyTHS1`). On the
-flight controller set `UXRCE_DDS_CFG` to Ethernet, `UXRCE_DDS_PRT` to `8888`,
-and `UXRCE_DDS_AG_IP` to the companion address the FC can reach (factory FC
-is `192.168.0.4` on the PAB V3 KSZ — add `192.168.0.1/24` on the SoM `end0`,
-or DHCP the FC onto the same LAN as the SoM).
+**uXRCE-DDS defaults to Ethernet, not UART.** Modalix UART1/Telem2 is not usable,
+so the packaged `dds-agent.toml` starts `MicroXRCEAgent udp4 -p 8888`. Change
+transport, port, and companion IP from the Services tab. On the flight controller
+set `UXRCE_DDS_CFG` to Ethernet, `UXRCE_DDS_PRT` to match the agent port, and
+`UXRCE_DDS_AG_IP` to the companion address the FC can reach (factory FC is
+`192.168.0.4` on the PAB V3 KSZ — add `192.168.0.1/24` on the SoM `end0`, or DHCP
+the FC onto the same LAN as the SoM).
 
 ## Board power / unique ID
 

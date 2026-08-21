@@ -117,8 +117,21 @@ for f in packaging/config/*; do
     if { [ "$P" = "pi" ] || [ "$P" = "modalix" ]; } && [ "$base" = "rid-transmitter.toml" ]; then
         continue
     fi
+    # dds-agent.toml is filled with platform transport/device below.
+    if [ "$base" = "dds-agent.toml" ]; then
+        continue
+    fi
     install -m 0644 "$f" "$DEFAULTS/$base"
 done
+DDS_TRANSPORT=serial
+DDS_DEVICE=/dev/ttyTHS1
+case "$P" in
+    pi) DDS_DEVICE=/dev/ttyAMA4 ;;
+    modalix) DDS_TRANSPORT=ethernet ;;
+esac
+sed -e "s|@DDS_TRANSPORT@|$DDS_TRANSPORT|g" -e "s|@DDS_DEVICE@|$DDS_DEVICE|g" \
+    packaging/config/dds-agent.toml > "$DEFAULTS/dds-agent.toml"
+chmod 0644 "$DEFAULTS/dds-agent.toml"
 install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
 
 # --- nginx site ---

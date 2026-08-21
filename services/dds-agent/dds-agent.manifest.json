@@ -1,6 +1,6 @@
 {
   "displayName": "DDS Agent",
-  "description": "uXRCE-DDS agent bridging PX4 uORB to ROS 2 (serial UART on Jetson/Pi, UDP Ethernet on Modalix).",
-  "configFile": "",
+  "description": "uXRCE-DDS agent bridging PX4 uORB to ROS 2. Configure serial UART or Ethernet (UDP/TCP) from the Services tab.",
+  "configFile": "dds-agent.toml",
   "visible": true
 }
