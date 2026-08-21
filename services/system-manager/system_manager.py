@@ -719,6 +719,33 @@ class ModalixCollector(SystemInfoCollector):
         except OSError:
             return None
 
+    @staticmethod
+    def _read_at24csw_unique_id(bus_num: int) -> str | None:
+        """128-bit factory ID from AT24CSW010 security window (addr 0x58, word 0x80).
+
+        Modalix SoM has no /proc/device-tree/serial-number; the on-module 24c128
+        is blank. Carrier EEPROM is I2C1 (PAB V3 / JAJ). Same protocol as
+        platform/jetson/scripts/jetson_serial_number.py (bus 7 on Jetson).
+        """
+        try:
+            from smbus2 import SMBus
+        except ImportError:
+            return None
+        try:
+            bus = SMBus(bus_num)
+            try:
+                bus.write_byte(0x58, 0x80)
+                data = bus.read_i2c_block_data(0x58, 0x80, 16)
+            finally:
+                bus.close()
+        except OSError:
+            return None
+        if not data or len(data) < 16:
+            return None
+        if all(b == 0xFF for b in data) or all(b == 0 for b in data):
+            return None
+        return "".join(f"{b:02x}" for b in data)
+
     @classmethod
     def get_modalix_info(cls) -> dict[str, Any]:
         """Model/module/serial from DT + AT24CSW unique ID; power from INA238 publisher."""
@@ -734,10 +761,14 @@ class ModalixCollector(SystemInfoCollector):
             if p.startswith("simaai,") and "modalix" in p:
                 module = p
 
-        # Serial: ARK JAJ unique ID from AT24CSW010 (ark-jaj-sys-power)
+        # Serial: carrier AT24CSW unique ID (PAB V3 / JAJ I2C1). Optional
+        # ark-jaj-sys-power publisher, then live I2C, then DT (usually absent).
         serial = (
             cls._read_file(f"{cls._BOARD_DIR}/unique_id")
             or cls._read_file(f"{cls._BOARD_DIR}/unique_id_text")
+            or cls._read_at24csw_unique_id(1)
+            or cls._read_at24csw_unique_id(7)
+            or cls._read_dt_string("/proc/device-tree/serial-number")
             or "Not available"
         )
 
