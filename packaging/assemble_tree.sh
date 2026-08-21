@@ -153,10 +153,13 @@ SMPKLA="$PKG/etc/polkit-1/localauthority/90-mandatory.d/99-ark-service-manager.p
 sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/99-ark-service-manager.pkla > "$SMPKLA"
 chmod 0644 "$SMPKLA"
 
-# --- udev gpio rules (jetson only, renamed) ---
+# --- udev gpio rules (jetson BOARD GPIO + modalix gpiochip for FMU reset) ---
 if [ "$P" = "jetson" ]; then
     mkdir -p "$PKG/etc/udev/rules.d"
     install -m 0644 platform/jetson/99-gpio.rules "$PKG/etc/udev/rules.d/99-ark-gpio.rules"
+elif [ "$P" = "modalix" ]; then
+    mkdir -p "$PKG/etc/udev/rules.d"
+    install -m 0644 platform/modalix/99-gpio.rules "$PKG/etc/udev/rules.d/99-ark-gpio.rules"
 fi
 
 # --- journald drop-in ---

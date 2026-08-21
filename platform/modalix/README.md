@@ -42,7 +42,9 @@ sudo ./packaging/install_ark_os.sh --platform=modalix --ark-os-version=X.Y.Z
 - **No jtop** (Jetson-stats)  
 - **No jetson-can** (Modalix has no SoM CAN)  
 - **No rid-transmitter** in the first cut  
-- **FMU reset / VBUS GPIO helpers** are no-ops until JAJ nRESET is mapped  
+- **FMU reset:** `reset_fmu_fast.py` / `reset_fmu_wait_bl.py` pulse gpio
+  `fmu_rst_req` (PAB V3 SODIMM 228 / SIO7[5], active-high). Overlay must
+  **not** hog that line. VBUS_SENSE stays hogged high for USB CDC.  
 
 ## Autopilot link
 

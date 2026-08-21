@@ -1,15 +1,15 @@
 #!/usr/lib/ark-os/venv/bin/python3
-"""Modalix / JAJ: FMU nRESET is not mapped like Jetson BOARD pin 33 yet.
-
-USB bootloader entry still works if the FC exposes the ARK CDC interface.
-This helper exits 0 so call sites do not hard-fail; operators can use a
-hardware reset or map a Modalix GPIO later.
-"""
+"""Pulse FMU_RST_REQ (PAB V3 SIO7[5], active-high) to reset the FC."""
 import sys
+import time
+
+from fmu_gpio import pulse_fmu_reset
 
 
 def main() -> int:
-    print("Modalix: reset_fmu_fast is a no-op until nRESET GPIO is mapped")
+    chip = pulse_fmu_reset(hold_s=0.1)
+    print(f"Resetting Flight Controller! ({chip} line 5 FMU_RST_REQ)")
+    time.sleep(0.2)
     return 0
 
 
