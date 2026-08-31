@@ -5,8 +5,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/bin/rtsp-server --config /etc/ark-os/rtsp-server.toml
 Restart=always
 RestartSec=5

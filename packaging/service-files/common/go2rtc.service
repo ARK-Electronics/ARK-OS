@@ -5,8 +5,8 @@ After=network-online.target rtsp-server.service
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/bin/go2rtc -config /etc/ark-os/go2rtc.yaml
 Restart=always
 RestartSec=5

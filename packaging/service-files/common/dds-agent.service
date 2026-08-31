@@ -1,12 +1,12 @@
 [Unit]
 Description=Micro-XRCE-DDS-Agent
-Wants=network-online.target
-After=network-online.target
+Wants=network.target
+After=dev-ttyTHS1.device dev-ttyAMA4.device network-online.target
 
 [Service]
 Type=simple
-User=sima
-Group=sima
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/libexec/start_dds_agent.sh
 Restart=on-failure
 RestartSec=5

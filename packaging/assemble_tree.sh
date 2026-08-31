@@ -35,11 +35,18 @@ mkdir -p "$PKG/etc/polkit-1/localauthority/90-mandatory.d"
 mkdir -p "$PKG/etc/systemd/journald.conf.d"
 mkdir -p "$PKG/etc/sudoers.d"
 
-# --- systemd units (platform set) + group target ---
-install -m 0644 packaging/service-files/ark-os.target "$PKG/lib/systemd/system/ark-os.target"
-install -m 0644 packaging/service-files/ark-os-firstboot.service "$PKG/lib/systemd/system/ark-os-firstboot.service"
-for f in packaging/service-files/"$P"/*.service; do
-    install -m 0644 "$f" "$PKG/lib/systemd/system/$(basename "$f")"
+# --- systemd units + group target ---
+# common/ is the unit set every platform gets; service-files/<platform>/ holds the
+# extras only that platform has (jetson-can, rid-transmitter). Units carry
+# @ARK_USER@ rather than a baked-in username, so a new platform is a user name in
+# build.sh plus its extras dir -- not a third copy of thirteen identical units.
+UNITS="$PKG/lib/systemd/system"
+install -m 0644 packaging/service-files/ark-os.target "$UNITS/ark-os.target"
+install -m 0644 packaging/service-files/ark-os-firstboot.service "$UNITS/ark-os-firstboot.service"
+for f in packaging/service-files/common/*.service packaging/service-files/"$P"/*.service; do
+    [ -f "$f" ] || continue
+    sed "s/@ARK_USER@/$ARK_USER/g" "$f" > "$UNITS/$(basename "$f")"
+    chmod 0644 "$UNITS/$(basename "$f")"
 done
 
 # --- systemd-only service entry points: wrapper scripts invoked solely by a unit's
@@ -91,7 +98,7 @@ done
 # --- manifests: install one per service unit that exists on this platform ---
 for f in services/*/*.manifest.json; do
     svc=$(basename "$f" .manifest.json)
-    if [ -f "packaging/service-files/$P/$svc.service" ]; then
+    if [ -f "$UNITS/$svc.service" ]; then
         install -m 0644 "$f" "$PKG$ARK/manifests/$svc.manifest.json"
     fi
 done

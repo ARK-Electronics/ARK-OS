@@ -5,8 +5,8 @@ After=network-online.target nginx.service
 
 [Service]
 Type=simple
-User=jetson
-Group=jetson
+User=@ARK_USER@
+Group=@ARK_USER@
 WorkingDirectory=/usr/lib/ark-os/ark-ui-backend
 ExecStart=/usr/lib/ark-os/bin/node /usr/lib/ark-os/ark-ui-backend/index.js
 Restart=on-failure
