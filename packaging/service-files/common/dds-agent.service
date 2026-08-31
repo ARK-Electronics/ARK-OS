@@ -1,7 +1,13 @@
 [Unit]
 Description=Micro-XRCE-DDS-Agent
 Wants=network.target
-After=dev-ttyTHS1.device dev-ttyAMA4.device network-online.target
+After=network-online.target
+# No dev-*.device ordering: the transport is a runtime setting in dds-agent.toml,
+# so which UART (if any) matters is only knowable in start_dds_agent.sh, which
+# checks it there. Same restart budget as mavlink-router: 5 failed starts within
+# 60s fail the unit permanently (until reset-failed/reboot).
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple

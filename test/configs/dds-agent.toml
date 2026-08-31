@@ -3,4 +3,3 @@ transport_options = ["serial", "ethernet", "tcp"]
 device = "/dev/ttyTHS1"
 baudrate = 3000000
 port = 8888
-address = "0.0.0.0"

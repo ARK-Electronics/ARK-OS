@@ -120,20 +120,22 @@ mkdir -p "$DEFAULTS"
 install -m 0644 services/mavlink-router/main.conf "$DEFAULTS/mavlink-router.conf"
 for f in packaging/config/*; do
     base=$(basename "$f")
-    # rid-transmitter is jetson-only; skip on pi and modalix.
-    if { [ "$P" = "pi" ] || [ "$P" = "modalix" ]; } && [ "$base" = "rid-transmitter.toml" ]; then
-        continue
-    fi
-    # dds-agent.toml is filled with platform transport/device below.
-    if [ "$base" = "dds-agent.toml" ]; then
-        continue
-    fi
+    # Skip a config whose service is not on this platform (rid-transmitter off
+    # jetson): it would only surface as an orphan entry in the Services tab.
+    [ -f "$UNITS/${base%.*}.service" ] || continue
+    # dds-agent.toml is filled with the platform's transport below.
+    [ "$base" = "dds-agent.toml" ] && continue
     install -m 0644 "$f" "$DEFAULTS/$base"
 done
+
+# The dds-agent transport lives in exactly one place: this table seeds the config,
+# and start_dds_agent.sh reads it back with no fallback of its own. Modalix has no
+# usable Telem2 UART, so it defaults to UDP; the device value is still written so
+# switching to serial in the UI has a sane starting point.
 DDS_TRANSPORT=serial
 DDS_DEVICE=/dev/ttyTHS1
 case "$P" in
-    pi) DDS_DEVICE=/dev/ttyAMA4 ;;
+    pi)      DDS_DEVICE=/dev/ttyAMA4 ;;
     modalix) DDS_TRANSPORT=ethernet ;;
 esac
 sed -e "s|@DDS_TRANSPORT@|$DDS_TRANSPORT|g" -e "s|@DDS_DEVICE@|$DDS_DEVICE|g" \

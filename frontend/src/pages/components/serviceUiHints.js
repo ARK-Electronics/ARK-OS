@@ -30,14 +30,12 @@ export default {
       device: { transport: ['serial'] },
       baudrate: { transport: ['serial'] },
       port: { transport: ['ethernet', 'udp', 'tcp'] },
-      address: { transport: ['ethernet', 'udp', 'tcp'] },
     },
     fieldHelp: {
       transport: 'Serial is Telem2 UART. Ethernet is UDP. TCP is rarely needed.',
       device: 'UART device, e.g. /dev/ttyTHS1 (Jetson) or /dev/ttyAMA4 (Pi).',
       baudrate: 'UART baud rate. PX4 Telem2 is typically 3000000.',
-      address: 'Companion IP the flight controller should use (PX4 UXRCE_DDS_AG_IP). The agent listens on all interfaces.',
-      port: 'Listen port. Match PX4 UXRCE_DDS_PRT (default 8888).',
+      port: 'Listen port on every interface. Match PX4 UXRCE_DDS_PRT (default 8888), and point UXRCE_DDS_AG_IP at this device.',
     },
   },
 };

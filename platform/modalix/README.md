@@ -53,7 +53,7 @@ the same as Jetson when the flight controller is USB.
 
 **uXRCE-DDS defaults to Ethernet, not UART.** Modalix UART1/Telem2 is not usable,
 so the packaged `dds-agent.toml` starts `MicroXRCEAgent udp4 -p 8888`. Change
-transport, port, and companion IP from the Services tab. On the flight controller
+transport and port from the Services tab. On the flight controller
 set `UXRCE_DDS_CFG` to Ethernet, `UXRCE_DDS_PRT` to match the agent port, and
 `UXRCE_DDS_AG_IP` to the companion address the FC can reach (factory FC is
 `192.168.0.4` on the PAB V3 KSZ — add `192.168.0.1/24` on the SoM `end0`, or DHCP

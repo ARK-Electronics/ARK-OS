@@ -1,6 +1,6 @@
 # uXRCE-DDS agent (MicroXRCEAgent). Edit from the Services tab.
 # transport: serial (Telem2 UART), ethernet (UDP), or tcp.
-# Default transport and serial device are filled per platform at package build.
+# The transport and serial device below are filled per platform at package build.
 
 transport = "@DDS_TRANSPORT@"
 transport_options = ["serial", "ethernet", "tcp"]
@@ -9,7 +9,6 @@ transport_options = ["serial", "ethernet", "tcp"]
 device = "@DDS_DEVICE@"
 baudrate = 3000000
 
-# ethernet / tcp — agent listens on all interfaces; match PX4 UXRCE_DDS_PRT.
-# address is the companion IP the flight controller should use (UXRCE_DDS_AG_IP).
+# ethernet / tcp -- the agent listens on every interface, so this is a listen
+# port only. Match PX4's UXRCE_DDS_PRT, and point UXRCE_DDS_AG_IP at this host.
 port = 8888
-address = "0.0.0.0"
