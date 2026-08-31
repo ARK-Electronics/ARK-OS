@@ -327,21 +327,6 @@ export default {
       return this.systemInfo?.resources?.memory?.available || 0;
     },
 
-    diskPercent() {
-      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
-      return disk?.percent || 0;
-    },
-
-    diskTotal() {
-      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
-      return disk?.total || 0;
-    },
-
-    diskAvailable() {
-      const disk = this.systemInfo?.resources?.disk || this.systemInfo?.disk;
-      return disk?.available || 0;
-    },
-
     /** All physical disks (eMMC + NVMe etc.); fall back to root-only disk field. */
     diskVolumes() {
       const disks = this.systemInfo?.resources?.disks;
