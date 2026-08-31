@@ -6,8 +6,8 @@
 # from there. Nothing here detects hardware or substitutes a default -- an
 # unreadable config is a broken install, not something to guess around.
 #
-# DDS_AGENT_CONFIG and MICROXRCEAGENT override the paths; --print writes the argv
-# and exits without exec'ing.
+# DDS_AGENT_CONFIG, MICROXRCEAGENT and ARK_PYTHON override the paths; --print
+# writes the argv and exits without exec'ing.
 
 set -euo pipefail
 
