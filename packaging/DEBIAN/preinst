@@ -13,14 +13,16 @@ want="@CODENAME@"
 have=""
 [ -r /etc/os-release ] && have="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
 
-# Modalix: eLxr 12 (aria) is Debian 12 / Python 3.11 class, same as bookworm CI builds.
 compatible_codename=0
-if [ "$have" = "$want" ]; then
-    compatible_codename=1
-elif [ "@PLATFORM@" = "modalix" ] && { [ "$want" = "bookworm" ] && [ "$have" = "aria" ]; }; then
-    compatible_codename=1
-elif [ "@PLATFORM@" = "modalix" ] && { [ "$want" = "aria" ] && [ "$have" = "bookworm" ]; }; then
-    compatible_codename=1
+[ "$have" = "$want" ] && compatible_codename=1
+
+# eLxr 12 (aria) is Debian 12 / Python 3.11, the same runtime class as bookworm,
+# so the two are interchangeable for modalix -- CI only builds bookworm.
+# shellcheck disable=SC2050  # @PLATFORM@ is substituted at package build
+if [ "@PLATFORM@" = "modalix" ]; then
+    case "$want:$have" in
+        bookworm:aria|aria:bookworm) compatible_codename=1 ;;
+    esac
 fi
 
 if [ -n "$have" ] && [ "$compatible_codename" -eq 0 ]; then
