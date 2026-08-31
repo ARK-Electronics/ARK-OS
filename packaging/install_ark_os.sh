@@ -117,10 +117,9 @@ detect_platform() {
     if [ -r /etc/os-release ]; then
         # shellcheck source=/dev/null
         . /etc/os-release
-        if [ "${ID:-}" = "elxr" ] || [ "${ID_LIKE:-}" = *"elxr"* ]; then
-            echo modalix
-            return
-        fi
+        case "${ID:-} ${ID_LIKE:-}" in
+            *elxr*) echo modalix; return ;;
+        esac
     fi
     [ -f /etc/nv_tegra_release ] && { echo jetson; return; }
     if [ -r /proc/device-tree/model ]; then
@@ -182,6 +181,14 @@ info "Platform: $PLATFORM"
 # carries its codename in the filename, and the deb's preinst guards a mismatch.
 [ -n "$CODENAME" ] || CODENAME="$(detect_codename || true)"
 [ -n "$CODENAME" ] && info "OS codename: $CODENAME"
+
+# The release only carries codenames CI builds (build-deb.yml). eLxr 12 (aria) is
+# Debian 12 / Python 3.11, so it installs the bookworm build -- the same pairing
+# the deb's preinst accepts. Without this the download URL would 404 on aria.
+if [ "$PLATFORM" = "modalix" ] && [ "$CODENAME" = "aria" ]; then
+    CODENAME="bookworm"
+    info "Using the $CODENAME build (aria is Debian 12 / Python 3.11)"
+fi
 
 # Every ARK-OS service runs as User=$PLATFORM (baked into the unit files). Modern
 # Raspberry Pi OS no longer ships a default 'pi' account, so fail before touching
