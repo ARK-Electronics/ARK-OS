@@ -5,8 +5,8 @@ After=network-online.target mavlink-router.service
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/bin/pointperfect-client-mavlink --config /etc/ark-os/pointperfect.toml
 Restart=always
 RestartSec=5

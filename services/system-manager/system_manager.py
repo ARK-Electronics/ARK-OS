@@ -32,7 +32,7 @@ class Hardware(BaseModel):
     serial_number: str
     l4t: str
     jetpack: str
-    type: str | None = None  # only populated on Jetson
+    type: str | None = None  # device family, when the collector knows it
 
 
 class Platform(BaseModel):
@@ -58,6 +58,9 @@ class Power(BaseModel):
     jetson_clocks: str | None
     total: float
     temperature: dict[str, float] = Field(default_factory=dict)
+    # Optional rail measurements (Modalix INA238); volts / amps when known
+    voltage: float | None = None
+    current: float | None = None
 
 
 class Usage(BaseModel):
@@ -67,9 +70,27 @@ class Usage(BaseModel):
     percent: float
 
 
+class DiskVolume(BaseModel):
+    """One physical disk on the Memory card.
+
+    The four size fields describe the mounted filesystem when `mountpoint` is
+    set, and the raw device capacity when it is empty -- never a mix of the two,
+    so used + available always reconciles with total and percent.
+    """
+    name: str          # short label, e.g. eMMC, NVMe, mmcblk0
+    device: str        # /dev/mmcblk0 or /dev/nvme0n1
+    mountpoint: str    # e.g. / or empty if not mounted
+    total: float       # GiB
+    used: float
+    available: float
+    percent: float
+    model: str = ""    # optional drive model string
+
+
 class Resources(BaseModel):
     memory: Usage
-    disk: Usage
+    disk: Usage  # root filesystem (backward compatible)
+    disks: list[DiskVolume] = Field(default_factory=list)
     cpu_count: int
 
 
@@ -137,6 +158,7 @@ class SystemInfoCollector:
                 "available": du.free / (1024**3),
                 "percent": du.percent
             },
+            "disks": SystemInfoCollector.get_disk_volumes(),
             "network_interfaces": {}
         }
 
@@ -165,6 +187,145 @@ class SystemInfoCollector:
             info["codename"] = "unknown"
 
         return info
+
+    @staticmethod
+    def _parent_disk(dev: str) -> str:
+        """Whole-disk name behind a device node: /dev/nvme0n1p1 -> nvme0n1.
+
+        sysfs is authoritative -- a partition carries a `partition` attribute and
+        lives under its disk's directory, which beats guessing at the p<N>/<N>
+        suffix conventions of mmcblk, nvme and sd.
+        """
+        base = os.path.basename(dev)
+        if not os.path.exists(f"/sys/class/block/{base}/partition"):
+            return base
+        return os.path.basename(os.path.dirname(os.path.realpath(f"/sys/class/block/{base}")))
+
+    @staticmethod
+    def _disk_label(disk: str, model: str = "") -> str:
+        model = model.strip()
+        if disk.startswith("mmcblk"):
+            return f"eMMC ({model})" if model else "eMMC"
+        if disk.startswith("nvme"):
+            return f"NVMe ({model})" if model else "NVMe"
+        return model or disk
+
+    @staticmethod
+    def _block_devices() -> dict[str, dict[str, Any]]:
+        """Whole physical disks from /sys/block: name -> {capacity GiB, model}."""
+        gib = 1024.0 ** 3
+        disks: dict[str, dict[str, Any]] = {}
+        try:
+            names = os.listdir("/sys/block")
+        except OSError:
+            return disks
+
+        for disk in names:
+            # Virtual and removable-media nodes; mmcblk0boot0 is the eMMC boot area.
+            if disk.startswith(("loop", "ram", "zram", "dm-", "sr", "fd", "md")):
+                continue
+            if "boot" in disk:
+                continue
+            try:
+                with open(f"/sys/block/{disk}/size") as f:
+                    sectors = int(f.read().strip())
+            except (OSError, ValueError):
+                continue
+            capacity = (sectors * 512) / gib
+            if capacity < 0.1:
+                continue
+            model = ""
+            for path in (f"/sys/block/{disk}/device/model", f"/sys/block/{disk}/device/name"):
+                try:
+                    with open(path) as f:
+                        model = f.read().strip()
+                except OSError:
+                    continue
+                if model:
+                    break
+            disks[disk] = {"capacity": capacity, "model": model}
+        return disks
+
+    @staticmethod
+    def _primary_mounts() -> dict[str, Any]:
+        """Parent disk -> the psutil partition whose usage represents it.
+
+        A disk can carry several filesystems; "/" wins, otherwise the
+        alphabetically first mountpoint, so the answer does not depend on the
+        order the kernel happens to list mounts in.
+        """
+        pseudo = ("", "tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs")
+        try:
+            partitions = psutil.disk_partitions(all=False)
+        except Exception:
+            return {}
+
+        chosen: dict[str, Any] = {}
+        for part in sorted(partitions, key=lambda p: p.mountpoint):
+            dev = part.device or ""
+            if not dev.startswith("/dev/") or "/mapper/" in dev:
+                continue
+            if (part.fstype or "").lower() in pseudo:
+                continue
+            parent = SystemInfoCollector._parent_disk(dev)
+            if parent.startswith(("loop", "ram", "zram", "dm-")):
+                continue
+            if parent not in chosen or part.mountpoint == "/":
+                chosen[parent] = part
+        return chosen
+
+    @staticmethod
+    def get_disk_volumes() -> list[dict[str, Any]]:
+        """One entry per physical disk, root disk first.
+
+        total/used/available/percent describe the mounted filesystem when
+        `mountpoint` is set -- so the three always reconcile with each other --
+        and the raw device capacity when nothing on the disk is mounted. The two
+        are never mixed: a 64 GB eMMC holding a 60 GB rootfs reports the 60 GB
+        the operator can actually fill.
+        """
+        gib = 1024.0 ** 3
+        devices = SystemInfoCollector._block_devices()
+        mounts = SystemInfoCollector._primary_mounts()
+
+        volumes: list[dict[str, Any]] = []
+        for disk in sorted(set(devices) | set(mounts)):
+            model = str(devices.get(disk, {}).get("model", ""))
+            part = mounts.get(disk)
+            usage = None
+            if part is not None:
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                except OSError:
+                    usage = None
+
+            entry: dict[str, Any]
+            if usage is not None and part is not None:
+                entry = {
+                    "mountpoint": part.mountpoint,
+                    "total": usage.total / gib,
+                    "used": usage.used / gib,
+                    "available": usage.free / gib,
+                    "percent": float(usage.percent),
+                }
+            else:
+                capacity = float(devices.get(disk, {}).get("capacity", 0.0))
+                entry = {
+                    "mountpoint": "",
+                    "total": capacity,
+                    "used": 0.0,
+                    "available": capacity,
+                    "percent": 0.0,
+                }
+            if entry["total"] <= 0:
+                continue
+            entry["name"] = SystemInfoCollector._disk_label(disk, model)
+            entry["device"] = f"/dev/{disk}"
+            entry["model"] = model
+            volumes.append(entry)
+
+        volumes.sort(key=lambda v: (0 if v["mountpoint"] == "/" else 1, v["device"]))
+        return volumes
 
     @staticmethod
     def get_temperature_info() -> dict[str, Any]:
@@ -267,12 +428,30 @@ class JetsonCollector(SystemInfoCollector):
 
     @staticmethod
     def is_jetson() -> bool:
-        """Check if running on a Jetson device"""
+        """Check if running on an NVIDIA Jetson (not ARK JAJ + Modalix).
+
+        Note: the carrier product name "Just a Jetson" also contains "jetson";
+        require NVIDIA/Tegra identity so Modalix eLxr is not mis-detected.
+        """
+        if os.path.isfile("/etc/nv_tegra_release"):
+            return True
         try:
-            with open('/proc/device-tree/model', 'r') as f:
+            with open("/proc/device-tree/compatible", "r") as f:
+                compat = f.read().lower()
+            if "simaai" in compat or "modalix" in compat:
+                return False
+            if "nvidia" in compat or "tegra" in compat:
+                return True
+        except OSError:
+            pass
+        try:
+            with open("/proc/device-tree/model", "r") as f:
                 model = f.read().lower()
-                return 'nvidia' in model or 'jetson' in model
-        except:
+            if "modalix" in model or "simaai" in model:
+                return False
+            # Do not match bare "jetson" (carrier product name on Modalix JAJ)
+            return "nvidia" in model or "tegra" in model
+        except OSError:
             return False
 
     @staticmethod
@@ -437,6 +616,216 @@ class GenericLinuxCollector(SystemInfoCollector):
         return info
 
 
+class ModalixCollector(SystemInfoCollector):
+    """Collector for SiMa Modalix (eLxr) on ARK Just a Jetson / Modalix carriers."""
+
+    _POWER_DIR = "/run/ark-jaj/sys-power"
+    _BOARD_DIR = "/run/ark-jaj/board"
+    _serial: str | None = None
+    _at24_dead_buses: set[int] = set()
+
+    @staticmethod
+    def _os_release_is_elxr() -> bool:
+        """ID= or ID_LIKE= naming eLxr, not the word appearing anywhere in the file."""
+        try:
+            with open("/etc/os-release", "r") as f:
+                for line in f:
+                    key, _, value = line.partition("=")
+                    if key.strip() not in ("ID", "ID_LIKE"):
+                        continue
+                    if "elxr" in value.strip().strip("\"'").lower().split():
+                        return True
+        except OSError:
+            pass
+        return False
+
+    @classmethod
+    def is_modalix(cls) -> bool:
+        """Detect a SiMa Modalix SoM.
+
+        The device tree decides: the ARK carrier's model string reads "Just a
+        Jetson" whichever module is fitted, so only `compatible` tells the two
+        apart. eLxr is the fallback for a board booted without the ARK overlay.
+        """
+        compat = cls._read_dt_strings("/proc/device-tree/compatible")
+        if any("simaai" in c.lower() or "modalix" in c.lower() for c in compat):
+            return True
+        if "modalix" in (cls._read_dt_string("/proc/device-tree/model") or "").lower():
+            return True
+        return cls._os_release_is_elxr()
+
+    @staticmethod
+    def _read_dt_string(path: str) -> str | None:
+        """First NUL-terminated string (model is a single string)."""
+        try:
+            with open(path, "rb") as f:
+                return f.read().split(b"\x00")[0].decode("utf-8", errors="replace").strip()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _read_dt_strings(path: str) -> list[str]:
+        """All NUL-separated strings (compatible is a list)."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+            return [
+                p.decode("utf-8", errors="replace").strip()
+                for p in raw.split(b"\x00")
+                if p.strip()
+            ]
+        except OSError:
+            return []
+
+    @staticmethod
+    def _read_file(path: str) -> str | None:
+        try:
+            with open(path, "r") as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
+    @classmethod
+    def _read_at24csw_unique_id(cls, bus_num: int) -> str | None:
+        """128-bit factory ID from AT24CSW010 security window (addr 0x58, word 0x80).
+
+        Modalix SoM has no /proc/device-tree/serial-number; the on-module 24c128
+        is blank. Carrier EEPROM is I2C1 (PAB V3 / JAJ). Same protocol as
+        platform/jetson/scripts/jetson_serial_number.py (bus 7 on Jetson).
+
+        A bus that comes back empty is not probed again: the EEPROM is soldered
+        down, so a second answer is not coming, and this bus also carries the
+        INA238 that the power reading polls.
+        """
+        if bus_num in cls._at24_dead_buses:
+            return None
+        try:
+            from smbus2 import SMBus
+        except ImportError:
+            cls._at24_dead_buses.add(bus_num)
+            return None
+        try:
+            bus = SMBus(bus_num)
+            try:
+                bus.write_byte(0x58, 0x80)
+                data = bus.read_i2c_block_data(0x58, 0x80, 16)
+            finally:
+                bus.close()
+        except OSError:
+            cls._at24_dead_buses.add(bus_num)
+            return None
+        if len(data) < 16 or all(b == 0xFF for b in data) or all(b == 0 for b in data):
+            cls._at24_dead_buses.add(bus_num)
+            return None
+        return "".join(f"{b:02x}" for b in data)
+
+    @classmethod
+    def _board_serial(cls) -> str:
+        """Serial from the sys-power publisher, the carrier EEPROM, or DT.
+
+        Cached once resolved -- the board ID cannot change under a running
+        service, and /info is polled every five seconds by the System page. A
+        failure is not cached, so the answer still appears if the ark-jaj
+        publisher comes up after this service.
+        """
+        if cls._serial is not None:
+            return cls._serial
+        serial = (
+            cls._read_file(f"{cls._BOARD_DIR}/unique_id")
+            or cls._read_file(f"{cls._BOARD_DIR}/unique_id_text")
+            or cls._read_at24csw_unique_id(1)
+            or cls._read_at24csw_unique_id(7)
+            or cls._read_dt_string("/proc/device-tree/serial-number")
+        )
+        if serial:
+            cls._serial = serial
+        return serial or "Not available"
+
+    @classmethod
+    def get_modalix_info(cls) -> dict[str, Any]:
+        """Model/module/serial from DT + AT24CSW unique ID; power from INA238 publisher."""
+        model = cls._read_dt_string("/proc/device-tree/model") or "Modalix"
+        compat_list = cls._read_dt_strings("/proc/device-tree/compatible")
+
+        # Module: prefer SoM token from compatible (e.g. simaai,modalix-som)
+        module = "Modalix SoM"
+        for p in compat_list:
+            if "modalix-som" in p:
+                module = p  # e.g. simaai,modalix-som
+                break
+            if p.startswith("simaai,") and "modalix" in p:
+                module = p
+
+        serial = cls._board_serial()
+
+        # Power: /run/ark-jaj/sys-power from INA238 userspace (or future hwmon)
+        # Frontend expects power.total in milliwatts (Jetson jtop convention).
+        power_total_mw = 0.0
+        voltage_V: float | None = None
+        current_A: float | None = None
+
+        def _num(s: str | None) -> float | None:
+            if s is None:
+                return None
+            s = s.strip()
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        power_uW = _num(cls._read_file(f"{cls._POWER_DIR}/power_uW"))
+        voltage_uV = _num(cls._read_file(f"{cls._POWER_DIR}/voltage_uV"))
+        current_uA = _num(cls._read_file(f"{cls._POWER_DIR}/current_uA"))
+        if power_uW is not None:
+            power_total_mw = power_uW / 1000.0
+        if voltage_uV is not None:
+            voltage_V = voltage_uV / 1e6
+        if current_uA is not None:
+            current_A = current_uA / 1e6
+
+        if power_uW is None and voltage_V is None:
+            # Fallback: in-kernel hwmon ina238 (power1 µW, in1 mV, curr1 mA)
+            try:
+                for name in os.listdir("/sys/class/hwmon"):
+                    base = f"/sys/class/hwmon/{name}"
+                    hwname = (cls._read_file(f"{base}/name") or "").lower()
+                    if hwname not in ("ina238", "ina2xx"):
+                        continue
+                    pw = _num(cls._read_file(f"{base}/power1_input"))
+                    if pw is not None:
+                        power_total_mw = pw / 1000.0
+                    vin = _num(cls._read_file(f"{base}/in1_input"))
+                    if vin is not None:
+                        voltage_V = vin / 1000.0  # mV → V
+                    cur = _num(cls._read_file(f"{base}/curr1_input"))
+                    if cur is not None:
+                        current_A = cur / 1000.0  # mA → A
+                    break
+            except OSError:
+                pass
+
+        # Die temp from INA238 publisher if available (millidegC → °C)
+        temperatures: dict[str, float] = {}
+        temp_mC = _num(cls._read_file(f"{cls._POWER_DIR}/temp_mC"))
+        if temp_mC is not None:
+            temperatures["ina238"] = temp_mC / 1000.0
+
+        return {
+            "hardware": {
+                "type": "modalix",
+                "model": model,
+                "module": module,
+                "serial_number": serial,
+            },
+            "power": {
+                "total": power_total_mw,
+                "voltage": voltage_V,
+                "current": current_A,
+                "temperature": temperatures,
+            },
+        }
+
+
 def get_system_info() -> SystemInfo:
     """Collect all system information as a validated SystemInfo model.
 
@@ -447,31 +836,56 @@ def get_system_info() -> SystemInfo:
     common = SystemInfoCollector.get_common_info()
     temp_info = SystemInfoCollector.get_temperature_info()
 
-    # Device-agnostic defaults; device detection overrides these below.
+    # Device-agnostic defaults; the branches below override what they can fill.
+    # Empty means "this device has no such thing" -- the NVIDIA CUDA stack and the
+    # nvpmodel/jetson_clocks pair exist only on Jetson, where the collector always
+    # replaces these. The UI renders an empty field as "Not available".
     hardware = Hardware(
         model="Not available",
         module="Not available",
         serial_number="Not available",
-        l4t="Not available",
-        jetpack="Not available",
+        l4t="",
+        jetpack="",
     )
     libraries = Libraries(
-        cuda="Not available",
-        opencv="Not available",
+        cuda="",
+        opencv="",
         opencv_cuda=False,
-        cudnn="Not available",
-        tensorrt="Not available",
-        vpi="Not available",
-        vulkan="Not available",
+        cudnn="",
+        tensorrt="",
+        vpi="",
+        vulkan="",
     )
     power = Power(
-        nvpmodel="Not available",
-        jetson_clocks="Not available",
+        nvpmodel="",
+        jetson_clocks=None,
         total=0,
         temperature={},
     )
 
-    if JetsonCollector.is_jetson():
+    # Modalix first: carrier DT model may include "Just a Jetson" without NVIDIA.
+    if ModalixCollector.is_modalix():
+        device_type = "modalix"
+        mx = ModalixCollector.get_modalix_info()
+        hw = mx.get("hardware", {})
+        hardware = Hardware(
+            type=hw.get("type", "modalix"),
+            model=hw.get("model", "Modalix"),
+            module=hw.get("module", "Modalix SoM"),
+            serial_number=hw.get("serial_number", "Not available"),
+            l4t="",
+            jetpack="",
+        )
+        pw = mx.get("power", {})
+        power = Power(
+            nvpmodel="",
+            jetson_clocks=None,
+            total=float(pw.get("total", 0) or 0),
+            temperature=pw.get("temperature") or {},
+            voltage=pw.get("voltage"),
+            current=pw.get("current"),
+        )
+    elif JetsonCollector.is_jetson():
         device_type = "jetson"
         jetson_data = JetsonCollector.get_jetson_info()
         if jetson_data:
@@ -510,8 +924,8 @@ def get_system_info() -> SystemInfo:
             model=pi_info.get("model", "Raspberry Pi"),
             module="Not available",
             serial_number=pi_info.get("serial_number", "Unknown"),
-            l4t="Not available",
-            jetpack="Not available",
+            l4t="",
+            jetpack="",
         )
     else:
         device_type = "generic"
@@ -520,8 +934,8 @@ def get_system_info() -> SystemInfo:
             model=generic_info.get("cpu_model", "Generic Linux System"),
             module="Not available",
             serial_number="Not available",
-            l4t="Not available",
-            jetpack="Not available",
+            l4t="",
+            jetpack="",
         )
 
     network = Network(
@@ -554,6 +968,19 @@ def get_system_info() -> SystemInfo:
                 available=common["disk"]["available"],
                 percent=common["disk"]["percent"],
             ),
+            disks=[
+                DiskVolume(
+                    name=d["name"],
+                    device=d["device"],
+                    mountpoint=d.get("mountpoint") or "",
+                    total=float(d["total"]),
+                    used=float(d["used"]),
+                    available=float(d["available"]),
+                    percent=float(d["percent"]),
+                    model=d.get("model") or "",
+                )
+                for d in (common.get("disks") or [])
+            ],
             cpu_count=common["cpu_count"],
         ),
         network=network,
@@ -630,7 +1057,9 @@ if __name__ == '__main__':
     print("Device type detection in progress...")
 
     # Quick device detection for startup message
-    if JetsonCollector.is_jetson():
+    if ModalixCollector.is_modalix():
+        print("Detected: SiMa Modalix")
+    elif JetsonCollector.is_jetson():
         print("Detected: NVIDIA Jetson")
     elif RaspberryPiCollector.is_raspberry_pi():
         print("Detected: Raspberry Pi")

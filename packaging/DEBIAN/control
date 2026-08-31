@@ -12,4 +12,4 @@ Description: ARK-OS companion computer platform
  Pre-compiled services, web UI, and system configuration for autonomous vehicles.
  .
  The @PLATFORM@ package installs system-level systemd units that run as the
- default platform user. The Pi package assumes the default "pi" user exists.
+ default platform user (jetson / pi / sima for modalix).

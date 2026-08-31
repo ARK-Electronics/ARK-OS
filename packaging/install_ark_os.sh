@@ -51,7 +51,7 @@ Positional:
                             --ark-os-version is given.
 
 Options:
-  --platform=jetson|pi      Override platform autodetection.
+  --platform=jetson|pi|modalix  Override platform autodetection.
   --codename=NAME           Override OS-release codename autodetection (bookworm, trixie,
                             jammy, …). Only needed to name a download when /etc/os-release
                             can't be read.
@@ -99,17 +99,33 @@ JETSON_STATS_VERSION="${OPT_JETSON_STATS_VERSION:-${JETSON_STATS_VERSION:-}}"
 # --- Helpers ---
 platform_from_deb() {
     case "$(basename "$1")" in
-        ark-os-jetson-*) echo jetson ;;
-        ark-os-pi-*)     echo pi ;;
+        ark-os-jetson-*)  echo jetson ;;
+        ark-os-pi-*)      echo pi ;;
+        ark-os-modalix-*) echo modalix ;;
         *)               return 1 ;;
     esac
 }
 
 detect_platform() {
+    # Modalix before Jetson: PAB V3 model is "ARK Jetson PAB V3 with SiMa
+    # Modalix SoM" and would otherwise match *Jetson*.
+    if [ -r /proc/device-tree/compatible ] &&
+       grep -z -q 'simaai,modalix' /proc/device-tree/compatible; then
+        echo modalix
+        return
+    fi
+    if [ -r /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        . /etc/os-release
+        case "${ID:-} ${ID_LIKE:-}" in
+            *elxr*) echo modalix; return ;;
+        esac
+    fi
     [ -f /etc/nv_tegra_release ] && { echo jetson; return; }
     if [ -r /proc/device-tree/model ]; then
         local model; model="$(tr -d '\0' < /proc/device-tree/model)"
         case "$model" in
+            *Modalix*|*modalix*) echo modalix; return ;;
             *Jetson*|*Tegra*) echo jetson; return ;;
             *Raspberry*Pi*)   echo pi;     return ;;
         esac
@@ -156,8 +172,8 @@ if [ -z "$PLATFORM" ] && [ -n "$DEB_ARG" ]; then
     PLATFORM="$(platform_from_deb "$DEB_ARG" || true)"
 fi
 [ -n "$PLATFORM" ] || PLATFORM="$(detect_platform || true)"
-[ -n "$PLATFORM" ] || die "could not determine platform; pass --platform=jetson|pi."
-case "$PLATFORM" in jetson|pi) ;; *) die "invalid platform '$PLATFORM' (expected jetson or pi)." ;; esac
+[ -n "$PLATFORM" ] || die "could not determine platform; pass --platform=jetson|pi|modalix."
+case "$PLATFORM" in jetson|pi|modalix) ;; *) die "invalid platform '$PLATFORM' (expected jetson|pi|modalix)." ;; esac
 info "Platform: $PLATFORM"
 
 # Codename: explicit flag wins; otherwise read from the device's /etc/os-release.
@@ -166,11 +182,24 @@ info "Platform: $PLATFORM"
 [ -n "$CODENAME" ] || CODENAME="$(detect_codename || true)"
 [ -n "$CODENAME" ] && info "OS codename: $CODENAME"
 
+# The release only carries codenames CI builds (build-deb.yml). eLxr 12 (aria) is
+# Debian 12 / Python 3.11, so it installs the bookworm build -- the same pairing
+# the deb's preinst accepts. Without this the download URL would 404 on aria.
+if [ "$PLATFORM" = "modalix" ] && [ "$CODENAME" = "aria" ]; then
+    CODENAME="bookworm"
+    info "Using the $CODENAME build (aria is Debian 12 / Python 3.11)"
+fi
+
 # Every ARK-OS service runs as User=$PLATFORM (baked into the unit files). Modern
 # Raspberry Pi OS no longer ships a default 'pi' account, so fail before touching
 # the system rather than letting the deb's postinst abort on a missing user.
-getent passwd "$PLATFORM" >/dev/null 2>&1 || \
-    die "ARK-OS services run as the user '$PLATFORM', which does not exist on this device. Re-image with the username '$PLATFORM', or create it first: sudo useradd -m -s /bin/bash $PLATFORM && sudo passwd $PLATFORM && sudo usermod -aG sudo $PLATFORM"
+# Service account matches platform for jetson/pi; Modalix eLxr uses 'sima'.
+case "$PLATFORM" in
+    modalix) SERVICE_USER=sima ;;
+    *)       SERVICE_USER=$PLATFORM ;;
+esac
+getent passwd "$SERVICE_USER" >/dev/null 2>&1 || \
+    die "ARK-OS services run as the user '$SERVICE_USER', which does not exist on this device. Re-image with the username '$SERVICE_USER', or create it first: sudo useradd -m -s /bin/bash $SERVICE_USER && sudo passwd $SERVICE_USER && sudo usermod -aG sudo $SERVICE_USER"
 
 # --- Scratch space for downloads ---
 DL_DIR="$(mktemp -d)"

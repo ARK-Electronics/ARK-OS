@@ -1,50 +1,94 @@
 #!/bin/bash
+# Launch MicroXRCEAgent from /etc/ark-os/dds-agent.toml.
+#
+# The config is the only source of truth: assemble_tree.sh seeds it with the
+# platform's transport and UART at package build, and the Services tab edits it
+# from there. Nothing here detects hardware or substitutes a default -- an
+# unreadable config is a broken install, not something to guess around.
+#
+# DDS_AGENT_CONFIG, MICROXRCEAGENT and ARK_PYTHON override the paths; --print
+# writes the argv and exits without exec'ing.
 
-detect_platform() {
-    # Check if we're on Jetson (look for Tegra in kernel info)
-    if uname -ar | grep -q tegra; then
-        echo "jetson"
-        return 0
-    fi
+set -euo pipefail
 
-    # Check if we're on Raspberry Pi
-    if [ -f /proc/device-tree/model ] && grep -q "Raspberry Pi" /proc/device-tree/model; then
-        echo "pi"
-        return 0
-    fi
+CONFIG="${DDS_AGENT_CONFIG:-/etc/ark-os/dds-agent.toml}"
+AGENT="${MICROXRCEAGENT:-/usr/lib/ark-os/bin/MicroXRCEAgent}"
+PYTHON="${ARK_PYTHON:-/usr/lib/ark-os/venv/bin/python3}"
 
-    # Check for common files on Raspberry Pi
-    if [ -f /etc/rpi-issue ] || [ -d /opt/vc/lib ]; then
-        echo "pi"
-        return 0
-    fi
+PRINT_ONLY=0
+if [ "${1:-}" = "--print" ]; then
+    PRINT_ONLY=1
+    shift
+fi
 
-    # If not Jetson or Pi, assume regular Ubuntu
-    echo "ubuntu"
-    return 0
+# The bundled venv carries the `toml` lib that merge_configs.py already uses;
+# the system python3 is not a package dependency and Jetson's 3.10 predates
+# tomllib, so always go through the venv interpreter.
+read_config() {
+    "$PYTHON" - "$CONFIG" <<'PY'
+import shlex
+import sys
+import toml
+
+try:
+    cfg = toml.load(sys.argv[1])
+except (OSError, toml.TomlDecodeError) as exc:
+    sys.exit("dds-agent: %s" % exc)
+for key in ("transport", "device", "baudrate", "port"):
+    print("cfg_%s=%s" % (key, shlex.quote(str(cfg.get(key, "")))))
+PY
 }
 
-# Set platform as an environment variable
-export TARGET=$(detect_platform)
+if ! CONFIG_VARS="$(read_config)"; then
+    echo "dds-agent: cannot read transport settings from $CONFIG" >&2
+    exit 1
+fi
+# Declared so the eval below is the only writer and an empty value still reaches
+# the per-transport checks rather than tripping `set -u`.
+cfg_transport=""; cfg_device=""; cfg_baudrate=""; cfg_port=""
+eval "$CONFIG_VARS"
 
-echo "Detected platform: $TARGET"
+# Tolerate the spellings a hand-edited config might use; the UI dropdown only
+# ever writes serial/ethernet/tcp.
+case "$(echo "$cfg_transport" | tr '[:upper:]' '[:lower:]')" in
+    serial|uart)         transport=serial ;;
+    ethernet|udp|udp4)   transport=ethernet ;;
+    tcp|tcp4)            transport=tcp ;;
+    *)                   transport="$cfg_transport" ;;
+esac
 
-# Start the DDS agent based on the detected platform
-case "$TARGET" in
-    jetson)
-        echo "Starting DDS agent for Jetson platform"
-        exec /usr/lib/ark-os/bin/MicroXRCEAgent serial -b 3000000 -D /dev/ttyTHS1
+case "$transport" in
+    serial)
+        [ -n "$cfg_device" ] || { echo "dds-agent: serial transport needs 'device'" >&2; exit 1; }
+        [ -n "$cfg_baudrate" ] || { echo "dds-agent: serial transport needs 'baudrate'" >&2; exit 1; }
+        # The unit deliberately carries no dev-*.device ordering -- transport is a
+        # runtime setting, so the UART can only be checked here. Exiting fails the
+        # unit under the same restart budget as mavlink-router with no FC attached.
+        [ -e "$cfg_device" ] || { echo "dds-agent: serial device $cfg_device does not exist" >&2; exit 1; }
+        CMD=("$AGENT" serial -b "$cfg_baudrate" -D "$cfg_device")
+        echo "Starting DDS agent (serial $cfg_device @ $cfg_baudrate) from $CONFIG"
         ;;
-    pi)
-        echo "Starting DDS agent for Raspberry Pi platform"
-        exec /usr/lib/ark-os/bin/MicroXRCEAgent serial -b 3000000 -D /dev/ttyAMA4
-        ;;
-    ubuntu)
-        echo "Starting DDS agent for Ubuntu desktop"
-        exec /usr/lib/ark-os/bin/MicroXRCEAgent udp4 -p 8888
+    ethernet|tcp)
+        [ -n "$cfg_port" ] || { echo "dds-agent: $transport transport needs 'port'" >&2; exit 1; }
+        if [ "$transport" = "ethernet" ]; then
+            CMD=("$AGENT" udp4 -p "$cfg_port")
+        else
+            CMD=("$AGENT" tcp4 -p "$cfg_port")
+        fi
+        echo "Starting DDS agent ($transport port $cfg_port, all interfaces) from $CONFIG"
+        echo "  set PX4 UXRCE_DDS_AG_IP to this companion's address and UXRCE_DDS_PRT to $cfg_port"
         ;;
     *)
-        echo "Unknown platform"
+        echo "dds-agent: unknown transport '$cfg_transport' (use serial, ethernet, or tcp)" >&2
         exit 1
         ;;
 esac
+
+if [ "$PRINT_ONLY" = "1" ]; then
+    printf '%s\n' "${CMD[*]}"
+    exit 0
+fi
+
+[ -x "$AGENT" ] || { echo "dds-agent: MicroXRCEAgent not found at $AGENT" >&2; exit 1; }
+
+exec "${CMD[@]}"

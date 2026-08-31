@@ -5,8 +5,8 @@ After=network.target mavlink-router.service
 
 [Service]
 Type=simple
-User=jetson
-Group=jetson
+User=@ARK_USER@
+Group=@ARK_USER@
 Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ExecStart=/usr/lib/ark-os/bin/logloader --config /etc/ark-os/logloader.toml
 Restart=always

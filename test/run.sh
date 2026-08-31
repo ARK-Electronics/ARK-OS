@@ -26,6 +26,7 @@ case "${1:-up}" in
       -p 8080:80 \
       -v "$ROOT/test/manifests:/usr/lib/ark-os/manifests:ro" \
       -v "$ROOT/test/configs/mavlink-router.conf:/etc/ark-os/mavlink-router.conf" \
+      -v "$ROOT/test/configs/dds-agent.toml:/etc/ark-os/dds-agent.toml" \
       -v "$ROOT/test/go2rtc.test.yaml:/etc/ark-os/go2rtc.yaml" \
       "$IMG"
 

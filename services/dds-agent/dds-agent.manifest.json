@@ -1,6 +1,6 @@
 {
   "displayName": "DDS Agent",
-  "description": "DDS Bridge between PX4 and ROS2 over High Speed UART.",
-  "configFile": "",
+  "description": "uXRCE-DDS agent bridging PX4 uORB to ROS 2. Configure serial UART or Ethernet (UDP/TCP) from the Services tab.",
+  "configFile": "dds-agent.toml",
   "visible": true
 }

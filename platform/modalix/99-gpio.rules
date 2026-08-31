@@ -1,0 +1,2 @@
+# Modalix gpio chardev: ARK-OS reset_fmu_* runs as sima (group gpio).
+KERNEL=="gpiochip*", SUBSYSTEM=="gpio", GROUP="gpio", MODE="0660"

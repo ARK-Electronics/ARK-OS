@@ -5,8 +5,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=jetson
-Group=jetson
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/system_manager.py
 Restart=on-failure
 RestartSec=5

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Master build orchestrator for the ARK-OS .deb.
 #
-# Usage: ./packaging/build.sh <jetson|pi> [--version=X.Y.Z]
+# Usage: ./packaging/build.sh <jetson|pi|modalix> [--version=X.Y.Z]
 #
 # Must run on arm64 (native compilation, arm64 venv, arm64 Node). Produces
 # ark-os-<platform>-<codename>_<version>_arm64.deb in the repo root; <codename> is
 # read from the build host's OS release. The helper scripts read the exported
 # environment below; run them via this orchestrator, not directly.
+#
+# modalix: SiMa Modalix SoM on eLxr 12 (aria) / ARK Just a Jetson. Service user
+# is 'sima' (SiMa eLxr default), not 'modalix'. Build on aarch64 eLxr 12 or a
+# bookworm host with ARK_OS_ALLOW_HOST_MISMATCH only for packaging dry-runs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,8 +35,8 @@ for arg in "$@"; do
 done
 
 case "$PLATFORM" in
-    jetson|pi) ;;
-    *) echo "Usage: $0 <jetson|pi> [--version=X.Y.Z]" >&2; exit 1 ;;
+    jetson|pi|modalix) ;;
+    *) echo "Usage: $0 <jetson|pi|modalix> [--version=X.Y.Z]" >&2; exit 1 ;;
 esac
 
 if [ -z "$VERSION" ]; then
@@ -41,7 +45,11 @@ if [ -z "$VERSION" ]; then
 fi
 
 export PLATFORM VERSION REPO_ROOT
-export ARK_USER="$PLATFORM"          # the service user matches the platform name
+# Service account: jetson/pi match the platform name; Modalix eLxr ships 'sima'.
+case "$PLATFORM" in
+    modalix) export ARK_USER="sima" ;;
+    *)       export ARK_USER="$PLATFORM" ;;
+esac
 export PKG_PREFIX="/usr/lib/ark-os"  # install prefix inside the package
 export BUILD_DIR="$REPO_ROOT/build/ark-os-$PLATFORM"
 
@@ -68,8 +76,10 @@ fi
 # new OS release = add an entry here and a matching leg to the CI build matrix
 # (.github/workflows/build-deb.yml).
 case "$PLATFORM" in
-    jetson) BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7 (noble = future, untested)
-    pi)     BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 (Pi OS Bookworm) / Debian 13 (Pi OS Trixie)
+    jetson)  BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7 (noble = future, untested)
+    pi)      BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 (Pi OS Bookworm) / Debian 13 (Pi OS Trixie)
+    # eLxr 12 (aria) is Debian 12-based with Python 3.11 — same ABI class as bookworm.
+    modalix) BASELINES="aria:3.11 bookworm:3.11" ;;
 esac
 
 HOST_CODENAME=""

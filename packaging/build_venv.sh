@@ -32,6 +32,10 @@ echo "==> flight-review requirements"
 # the jtop client is unavailable.
 if [ "$PLATFORM" = "jetson" ]; then
     "$VENV/bin/pip" install "Jetson.GPIO>=2.1.12" smbus2
+elif [ "$PLATFORM" = "modalix" ]; then
+    # No Jetson.GPIO. smbus2 optional for diagnostics; board power uses
+    # meta-ark-simaai ark-jaj-sys-power when installed on the image.
+    "$VENV/bin/pip" install smbus2
 elif [ "$PLATFORM" = "pi" ]; then
     # No Python GPIO library is installed for Pi. The vbus_*/reset_fmu_* helpers
     # drive GPIO via the system `pinctrl` tool (raspi-utils) instead. Classic

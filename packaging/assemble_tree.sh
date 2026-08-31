@@ -18,8 +18,11 @@ ARK="$PKG_PREFIX"   # /usr/lib/ark-os
 # Trixie's time64 transition renamed libssl3 -> libssl3t64, handled in control by the
 # alternative "libssl3t64 | libssl3"; use the same idiom if a future release renames more.
 case "$P" in
-    jetson) EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
-    pi)     EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
+    jetson)  EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
+    pi)      EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
+    # eLxr/Modalix: base gstreamer deps only; no Jetson BT QMI stack, no raspi-utils.
+    # gpiod supplies the gpioset that fmu_gpio.py prefers for the FMU reset pulse.
+    modalix) EXTRA_DEPENDS=", gpiod" ;;
 esac
 
 # --- directory skeleton ---
@@ -33,11 +36,18 @@ mkdir -p "$PKG/etc/polkit-1/localauthority/90-mandatory.d"
 mkdir -p "$PKG/etc/systemd/journald.conf.d"
 mkdir -p "$PKG/etc/sudoers.d"
 
-# --- systemd units (platform set) + group target ---
-install -m 0644 packaging/service-files/ark-os.target "$PKG/lib/systemd/system/ark-os.target"
-install -m 0644 packaging/service-files/ark-os-firstboot.service "$PKG/lib/systemd/system/ark-os-firstboot.service"
-for f in packaging/service-files/"$P"/*.service; do
-    install -m 0644 "$f" "$PKG/lib/systemd/system/$(basename "$f")"
+# --- systemd units + group target ---
+# common/ is the unit set every platform gets; service-files/<platform>/ holds the
+# extras only that platform has (jetson-can, rid-transmitter). Units carry
+# @ARK_USER@ rather than a baked-in username, so a new platform is a user name in
+# build.sh plus its extras dir -- not a third copy of thirteen identical units.
+UNITS="$PKG/lib/systemd/system"
+install -m 0644 packaging/service-files/ark-os.target "$UNITS/ark-os.target"
+install -m 0644 packaging/service-files/ark-os-firstboot.service "$UNITS/ark-os-firstboot.service"
+for f in packaging/service-files/common/*.service packaging/service-files/"$P"/*.service; do
+    [ -f "$f" ] || continue
+    sed "s/@ARK_USER@/$ARK_USER/g" "$f" > "$UNITS/$(basename "$f")"
+    chmod 0644 "$UNITS/$(basename "$f")"
 done
 
 # --- systemd-only service entry points: wrapper scripts invoked solely by a unit's
@@ -89,7 +99,7 @@ done
 # --- manifests: install one per service unit that exists on this platform ---
 for f in services/*/*.manifest.json; do
     svc=$(basename "$f" .manifest.json)
-    if [ -f "packaging/service-files/$P/$svc.service" ]; then
+    if [ -f "$UNITS/$svc.service" ]; then
         install -m 0644 "$f" "$PKG$ARK/manifests/$svc.manifest.json"
     fi
 done
@@ -111,10 +121,27 @@ mkdir -p "$DEFAULTS"
 install -m 0644 services/mavlink-router/main.conf "$DEFAULTS/mavlink-router.conf"
 for f in packaging/config/*; do
     base=$(basename "$f")
-    # rid-transmitter is jetson-only; skip its config on pi.
-    [ "$P" = "pi" ] && [ "$base" = "rid-transmitter.toml" ] && continue
+    # Skip a config whose service is not on this platform (rid-transmitter off
+    # jetson): it would only surface as an orphan entry in the Services tab.
+    [ -f "$UNITS/${base%.*}.service" ] || continue
+    # dds-agent.toml is filled with the platform's transport below.
+    [ "$base" = "dds-agent.toml" ] && continue
     install -m 0644 "$f" "$DEFAULTS/$base"
 done
+
+# The dds-agent transport lives in exactly one place: this table seeds the config,
+# and start_dds_agent.sh reads it back with no fallback of its own. Modalix has no
+# usable Telem2 UART, so it defaults to UDP; the device value is still written so
+# switching to serial in the UI has a sane starting point.
+DDS_TRANSPORT=serial
+DDS_DEVICE=/dev/ttyTHS1
+case "$P" in
+    pi)      DDS_DEVICE=/dev/ttyAMA4 ;;
+    modalix) DDS_TRANSPORT=ethernet ;;
+esac
+sed -e "s|@DDS_TRANSPORT@|$DDS_TRANSPORT|g" -e "s|@DDS_DEVICE@|$DDS_DEVICE|g" \
+    packaging/config/dds-agent.toml > "$DEFAULTS/dds-agent.toml"
+chmod 0644 "$DEFAULTS/dds-agent.toml"
 install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
 install -m 0755 packaging/system-config/migrate_logloader_config.py "$PKG$ARK/libexec/migrate_logloader_config.py"
 
@@ -132,7 +159,8 @@ install -m 0644 platform/common/wifi/99-network.pkla \
 
 # --- service-manager polkit rule: substitute @ARK_USER@; pi strips JETSON-ONLY ---
 SMR="$PKG/etc/polkit-1/rules.d/03-ark-service-manager.rules"
-if [ "$P" = "pi" ]; then
+if [ "$P" = "pi" ] || [ "$P" = "modalix" ]; then
+    # No Jetson-only polkit grants (jtop etc.) on Pi or Modalix.
     sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/03-ark-service-manager.rules \
         | grep -v 'JETSON-ONLY' > "$SMR"
 else
@@ -149,10 +177,13 @@ SMPKLA="$PKG/etc/polkit-1/localauthority/90-mandatory.d/99-ark-service-manager.p
 sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/99-ark-service-manager.pkla > "$SMPKLA"
 chmod 0644 "$SMPKLA"
 
-# --- udev gpio rules (jetson only, renamed) ---
+# --- udev gpio rules (jetson BOARD GPIO + modalix gpiochip for FMU reset) ---
 if [ "$P" = "jetson" ]; then
     mkdir -p "$PKG/etc/udev/rules.d"
     install -m 0644 platform/jetson/99-gpio.rules "$PKG/etc/udev/rules.d/99-ark-gpio.rules"
+elif [ "$P" = "modalix" ]; then
+    mkdir -p "$PKG/etc/udev/rules.d"
+    install -m 0644 platform/modalix/99-gpio.rules "$PKG/etc/udev/rules.d/99-ark-gpio.rules"
 fi
 
 # --- journald drop-in ---

@@ -29,11 +29,7 @@ MIGRATED=0
 
 # ===========================================================================
 # Required service account. Every ARK-OS unit runs as User=$ARK_USER (baked at
-# build time: 'jetson' or 'pi'). Modern Raspberry Pi OS no longer ships a default
-# 'pi' account — it is chosen at imaging time — so a Pi imaged with a different
-# username has no 'pi' user and every service would fail to start. Fail early with
-# guidance instead of letting the Step 1 usermod abort with a cryptic error.
-# (Jetson chroot provisioning creates the 'jetson' user before this runs.)
+# build time: jetson, pi, or sima for modalix/eLxr). Fail early with guidance.
 # ===========================================================================
 if ! getent passwd "$ARK_USER" >/dev/null; then
     echo "ERROR: ARK-OS requires a user named '$ARK_USER', which does not exist on this system." >&2
@@ -41,6 +37,7 @@ if ! getent passwd "$ARK_USER" >/dev/null; then
     echo "       '$ARK_USER', or create the account and reinstall:" >&2
     echo "         sudo useradd -m -s /bin/bash $ARK_USER && sudo passwd $ARK_USER" >&2
     echo "         sudo usermod -aG sudo $ARK_USER" >&2
+    echo "       Modalix eLxr images use 'sima' by default." >&2
     exit 1
 fi
 

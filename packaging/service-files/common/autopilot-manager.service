@@ -5,8 +5,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/venv/bin/python3 /usr/lib/ark-os/python/autopilot_manager.py
 Restart=on-failure
 RestartSec=5

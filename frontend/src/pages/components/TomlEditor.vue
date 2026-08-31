@@ -33,6 +33,7 @@
             </a>
 
             <label :for="key">{{ formatKey(key) }}</label>
+            <p v-if="fieldHelpText(key)" class="field-help">{{ fieldHelpText(key) }}</p>
 
             <!-- Dropdown when a sibling <field>_options array is present -->
             <select
@@ -173,7 +174,7 @@ import serviceUiHints from './serviceUiHints.js';
 
 // Display-only casing for tokens the sentence-case default would mangle
 // ("Ntrip host"); config keys and saved values stay lowercase.
-const ACRONYMS = new Set(['ntrip', 'rtcm', 'spartn', 'gga', 'mga', 'tls', 'url', 'api']);
+const ACRONYMS = new Set(['ntrip', 'rtcm', 'spartn', 'gga', 'mga', 'tls', 'url', 'api', 'udp', 'tcp', 'ip']);
 
 export default {
   name: 'TomlEditor',
@@ -199,6 +200,9 @@ export default {
     topLevelFieldKeys() {
       return Object.keys(this.config).filter((key) => {
         if (this.isOptionsField(key)) {
+          return false;
+        }
+        if (!this.fieldVisible(key)) {
           return false;
         }
         const value = this.config[key];
@@ -228,6 +232,22 @@ export default {
 
     isObject(value) {
       return typeof value === 'object' && value !== null && !Array.isArray(value);
+    },
+
+    // Hide a field when uiHints.visibleWhen[field] does not match live config.
+    fieldVisible(key) {
+      const rules = (this.uiHints.visibleWhen || {})[key];
+      if (!rules) {
+        return true;
+      }
+      return Object.entries(rules).every(([field, values]) => {
+        const allowed = Array.isArray(values) ? values : [values];
+        return allowed.includes(this.config[field]);
+      });
+    },
+
+    fieldHelpText(key) {
+      return (this.uiHints.fieldHelp || {})[key] || '';
     },
 
     // Check if a field is an options array (ends with _options)
@@ -444,7 +464,13 @@ export default {
     // Dropdown option display text; the underlying value is unchanged
     formatValue(option) {
       const token = String(option).toLowerCase();
-      return ACRONYMS.has(token) ? token.toUpperCase() : option;
+      if (ACRONYMS.has(token)) {
+        return token.toUpperCase();
+      }
+      if (!token) {
+        return option;
+      }
+      return token.charAt(0).toUpperCase() + token.slice(1);
     }
   }
 };
@@ -505,6 +531,14 @@ h1 {
   font-weight: 600;
   margin-bottom: 8px;
   color: var(--ark-color-black);
+}
+
+.field-help {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ark-color-grey);
+  margin: -4px 0 8px 0;
+  line-height: 1.4;
 }
 
 .callout-link {

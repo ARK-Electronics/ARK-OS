@@ -9,8 +9,8 @@ StartLimitBurst=5
 
 [Service]
 Type=exec
-User=jetson
-Group=jetson
+User=@ARK_USER@
+Group=@ARK_USER@
 ExecStart=/usr/lib/ark-os/libexec/start_mavlink_router.sh
 Restart=on-failure
 RestartSec=5

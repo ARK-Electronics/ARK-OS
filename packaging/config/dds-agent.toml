@@ -1,0 +1,14 @@
+# uXRCE-DDS agent (MicroXRCEAgent). Edit from the Services tab.
+# transport: serial (Telem2 UART), ethernet (UDP), or tcp.
+# The transport and serial device below are filled per platform at package build.
+
+transport = "@DDS_TRANSPORT@"
+transport_options = ["serial", "ethernet", "tcp"]
+
+# serial
+device = "@DDS_DEVICE@"
+baudrate = 3000000
+
+# ethernet / tcp -- the agent listens on every interface, so this is a listen
+# port only. Match PX4's UXRCE_DDS_PRT, and point UXRCE_DDS_AG_IP at this host.
+port = 8888
