@@ -19,7 +19,7 @@ ssh <user>@<hostname>.local
 |--------|----------|----------|
 | jetson | jetson   | jetson   |
 | pi     | pi       | pi6x     |
-| sima   | edgeai   | modalix (SiMa eLxr / JAJ+Modalix) |
+| sima   | edgeai   | modalix  |
 
 Connect to your WiFi network using Network Manager
 ```
