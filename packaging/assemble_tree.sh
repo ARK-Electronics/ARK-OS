@@ -21,7 +21,8 @@ case "$P" in
     jetson)  EXTRA_DEPENDS=", bluez, bluez-tools, libbluetooth3, libqmi-utils" ;;
     pi)      EXTRA_DEPENDS=", gstreamer1.0-libcamera, raspi-utils" ;;
     # eLxr/Modalix: base gstreamer deps only; no Jetson BT QMI stack, no raspi-utils.
-    modalix) EXTRA_DEPENDS="" ;;
+    # gpiod supplies the gpioset that fmu_gpio.py prefers for the FMU reset pulse.
+    modalix) EXTRA_DEPENDS=", gpiod" ;;
 esac
 
 # --- directory skeleton ---

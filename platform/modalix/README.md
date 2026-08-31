@@ -27,7 +27,9 @@ Package name examples:
 - `ark-os-modalix-bookworm_*_arm64.deb` — CI / Debian 12 builders  
 - `ark-os-modalix-aria_*_arm64.deb` — native eLxr 12 builders  
 
-`preinst` treats **aria ↔ bookworm** as compatible for modalix only.
+`preinst` treats **aria ↔ bookworm** as compatible for modalix only, and
+`install_ark_os.sh --ark-os-version=` downloads the bookworm build on an aria
+device for the same reason.
 
 ## Install on the SoM
 
@@ -42,9 +44,21 @@ sudo ./packaging/install_ark_os.sh --platform=modalix --ark-os-version=X.Y.Z
 - **No jtop** (Jetson-stats)  
 - **No jetson-can** (Modalix has no SoM CAN)  
 - **No rid-transmitter** in the first cut  
-- **FMU reset:** `reset_fmu_fast.py` / `reset_fmu_wait_bl.py` pulse gpio
-  `fmu_rst_req` (PAB V3 SODIMM 228 / SIO7[5], active-high). Overlay must
-  **not** hog that line. VBUS_SENSE stays hogged high for USB CDC.  
+- **FMU reset:** `reset_fmu_fast.py` / `reset_fmu_wait_bl.py` pulse
+  `fmu_rst_req` (PAB V3 SODIMM 228 / SIO7[5], active-high). The overlay must
+  name that line and must **not** hog it. `fmu_gpio.py` looks the line up by
+  name and falls back to SIO7[5] on an overlay that does not name it; it drives
+  the pulse with libgpiod's `gpioset` where available (`gpiod` is a package
+  dependency) and with the gpio chardev ioctls otherwise. libgpiod 2.x, on
+  Debian trixie, does not take the v1 flags, so it lands on the ioctl path
+  there. `ARK_GPIO_BACKEND=gpiod|ioctl` pins one for bring-up.  
+- **VBUS_SENSE** stays hogged high in DT, and `vbus_enable.py` / `vbus_disable.py`
+  are no-ops. A gpio chardev line is released when the requesting process exits,
+  so a set-and-exit helper cannot hold VBUS the way Jetson.GPIO and `pinctrl` do
+  on the other carriers — driving it from userspace would need a long-lived unit
+  holding the line. The hogged-high state matches what a JetPack 6 Jetson does
+  anyway: `platform/jetson/scripts/reset_fmu_wait_bl.py` skips VBUS control on
+  R36.  
 
 ## Autopilot link
 
