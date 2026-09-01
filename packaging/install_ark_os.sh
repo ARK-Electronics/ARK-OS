@@ -140,6 +140,11 @@ detect_codename() {
     return 1
 }
 
+asset_exists() {
+    command -v curl >/dev/null 2>&1 || return 0   # no curl: let fetch's wget attempt report the failure
+    curl -fsIL -o /dev/null "$1"
+}
+
 fetch() {
     local url="$1" out="$2"
     info "Downloading $(basename "$out")"
@@ -222,8 +227,23 @@ else
         die "multiple ark-os-${PLATFORM} debs in $(pwd); pass the one to install as an argument."
     elif [ -n "$ARK_OS_VERSION" ]; then
         [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|trixie|jammy|…>."
-        ARK_OS_DEB="$DL_DIR/ark-os-${PLATFORM}-${CODENAME}_${ARK_OS_VERSION}_arm64.deb"
-        fetch "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$(basename "$ARK_OS_DEB")" "$ARK_OS_DEB"
+        # A Modalix reports eLxr 12's own codename (aria), but releases ship the
+        # ABI-compatible bookworm build until a native eLxr builder exists (see the
+        # modalix leg of .github/workflows/build-deb.yml). Prefer the exact codename
+        # so an aria asset wins the day it is published.
+        CANDIDATES="$CODENAME"
+        [ "$PLATFORM" = modalix ] && [ "$CODENAME" != bookworm ] && CANDIDATES="$CODENAME bookworm"
+        ARK_OS_DEB=""
+        for candidate in $CANDIDATES; do
+            name="ark-os-${PLATFORM}-${candidate}_${ARK_OS_VERSION}_arm64.deb"
+            if asset_exists "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$name"; then
+                [ "$candidate" = "$CODENAME" ] || info "No $CODENAME build for v${ARK_OS_VERSION}; using the $candidate build."
+                ARK_OS_DEB="$DL_DIR/$name"
+                fetch "$ARK_OS_REPO/releases/download/v${ARK_OS_VERSION}/$name" "$ARK_OS_DEB"
+                break
+            fi
+        done
+        [ -n "$ARK_OS_DEB" ] || die "v${ARK_OS_VERSION} publishes no ark-os-${PLATFORM} build for this OS (tried: ${CANDIDATES// /, })."
     else
         die "no ark-os deb given: pass a path, place one in $(pwd), or use --ark-os-version=X.Y.Z."
     fi
