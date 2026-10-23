@@ -144,12 +144,15 @@ sed -e "s|@DDS_TRANSPORT@|$DDS_TRANSPORT|g" -e "s|@DDS_DEVICE@|$DDS_DEVICE|g" \
 chmod 0644 "$DEFAULTS/dds-agent.toml"
 install -m 0755 packaging/system-config/merge_configs.py "$PKG$ARK/libexec/merge_configs.py"
 install -m 0755 packaging/system-config/migrate_logloader_config.py "$PKG$ARK/libexec/migrate_logloader_config.py"
+# Root helper the managers run through sudo to control manifest-registered services.
+install -m 0755 packaging/system-config/ark_service_ctl.sh "$PKG$ARK/libexec/ark_service_ctl.sh"
 
 # --- nginx site ---
 install -m 0644 frontend/ark-ui.nginx "$PKG/etc/nginx/sites-available/ark-ui"
 
-# --- sudoers (renamed, 0440) ---
-install -m 0440 platform/common/ark_scripts.sudoers "$PKG/etc/sudoers.d/ark-os"
+# --- sudoers (renamed, 0440; @ARK_USER@ substituted) ---
+sed "s/@ARK_USER@/$ARK_USER/g" platform/common/ark_scripts.sudoers > "$PKG/etc/sudoers.d/ark-os"
+chmod 0440 "$PKG/etc/sudoers.d/ark-os"
 
 # --- NetworkManager polkit rule + pkla (renamed) ---
 install -m 0644 platform/common/wifi/02-network-manager.rules \
@@ -157,25 +160,11 @@ install -m 0644 platform/common/wifi/02-network-manager.rules \
 install -m 0644 platform/common/wifi/99-network.pkla \
     "$PKG/etc/polkit-1/localauthority/90-mandatory.d/99-ark-network.pkla"
 
-# --- service-manager polkit rule: substitute @ARK_USER@; pi strips JETSON-ONLY ---
+# --- service-manager polkit rule (hostname only): substitute @ARK_USER@. Service
+# control is not a polkit grant; see ark_service_ctl.sh. ---
 SMR="$PKG/etc/polkit-1/rules.d/03-ark-service-manager.rules"
-if [ "$P" = "pi" ] || [ "$P" = "modalix" ]; then
-    # No Jetson-only polkit grants (jtop etc.) on Pi or Modalix.
-    sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/03-ark-service-manager.rules \
-        | grep -v 'JETSON-ONLY' > "$SMR"
-else
-    sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/03-ark-service-manager.rules > "$SMR"
-fi
+sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/03-ark-service-manager.rules > "$SMR"
 chmod 0644 "$SMR"
-
-# --- service-manager polkit pkla: the JetPack-6 / Ubuntu 22.04 rootfs runs polkit
-# 0.105, which honors .pkla (local authority) and ignores JS .rules; Pi/Bookworm is
-# the reverse. Ship both so the grant applies on each. pkla can't scope per-unit, so
-# it grants the service user blanket systemd manage rights (same breadth as the
-# NetworkManager grant above); the .rules file keeps per-unit scoping where honored.
-SMPKLA="$PKG/etc/polkit-1/localauthority/90-mandatory.d/99-ark-service-manager.pkla"
-sed "s/@ARK_USER@/$ARK_USER/g" packaging/system-config/99-ark-service-manager.pkla > "$SMPKLA"
-chmod 0644 "$SMPKLA"
 
 # --- udev gpio rules (jetson BOARD GPIO + modalix gpiochip for FMU reset) ---
 if [ "$P" = "jetson" ]; then
@@ -230,6 +219,7 @@ for p in \
     "$PKG/var/www/ark-ui/html" \
     "$PKG$ARK/flight-review/app/serve.py" \
     "$PKG$ARK/libexec/ark_os_firstboot.sh" \
+    "$PKG$ARK/libexec/ark_service_ctl.sh" \
     "$PKG/lib/systemd/system/ark-os-firstboot.service" \
     "$PKG/DEBIAN/control"; do
     if [ ! -e "$p" ]; then echo "MISSING: $p" >&2; missing=1; fi

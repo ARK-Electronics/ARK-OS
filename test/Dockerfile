@@ -44,12 +44,17 @@ COPY services/autopilot-manager/  /usr/lib/ark-os/python/autopilot-manager/
 # Built UI.
 COPY --from=frontend /app/dist /var/www/ark-ui/html
 
-# Harness bits: nginx site, supervisord config, fake FC, systemctl/journalctl shims.
+# Harness bits: nginx site, supervisord config, fake FC, systemctl/journalctl/sudo
+# shims, and the real service-control helper the managers run through sudo. The
+# helper pins PATH to /usr/bin et al., so the systemctl shim is linked there too.
 COPY test/nginx.conf /etc/nginx/conf.d/ark-ui.conf
 COPY test/supervisord.conf /etc/supervisord.conf
 COPY test/mavlink_stub.py /usr/lib/ark-os/test/mavlink_stub.py
-COPY test/bin/systemctl test/bin/journalctl /usr/local/bin/
-RUN chmod +x /usr/local/bin/systemctl /usr/local/bin/journalctl \
+COPY test/bin/systemctl test/bin/journalctl test/bin/sudo /usr/local/bin/
+COPY packaging/system-config/ark_service_ctl.sh /usr/lib/ark-os/libexec/ark_service_ctl.sh
+RUN chmod +x /usr/local/bin/systemctl /usr/local/bin/journalctl /usr/local/bin/sudo \
+      /usr/lib/ark-os/libexec/ark_service_ctl.sh \
+ && ln -s /usr/local/bin/systemctl /usr/bin/systemctl \
  && mkdir -p /usr/lib/ark-os/manifests /etc/ark-os /run/ark-os-test
 
 EXPOSE 80
