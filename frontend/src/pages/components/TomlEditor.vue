@@ -169,7 +169,7 @@
 
 <script>
 import axios from 'axios';
-import toml from 'toml-js';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import serviceUiHints from './serviceUiHints.js';
 
 // Display-only casing for tokens the sentence-case default would mangle
@@ -360,7 +360,7 @@ export default {
 
           if (status === 'success') {
             try {
-              this.config = toml.parse(configData.trim());
+              this.config = parseToml(configData);
 
               // Store the original data types
               this.originalTypes = {};
@@ -419,7 +419,7 @@ export default {
         // Convert any string values back to numbers where needed
         convertTypes(configToSave);
 
-        const tomlString = toml.dump(configToSave);
+        const tomlString = stringifyToml(configToSave);
 
         axios.post(`/api/service/config?serviceName=${this.serviceName}`,
           JSON.stringify({ config: tomlString }),
