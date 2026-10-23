@@ -11,9 +11,10 @@ Use one name, `<name>`, everywhere: it is the unit name, the manifest's filename
 | What | Where | Notes |
 |------|-------|-------|
 | systemd **system** unit | `/etc/systemd/system/<name>.service` | Not a user unit (`~/.config/systemd/user`). Has an `[Install]` section. |
-| Manifest | `/usr/lib/ark-os/manifests/<name>.manifest.json` | Its presence is what makes the service appear and be manageable. |
+| Manifest | `/usr/lib/ark-os/manifests/<name>.manifest.json` | Its presence is what makes the service appear and lets the web UI control it. |
 | Config (optional) | `/etc/ark-os/<configFile>` | TOML. Group `<ark-user>`, mode `0664`. |
-| polkit rule (recommended) | `/etc/polkit-1/rules.d/50-<name>.rules` | Lets the web UI start and stop the unit. See [below](#the-polkit-rule-recommended). |
+
+You don't need a polkit rule or a sudoers entry: the web UI can start, stop, enable and disable any service that has a manifest. The manifests directory is owned by root, so only root can register a service.
 
 `<ark-user>` is the account ARK-OS runs as: `jetson` on Jetson, `pi` on Raspberry Pi, `sima` on Modalix. To read it on a device:
 
@@ -56,18 +57,7 @@ See [`hello-ark.service`](hello-ark.service).
 - **Read it at startup.** Saving does not restart the service. The operator restarts it from the card (stop, then start) to apply changes.
 - **Make it writable by `<ark-user>`.** The web UI saves configs as `<ark-user>`. `/etc/ark-os` is group `<ark-user>` with the setgid bit, so a new file inherits the group; give it mode `0664`.
 - **Pick a filename no other service uses.** `/etc/ark-os` is one flat directory shared with ARK-OS's own configs. `<name>.toml` is a safe choice.
-- **Expect the file to be rewritten.** Saving from the UI regenerates the whole file, so comments are dropped. The editor's TOML parser also strips whitespace inside string values, so avoid spaces in strings an operator will edit from the UI.
-
-### The polkit rule (recommended)
-
-The service-manager runs as `<ark-user>` with no login session, so polkit decides whether each `systemctl start`/`stop`/`restart` it runs is allowed. Your service works without a rule of its own today, but only through grants ARK-OS makes for other reasons:
-
-- **Pi and Modalix** read polkit `.rules` files. ARK-OS's `03-ark-service-manager.rules` names only ARK-OS's own units for start and stop. It also grants `manage-unit-files`, which the Autostart toggle needs, for every unit, and systemd accepts that grant for start and stop as well.
-- **Jetson** (JetPack 6) runs polkit 0.105, which ignores `.rules` files. ARK-OS's `.pkla` there lets `<ark-user>` manage any unit.
-
-Install a rule that names your unit, so the Start and Stop buttons keep working if ARK-OS narrows those grants: see [`50-hello-ark.rules`](50-hello-ark.rules). Jetson ignores it, so the same install works on every platform.
-
-Do not edit `03-ark-service-manager.rules`. It is a package file, so every ARK-OS upgrade replaces it.
+- **Expect the file to be rewritten.** Saving from the UI regenerates the whole file, so comments are dropped.
 
 ## Try the example
 
@@ -77,7 +67,7 @@ On the device, from a checkout of this repo:
 sudo ./examples/custom-service/install.sh
 ```
 
-The script fills in `<ark-user>`, installs the five files at the paths in the table above, then enables and starts `hello-ark.service`. It has a card on the Services page within a second. From the card you can:
+The script fills in `<ark-user>`, installs the four files at the paths in the table above, then enables and starts `hello-ark.service`. It has a card on the Services page within a second. From the card you can:
 
 - open the log viewer to see the message repeat every `interval_s` seconds;
 - edit the config, then stop and start the service to apply it. Setting `priority` to `warning` or `err` colours the lines in the log viewer;
@@ -105,7 +95,6 @@ Before ARK-OS moved to the Debian package ([#68](https://github.com/ARK-Electron
 | `WantedBy=default.target` | `WantedBy=multi-user.target` |
 | `~/.local/share/<name>/<name>.manifest.json` | `/usr/lib/ark-os/manifests/<name>.manifest.json` |
 | `~/.local/share/<name>/config.toml` (the default when `configFile` was unset) | `/etc/ark-os/<configFile>`, with `configFile` set in the manifest |
-| No polkit rule | `/etc/polkit-1/rules.d/50-<name>.rules` (recommended) |
 
 1. Stop the old unit and remove it: `systemctl --user disable --now <name>`, then delete `~/.config/systemd/user/<name>.service`.
 2. Replace any `%h`, `~`, or bare command names in the unit with absolute paths, and point the program at its new config path.
@@ -118,7 +107,7 @@ Use `sudo systemctl ...` and `journalctl -u <name>` from now on (no `--user`).
 | Symptom | Check |
 |---------|-------|
 | No card for the service | The manifest's filename must be exactly `<name>.manifest.json` in `/usr/lib/ark-os/manifests/`, and `visible` must not be `false`. |
-| Start fails and the card stays red | Run `sudo -u <ark-user> systemctl --no-ask-password restart <name>` to see the error the web UI gets. "Unit <name>.service not found" means systemd does not know the unit: check its path, and run `sudo systemctl daemon-reload` after adding or editing a unit file. "Interactive authentication required" means polkit refused: check that your polkit rule names `<name>.service` and `<ark-user>`. Otherwise the reason is in the service's logs. |
+| Start fails and the card stays red | Run `sudo systemctl start <name>`. "Unit <name>.service not found" means systemd does not know the unit: check its path, and run `sudo systemctl daemon-reload` after adding or editing a unit file. Otherwise the reason is in `systemctl status <name>` and the service's logs. |
 | No edit (pencil) button | `configFile` is unset in the manifest, or `/etc/ark-os/<configFile>` does not exist. |
 | "Error saving configuration" | `<ark-user>` cannot write the file. Run `sudo chgrp <ark-user> /etc/ark-os/<configFile> && sudo chmod 0664 /etc/ark-os/<configFile>`. |
 | The service exits with status 127 | A command in the unit or its scripts was not found. Use absolute paths. |

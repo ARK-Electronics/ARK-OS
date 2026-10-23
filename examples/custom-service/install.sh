@@ -13,7 +13,6 @@ UNIT=/etc/systemd/system/$NAME.service
 MANIFEST=/usr/lib/ark-os/manifests/$NAME.manifest.json
 CONFIG=/etc/ark-os/$NAME.toml
 BIN=/usr/local/bin/$NAME
-POLKIT=/etc/polkit-1/rules.d/50-$NAME.rules
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run as root: sudo $0 $*" >&2
@@ -22,7 +21,7 @@ fi
 
 if [ "${1:-}" = "--uninstall" ]; then
     systemctl disable --now "$NAME.service" 2>/dev/null || true
-    rm -f "$UNIT" "$MANIFEST" "$CONFIG" "$BIN" "$POLKIT"
+    rm -f "$UNIT" "$MANIFEST" "$CONFIG" "$BIN"
     systemctl daemon-reload
     echo "Removed $NAME."
     exit 0
@@ -40,8 +39,6 @@ install -m 0755 "$HERE/hello_ark.sh" "$BIN"
 sed "s/@ARK_USER@/$ARK_USER/g" "$HERE/$NAME.service" > "$UNIT"
 chmod 0644 "$UNIT"
 install -m 0644 "$HERE/$NAME.manifest.json" "$MANIFEST"
-sed "s/@ARK_USER@/$ARK_USER/g" "$HERE/50-$NAME.rules" > "$POLKIT"
-chmod 0644 "$POLKIT"
 
 # The web UI saves configs as $ARK_USER, so the file must be group-writable by it.
 # Seed it only once so a re-run keeps edits made from the UI.
