@@ -54,6 +54,10 @@ def setup_logging():
 # Initialize logger
 logger = setup_logging()
 
+# Root helper for stopping/restarting ARK-OS services, run through sudo
+# (/etc/sudoers.d/ark-os); the service user has no polkit grant to do it directly.
+SERVICE_CTL = "/usr/lib/ark-os/libexec/ark_service_ctl.sh"
+
 
 # ── HTTP contract: the single source of truth ────────────────────────────────
 
@@ -691,7 +695,7 @@ class AutopilotManager:
     def stop_mavlink_router(self):
         try:
             logger.debug("Stopping mavlink-router service")
-            result = subprocess.run(["systemctl", "stop", "mavlink-router"],
+            result = subprocess.run(["sudo", "-n", SERVICE_CTL, "stop", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -708,7 +712,7 @@ class AutopilotManager:
     def restart_mavlink_router(self):
         try:
             logger.debug("Restarting mavlink-router service")
-            result = subprocess.run(["systemctl", "restart", "mavlink-router"],
+            result = subprocess.run(["sudo", "-n", SERVICE_CTL, "restart", "mavlink-router"],
                                     check=False,
                                     capture_output=True,
                                     text=True)
@@ -799,8 +803,8 @@ class AutopilotManager:
                 if not self.stop_mavlink_router():
                     error_msg = ("Could not stop mavlink-router; it still holds the autopilot "
                                  "serial port, so the bootloader erase would stall. This usually "
-                                 "means the service user lacks polkit authorization to run "
-                                 "systemctl (the 99-ark-service-manager.pkla grant is missing).")
+                                 "means the service user can't run ark_service_ctl.sh through "
+                                 "sudo (/etc/sudoers.d/ark-os is missing or invalid).")
                     logger.error(error_msg)
                     broker.publish('failed', FlashMessage(message=error_msg).model_dump())
                     return False

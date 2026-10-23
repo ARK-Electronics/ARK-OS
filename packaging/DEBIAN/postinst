@@ -53,7 +53,8 @@ if command -v visudo >/dev/null 2>&1 && [ -f /etc/sudoers.d/ark-os ]; then
     if ! visudo -cf /etc/sudoers.d/ark-os >/dev/null 2>&1; then
         mv -f /etc/sudoers.d/ark-os /etc/sudoers.d/ark-os.invalid 2>/dev/null || rm -f /etc/sudoers.d/ark-os
         echo "WARNING: /etc/sudoers.d/ark-os failed validation and was disabled." >&2
-        echo "         connection-manager's 'sudo hostnamectl' will not work until this is fixed." >&2
+        echo "         The web UI's service controls and connection-manager's 'sudo hostnamectl'" >&2
+        echo "         will not work until this is fixed." >&2
     fi
 fi
 
