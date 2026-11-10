@@ -186,3 +186,15 @@ This service starts the RemoteIDTransmitter service which broadcasts RemoteID da
 
 **jetson-can.service** <br>
 This service enables the Jetson CAN interface.
+
+## Adding your own services
+Your own applications can appear on the web UI's **Services** page next to the built-in ones, with start/stop, the Autostart toggle, live logs, and a TOML config editor. Each one needs:
+
+- a systemd **system** unit, `/etc/systemd/system/<name>.service`, with `User=` set and an `[Install]` section;
+- a manifest, `/usr/lib/ark-os/manifests/<name>.manifest.json`.
+
+It can also have a TOML config in `/etc/ark-os/`, writable by the ARK-OS user (`jetson`, `pi`, or `sima`), for the Services page to edit.
+
+No polkit rule or sudoers entry is needed: the manifest is what lets the web UI control the service.
+
+ARK-OS no longer looks for user services (`systemctl --user`). See [`examples/custom-service`](examples/custom-service/README.md) for the full requirements, a working example with an install script, and how to migrate an existing user service.

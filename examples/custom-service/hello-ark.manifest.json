@@ -1,0 +1,6 @@
+{
+  "displayName": "Hello ARK",
+  "description": "Example add-on service that logs a configurable message.",
+  "configFile": "hello-ark.toml",
+  "visible": true
+}

@@ -1,0 +1,7 @@
+# hello-ark config, edited from the web UI's Services page.
+# Saving from the UI rewrites this file, so these comments will not survive.
+message = "hello-from-ark-os"
+interval_s = 5
+# A "<key>_options" array turns <key> into a dropdown in the UI's editor.
+priority = "info"
+priority_options = ["info", "warning", "err"]
