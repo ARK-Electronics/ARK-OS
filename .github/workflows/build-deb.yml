@@ -29,6 +29,11 @@ jobs:
             runner: ubuntu-22.04-arm
             container: ""
             extra_deps: "libbluetooth-dev"
+          - platform: jetson
+            codename: noble
+            runner: ubuntu-24.04-arm
+            container: ""
+            extra_deps: "libbluetooth-dev"
           - platform: pi
             codename: bookworm
             runner: ubuntu-22.04-arm
@@ -54,6 +59,7 @@ jobs:
     # from the *system* python at runtime — a Jammy (3.10) venv will not run on
     # Bookworm (no system python3.10) and vice-versa.
     #   - jetson: ubuntu-22.04-arm natively    (Jammy / Python 3.10  = JetPack 6 rootfs)
+    #   - jetson: ubuntu-24.04-arm natively    (Noble / Python 3.12  = JetPack 7 rootfs)
     #   - pi:     a debian:bookworm container  (Debian 12 / Python 3.11 = Raspberry Pi OS Bookworm)
     #   - pi:     a debian:trixie   container  (Debian 13 / Python 3.13 = Raspberry Pi OS Trixie)
     #   - modalix: debian:bookworm container   (Python 3.11 ≈ eLxr 12 / aria)
@@ -72,7 +78,7 @@ jobs:
       - name: Bootstrap container toolchain
         # The minimal debian:* images (pi builds) lack tools the checkout
         # action and later steps assume a GitHub-hosted runner already provides.
-        # Install them before checkout. Skipped on the native jetson runner.
+        # Install them before checkout. Skipped on the native jetson runners.
         if: ${{ matrix.container != '' }}
         run: |
           apt-get update

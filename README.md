@@ -49,7 +49,7 @@ The script auto-detects Jetson vs Pi (override with `--platform`), skips jtop wh
 
 ### Manual install
 
-MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `noble` for JetPack 7, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
 
 #### Jetson
 ```

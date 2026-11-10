@@ -76,7 +76,7 @@ fi
 # new OS release = add an entry here and a matching leg to the CI build matrix
 # (.github/workflows/build-deb.yml).
 case "$PLATFORM" in
-    jetson)  BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7 (noble = future, untested)
+    jetson)  BASELINES="jammy:3.10 noble:3.12" ;;     # JetPack 6 / JetPack 7
     pi)      BASELINES="bookworm:3.11 trixie:3.13" ;;  # Debian 12 (Pi OS Bookworm) / Debian 13 (Pi OS Trixie)
     # eLxr 12 (aria) is Debian 12-based with Python 3.11 — same ABI class as bookworm.
     modalix) BASELINES="aria:3.11 bookworm:3.11" ;;
