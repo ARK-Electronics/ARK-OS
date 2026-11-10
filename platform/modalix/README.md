@@ -56,9 +56,9 @@ sudo ./packaging/install_ark_os.sh --platform=modalix --ark-os-version=X.Y.Z
   are no-ops. A gpio chardev line is released when the requesting process exits,
   so a set-and-exit helper cannot hold VBUS the way Jetson.GPIO and `pinctrl` do
   on the other carriers — driving it from userspace would need a long-lived unit
-  holding the line. The hogged-high state matches what a JetPack 6 Jetson does
-  anyway: `platform/jetson/scripts/reset_fmu_wait_bl.py` skips VBUS control on
-  R36.  
+  holding the line. The hogged-high state matches what a Jetson does
+  from JetPack 6 on: `platform/jetson/scripts/reset_fmu_wait_bl.py` drives VBUS
+  only on JetPack 5.  
 
 ## Autopilot link
 

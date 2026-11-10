@@ -29,22 +29,20 @@ import time
 
 reset_pin = 33
 vbus_det_pin = 32
-jetpack_6 = False
 
 def main():
-    # Check Jetpack version. R36 can't use VBUS Enable
+    # Only JetPack 5 (L4T R35) leaves VBUS_DET to userspace. From JetPack 6 on
+    # the pinmux owns it.
     with open("/etc/nv_tegra_release") as f:
-        jetpack_version = f.read()
-    if "R36" in jetpack_version:
-        print("Jetpack version is R36, skipping VBUS Control")
-        jetpack_6 = True
+        jetpack_5 = "R35" in f.read()
+    if not jetpack_5:
+        print("Not JetPack 5, skipping VBUS Control")
 
     # Configure reset
     GPIO.setmode(GPIO.BOARD) # Jetson board numbering scheme
     GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
 
-    # Configure VBUS_DET if not JP6 -- configured in pinmux in JP6
-    if not jetpack_6:
+    if jetpack_5:
         GPIO.setup(vbus_det_pin, GPIO.OUT, initial=GPIO.HIGH)
         # Disable vbus detect for a faster reset
         GPIO.output(vbus_det_pin, GPIO.LOW)
@@ -56,7 +54,7 @@ def main():
     time.sleep(0.1)
     GPIO.output(reset_pin, GPIO.LOW)
 
-    if not jetpack_6:
+    if jetpack_5:
         # Do not enable VBUS, skips bootloader
         time.sleep(1)
         GPIO.output(vbus_det_pin, GPIO.HIGH)
