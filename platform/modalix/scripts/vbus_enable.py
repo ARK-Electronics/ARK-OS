@@ -9,7 +9,7 @@ the requesting process exits. A set-and-exit helper therefore cannot hold VBUS,
 and mavlink-router calls this one and moves on.
 
 Holding it in DT gives the same end state as the Jetson helper (VBUS asserted
-for the FMU's USB CDC), which is also what current Jetsons do: JetPack 6 skips
+for the FMU's USB CDC), which is also what current Jetsons do: JetPack 6 and later skip
 VBUS control outright. Dropping the hog to drive this from userspace would need
 a long-lived unit holding the line open, not a change here.
 """

@@ -30,11 +30,12 @@ import time
 vbus_det_pin = 32
 
 def main():
-    # Check Jetpack version. R36 can't use VBUS Enable
+    # Only JetPack 5 (L4T R35) leaves VBUS_DET to userspace. From JetPack 6 on
+    # the pinmux owns it.
     with open("/etc/nv_tegra_release") as f:
-        jetpack_version = f.read()
-    if "R36" in jetpack_version:
-        print("Jetpack version is R36, skipping VBUS Disable")
+        jetpack_5 = "R35" in f.read()
+    if not jetpack_5:
+        print("Not JetPack 5, skipping VBUS Disable")
         return
 
     # Configure VBUS_SENSE_BOOTLOADER
