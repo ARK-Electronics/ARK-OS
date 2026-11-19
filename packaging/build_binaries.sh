@@ -64,6 +64,10 @@ install -m 0755 services/mavlink-router/mavlink-router/build/src/mavlink-routerd
 
 echo "==> Micro-XRCE-DDS-Agent (cmake)"
 ( cd services/dds-agent/Micro-XRCE-DDS-Agent
+  # The superbuild clones Fast-DDS from its moving 3.x branch, which builds with warnings as errors.
+  # Its TypeLookup listeners catch std::exception ahead of a Fast-CDR exception derived from it, an
+  # unreachable handler GCC reports. Only environment CXXFLAGS reach that sub-build.
+  export CXXFLAGS="${CXXFLAGS:-} -Wno-error=exceptions"
   cmake -B build -DCMAKE_BUILD_TYPE=Release
   cmake --build build -j"$NPROC" )
 install -m 0755 services/dds-agent/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent "$BIN_DIR/"
