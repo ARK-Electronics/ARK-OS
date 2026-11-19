@@ -176,6 +176,12 @@ install_jtop() {
     if jtop --help 2>/dev/null | grep -- --install-service >/dev/null; then
         jtop --install-service || return 1
     fi
+    # jtop reads the power mode once at startup and, on JetPack 7, opens the GPU through
+    # NVML. Started before nvpmodel, it reports no power mode for the boot, and nvpmodel
+    # cannot set the GPU's power-gating masks.
+    mkdir -p /etc/systemd/system/jtop.service.d
+    printf '[Unit]\nAfter=nvpmodel.service\n' > /etc/systemd/system/jtop.service.d/ark-after-nvpmodel.conf
+    systemctl daemon-reload
     # A running daemon keeps the old version, and the new client refuses to talk to it.
     systemctl enable jtop.service && systemctl restart jtop.service || return 1
     # A running system-manager keeps the client it imported, which the new daemon refuses.
