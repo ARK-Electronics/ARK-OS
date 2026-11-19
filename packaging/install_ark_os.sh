@@ -165,11 +165,19 @@ apt_install_deb() { apt-get install -y --allow-downgrades "$(readlink -f "$1")";
 
 install_jtop() {
     apt-get install -y python3-pip || return 1
-    pip3 install "jetson-stats==$JETSON_STATS_VERSION" || return 1
-    # Bring the jtop daemon up now (pip's setup.py installs the unit) and enable
-    # it for next boot; harmless if already active.
-    systemctl enable --now jtop.service 2>/dev/null || true
-    return 0
+    # jtop must be a system install, which Ubuntu 24.04 (JetPack 7) refuses
+    # without --break-system-packages.
+    local pip_flags=()
+    if ls /usr/lib/python3*/EXTERNALLY-MANAGED >/dev/null 2>&1; then
+        pip_flags=(--break-system-packages)
+    fi
+    pip3 install "${pip_flags[@]}" "jetson-stats==$JETSON_STATS_VERSION" || return 1
+    # jetson-stats 7 installs from a wheel, which never runs its service installer.
+    if jtop --help 2>/dev/null | grep -- --install-service >/dev/null; then
+        jtop --install-service || return 1
+    fi
+    # A running daemon keeps the old version, and the new client refuses to talk to it.
+    systemctl enable jtop.service && systemctl restart jtop.service
 }
 
 # --- Platform: explicit flag > deb filename > hardware autodetect ---
