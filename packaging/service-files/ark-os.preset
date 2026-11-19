@@ -1,0 +1,8 @@
+# Opt-in services stay off until the operator turns them on from the Services page. A first boot that
+# applies presets to every unit, as JetPack 7's does, would otherwise enable and start them.
+disable dds-agent.service
+disable logloader.service
+disable polaris.service
+disable pointperfect.service
+disable flight-review.service
+disable rid-transmitter.service

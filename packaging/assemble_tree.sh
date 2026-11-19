@@ -27,7 +27,7 @@ esac
 
 # --- directory skeleton ---
 mkdir -p "$PKG/DEBIAN"
-mkdir -p "$PKG/lib/systemd/system"
+mkdir -p "$PKG/lib/systemd/system" "$PKG/lib/systemd/system-preset"
 mkdir -p "$PKG$ARK/bin" "$PKG$ARK/scripts" "$PKG$ARK/libexec" "$PKG$ARK/python" "$PKG$ARK/manifests"
 mkdir -p "$PKG/etc/ark-os"
 mkdir -p "$PKG/etc/nginx/sites-available"
@@ -44,6 +44,7 @@ mkdir -p "$PKG/etc/sudoers.d"
 UNITS="$PKG/lib/systemd/system"
 install -m 0644 packaging/service-files/ark-os.target "$UNITS/ark-os.target"
 install -m 0644 packaging/service-files/ark-os-firstboot.service "$UNITS/ark-os-firstboot.service"
+install -m 0644 packaging/service-files/ark-os.preset "$PKG/lib/systemd/system-preset/80-ark-os.preset"
 for f in packaging/service-files/common/*.service packaging/service-files/"$P"/*.service; do
     [ -f "$f" ] || continue
     sed "s/@ARK_USER@/$ARK_USER/g" "$f" > "$UNITS/$(basename "$f")"
