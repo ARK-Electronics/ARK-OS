@@ -177,7 +177,12 @@ install_jtop() {
         jtop --install-service || return 1
     fi
     # A running daemon keeps the old version, and the new client refuses to talk to it.
-    systemctl enable jtop.service && systemctl restart jtop.service
+    systemctl enable jtop.service && systemctl restart jtop.service || return 1
+    # A running system-manager keeps the client it imported, which the new daemon refuses.
+    # Reinstalling the same ark-os version runs no postinst, so nothing else restarts it.
+    if systemctl is-active --quiet system-manager.service; then
+        systemctl restart system-manager.service
+    fi
 }
 
 # --- Platform: explicit flag > deb filename > hardware autodetect ---
