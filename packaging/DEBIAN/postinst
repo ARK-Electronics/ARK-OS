@@ -216,6 +216,8 @@ ln -sf /etc/ark-os/flight-review.ini /usr/lib/ark-os/flight-review/app/config_us
 # Step 5/6: Enable always-on services (and the group target). Opt-in services
 # (dds-agent, logloader, polaris, pointperfect, flight-review, rid-transmitter)
 # are installed but deliberately NOT enabled — the operator turns them on via the web UI.
+# service-files/ark-os.preset keeps a first-boot preset pass from enabling them; keep
+# the two lists in step.
 # systemctl enable is a static symlink operation that works offline in a chroot.
 # ===========================================================================
 ENABLE_SERVICES="mavlink-router rtsp-server go2rtc ark-ui-backend autopilot-manager connection-manager service-manager system-manager"
