@@ -87,6 +87,10 @@ app = FastAPI(title="ARK-OS Service Manager", version="1.0.0")
 # configs the web UI edits live flat under CONFIG_DIR.
 MANIFEST_DIR = "/usr/lib/ark-os/manifests"
 CONFIG_DIR = "/etc/ark-os"
+# Root helper for start/stop/enable/disable, run through sudo (/etc/sudoers.d/ark-os).
+# It only accepts services with a manifest; the service user has no polkit grant to
+# run these systemctl actions itself.
+SERVICE_CTL = "/usr/lib/ark-os/libexec/ark_service_ctl.sh"
 
 _ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
@@ -141,8 +145,8 @@ class ServiceManager:
         """Only services the package installed a manifest for may be managed.
 
         Guards the systemctl / journalctl / config operations below against
-        arbitrary unit names from the web UI. The Jetson polkit .pkla grant is not
-        unit-scoped, so without this check a request could reach any system unit.
+        arbitrary unit names from the web UI. ark_service_ctl.sh applies the same
+        manifest check to the privileged actions.
         """
         if not service_name or "/" in service_name or service_name in (".", ".."):
             return False
@@ -155,7 +159,7 @@ class ServiceManager:
             return False, f"Unknown or unmanaged service: {service_name}"
         try:
             process = subprocess.run(
-                ["systemctl", operation, service_name],
+                ["sudo", "-n", SERVICE_CTL, operation, service_name],
                 capture_output=True,
                 text=True,
                 timeout=10

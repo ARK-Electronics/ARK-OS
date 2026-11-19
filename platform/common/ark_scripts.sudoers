@@ -1,1 +1,4 @@
 ALL ALL=(ALL) NOPASSWD: /bin/hostnamectl
+# Start/stop/enable/disable of services that have an ARK-OS manifest; the helper
+# enforces that restriction.
+@ARK_USER@ ALL=(root) NOPASSWD: /usr/lib/ark-os/libexec/ark_service_ctl.sh

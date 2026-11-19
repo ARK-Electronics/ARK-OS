@@ -1,0 +1,6 @@
+#!/bin/sh
+# Minimal `sudo` stand-in for the test container, where every manager already runs
+# as root: drop sudo's own options and run the command (the managers call
+# `sudo -n /usr/lib/ark-os/libexec/ark_service_ctl.sh ...`).
+while [ "${1#-}" != "$1" ]; do shift; done
+exec "$@"

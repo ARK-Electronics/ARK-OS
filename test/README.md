@@ -34,7 +34,7 @@ If you have the Compose plugin, `cd test && docker compose up --build` does the 
 | **System** | Real — system-manager's generic-Linux collector (CPU/mem/temp where the container can read it). |
 | **Video** | Real WebRTC path; camera is a test pattern. Edit `go2rtc.test.yaml` (or via the Services page) and restart the `go2rtc` container to change the source. |
 | **Autopilot** | Connected to the fake FC — heartbeat, battery, attitude, position move. No params/commands (those need SITL — see below). |
-| **Services** | Driven by `manifests/`; status/start/stop/enable/logs work via the `systemctl`/`journalctl` shims (state is faked, in-container). |
+| **Services** | Driven by `manifests/`; status/start/stop/enable/logs work via the `systemctl`/`journalctl`/`sudo` shims and the real `ark_service_ctl.sh` helper (state is faked, in-container). |
 | **Connections** | **Degraded** — connection-manager shells out to `nmcli`, which isn't present, so most actions error. This page is the one thing that really wants the systemd/NetworkManager tier. |
 
 System-manager actions that write to the host (e.g. setting the hostname) will fail or no-op in the container — expected.
