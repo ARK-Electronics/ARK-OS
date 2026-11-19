@@ -57,8 +57,10 @@ wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/a
 
 sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
 
-# Recommended: jtop, for Jetson system stats in the web UI
+# Recommended: jtop, for Jetson system stats in the web UI. On JetPack 7, add
+# --break-system-packages to the pip3 install.
 sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
+sudo jtop --install-service
 ```
 
 #### Modalix (SiMa eLxr 12 / JAJ or PAB V3 + Modalix)
