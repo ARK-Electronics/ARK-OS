@@ -1,0 +1,20 @@
+[Unit]
+Description=hello-ark example add-on service
+Wants=network.target
+After=network-online.target
+
+[Service]
+Type=simple
+# install.sh substitutes the ARK-OS service user (jetson / pi / sima). Without a
+# User= line a system unit runs as root.
+User=@ARK_USER@
+Group=@ARK_USER@
+# System units get no login environment (no ~/.local/bin on PATH, no ~), so use
+# absolute paths throughout.
+ExecStart=/usr/local/bin/hello-ark /etc/ark-os/hello-ark.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# Required for the Services page's Autostart toggle (systemctl enable/disable).
+WantedBy=multi-user.target
