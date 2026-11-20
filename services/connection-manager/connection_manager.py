@@ -440,9 +440,10 @@ class NetworkConnectionManager:
 
                 connections.append(connection)
 
-        # Get all Wifi signal strengths
+        # Get all Wifi signal strengths. The cached list: a rescan blocks for 15 s on
+        # JetPack 6's NetworkManager while the radio runs the hotspot.
         wifi_signals: dict[str, str] = {}
-        output = CommandExecutor.safe_run_command("nmcli -t -f SSID,SIGNAL device wifi")
+        output = CommandExecutor.safe_run_command("nmcli -t -f SSID,SIGNAL device wifi list --rescan no")
         if output:
             for line in output.strip().split('\n'):
                 parts = line.split(':')
@@ -1099,7 +1100,7 @@ class NetworkStatsCollector:
                     # Get signal strength for WiFi: first row of the terse list
                     # (strongest network on this interface).
                     signal_out = CommandExecutor.run_argv_output(
-                        ["nmcli", "-t", "-f", "SIGNAL", "device", "wifi", "list", "ifname", device]
+                        ["nmcli", "-t", "-f", "SIGNAL", "device", "wifi", "list", "ifname", device, "--rescan", "no"]
                     )
                     signal_output = next((l.strip() for l in (signal_out or '').split('\n') if l.strip()), '')
                     if signal_output and signal_output.isdigit():
