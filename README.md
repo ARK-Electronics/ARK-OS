@@ -42,24 +42,23 @@ cd ARK-OS
 sudo ./packaging/install_ark_os.sh --ark-os-version=X.Y.Z
 
 # ...or install a .deb you already have (built locally or downloaded):
-sudo ./packaging/install_ark_os.sh ./ark-os-jetson-jammy_X.Y.Z_arm64.deb
+sudo ./packaging/install_ark_os.sh ./ark-os-jetson-noble_X.Y.Z_arm64.deb
 ```
 
 The script auto-detects Jetson vs Pi (override with `--platform`), skips jtop when it is already at the pinned version, and re-runs safely for updates. The versions it installs are pinned in `packaging/versions.env`. Run `sudo ./packaging/install_ark_os.sh --help` for all options.
 
 ### Manual install
 
-MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `jammy` for JetPack 6, `noble` for JetPack 7, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`.
+MAVSDK is bundled inside the ARK-OS package, so you only install ARK-OS itself. Replace `<ark-os-ver>` and `<jetson-stats-ver>` with the versions pinned in `packaging/versions.env`. The ARK-OS package name includes your OS release codename — `noble` for JetPack 7, `trixie` for Raspberry Pi OS (Debian 13) or `bookworm` (Debian 12) — so pick the asset matching your device's `/etc/os-release` `VERSION_CODENAME`. JetPack 6's `jammy` package builds on the `jetpack6` branch.
 
 #### Jetson
 ```
-wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
+wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-jetson-noble_<ark-os-ver>_arm64.deb
 
-sudo apt install ./ark-os-jetson-jammy_<ark-os-ver>_arm64.deb
+sudo apt install ./ark-os-jetson-noble_<ark-os-ver>_arm64.deb
 
-# Recommended: jtop, for Jetson system stats in the web UI. On JetPack 7, add
-# --break-system-packages to the pip3 install.
-sudo apt install -y python3-pip && sudo pip3 install "jetson-stats==<jetson-stats-ver>"
+# Recommended: jtop, for Jetson system stats in the web UI.
+sudo apt install -y python3-pip && sudo pip3 install --break-system-packages "jetson-stats==<jetson-stats-ver>"
 sudo jtop --install-service
 ```
 
@@ -77,7 +76,7 @@ sudo ./packaging/install_ark_os.sh --platform=modalix ./ark-os-modalix-bookworm_
 Details: [`platform/modalix/README.md`](platform/modalix/README.md).
 
 #### Raspberry Pi
-Identical, replacing `ark-os-jetson-jammy` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:
+Identical, replacing `ark-os-jetson-noble` with `ark-os-pi-trixie` for Raspberry Pi OS Trixie (Debian 13) — use `ark-os-pi-bookworm` on Debian 12. No jetson-stats step:
 ```
 wget https://github.com/ARK-Electronics/ARK-OS/releases/download/v<ark-os-ver>/ark-os-pi-trixie_<ark-os-ver>_arm64.deb
 

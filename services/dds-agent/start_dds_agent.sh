@@ -22,8 +22,8 @@ if [ "${1:-}" = "--print" ]; then
 fi
 
 # The bundled venv carries the `toml` lib that merge_configs.py already uses;
-# the system python3 is not a package dependency and Jetson's 3.10 predates
-# tomllib, so always go through the venv interpreter.
+# the system python3 is not a package dependency, so always go through the venv
+# interpreter.
 read_config() {
     "$PYTHON" - "$CONFIG" <<'PY'
 import shlex
