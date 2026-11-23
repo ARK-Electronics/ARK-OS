@@ -53,7 +53,7 @@ Positional:
 Options:
   --platform=jetson|pi|modalix  Override platform autodetection.
   --codename=NAME           Override OS-release codename autodetection (bookworm, trixie,
-                            jammy, …). Only needed to name a download when /etc/os-release
+                            noble, …). Only needed to name a download when /etc/os-release
                             can't be read.
   --ark-os-version=X.Y.Z    Download this ark-os release when no local deb is given.
   --jetson-stats-version=X  Override the jetson-stats version (default from versions.env).
@@ -245,7 +245,7 @@ else
     elif [ "${#matches[@]}" -gt 1 ]; then
         die "multiple ark-os-${PLATFORM} debs in $(pwd); pass the one to install as an argument."
     elif [ -n "$ARK_OS_VERSION" ]; then
-        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|trixie|jammy|…>."
+        [ -n "$CODENAME" ] || die "could not determine this device's OS codename to name the download; pass --codename=<bookworm|trixie|noble|…>."
         # A Modalix reports eLxr 12's own codename (aria), but releases ship the
         # ABI-compatible bookworm build until a native eLxr builder exists (see the
         # modalix leg of .github/workflows/build-deb.yml). Prefer the exact codename
